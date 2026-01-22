@@ -1,0 +1,9 @@
+PyPDF2
+pdfminer.six
+spacy
+nltk
+pandas
+openpyxl
+tqdm
+openai
+python-dotenv
