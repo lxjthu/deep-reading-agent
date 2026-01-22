@@ -62,9 +62,25 @@ def main():
             analyzer.generate_markdown_report(analysis, md_path)
             
             # 4. Compile Result for Excel
+            # Helper to truncate references for Excel (take top 5 lines)
+            refs = analysis.get("data_methods", {}).get("references", "")
+            
+            # Handle list or string format for references
+            if isinstance(refs, list):
+                refs_short = "\n".join([str(r) for r in refs[:5]])
+                # Convert list to string for Markdown report if needed later
+                # But here we just need refs_short string for Excel
+            elif isinstance(refs, str):
+                refs_short = "\n".join(refs.split('\n')[:5])
+            else:
+                refs_short = str(refs)
+            
             row = {
                 "Filename": filename,
                 "Title": analysis.get("title", ""),
+                "Authors": analysis.get("authors", ""),
+                "Journal": analysis.get("journal", ""),
+                "Year": analysis.get("year", ""),
                 "Background": analysis.get("background", ""),
                 "Significance": analysis.get("significance", ""),
                 "Logic": analysis.get("logic", ""),
@@ -77,6 +93,7 @@ def main():
                 "Controls": analysis.get("variables", {}).get("controls", ""),
                 "Data Source": analysis.get("data_methods", {}).get("data_source", ""),
                 "Measurements": analysis.get("data_methods", {}).get("measurements", ""),
+                "References (Top 5)": refs_short,
                 "Stata Code": analysis.get("stata_code", "")
             }
             results.append(row)

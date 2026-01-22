@@ -43,28 +43,36 @@ class LLMAnalyzer:
         
         Paper Filename: {filename}
         
+        # CRITICAL LANGUAGE INSTRUCTION
+        Regardless of the paper's original language (English or Chinese), you **MUST** extract and summarize all information **in Chinese (Simplified Chinese)**.
+        - Exception: Keep proper nouns (e.g., author names, specific algorithm names, journal titles) in their original language if translation would cause ambiguity.
+        - Exception: Keep the 'Stata Code' in English/Stata syntax.
+        
         # Requirements
         Extract the following fields and return them in a valid JSON format.
         
         1. **General Info**:
-           - title: Paper title (inferred)
-           - background: Research background (200-300 words summary)
-           - significance: Theoretical and Practical significance
-           - logic: Research logic/flow (describe as text, mentions of flowcharts)
-           - methodology_summary: Detailed step-by-step methodology
-           - conclusions: 3-5 core findings
+           - title: Paper title (Translate to Chinese if it is English)
+           - authors: Authors list (Keep original language)
+           - journal: Journal name (Keep original language)
+           - year: Publication year
+           - background: Research background (200-300 words summary in Chinese)
+           - significance: Theoretical and Practical significance (in Chinese)
+           - logic: Research logic/flow (describe as text in Chinese, mentions of flowcharts)
+           - methodology_summary: Detailed step-by-step methodology (in Chinese)
+           - conclusions: 3-5 core findings (in Chinese)
            
-        2. **Academic Variables** (Crucial):
-           - dependent_variable: Name + Definition
-           - independent_variable: Name + Definition
-           - mechanism_variable: Name + Definition
-           - instrumental_variable: Name + Definition
-           - control_variables: List of controls
+        2. **Academic Variables** (Crucial) - Definitions MUST be in Chinese:
+           - dependent_variable: Name + Definition (in Chinese)
+           - independent_variable: Name + Definition (in Chinese)
+           - mechanism_variable: Name + Definition (in Chinese)
+           - instrumental_variable: Name + Definition (in Chinese)
+           - control_variables: List of controls (Names can be original if standard, descriptions in Chinese)
            
         3. **Data & Methods**:
-           - variable_measurements: How variables are measured
-           - data_source: Data sources description
-           - references: Key references in citation format
+           - variable_measurements: How variables are measured (in Chinese)
+           - data_source: Data sources description (in Chinese)
+           - references: List ALL references found in the 'References' section at the end of the paper. Return them as a markdown list.
            
         4. **Stata Code**:
            - stata_code: Generate expert-level Stata code corresponding to the methodology mentioned (e.g., DID, IV, Fixed Effects). Include comments.
@@ -74,6 +82,9 @@ class LLMAnalyzer:
         Structure:
         {{
             "title": "...",
+            "authors": "...",
+            "journal": "...",
+            "year": "...",
             "background": "...",
             "significance": "...",
             "logic": "...",
@@ -130,7 +141,18 @@ class LLMAnalyzer:
         if "error" in data:
             return
             
+        # Format references: handle list or string
+        refs_raw = data.get('data_methods', {}).get('references', 'N/A')
+        if isinstance(refs_raw, list):
+            refs_formatted = "\n".join([f"- {str(r)}" for r in refs_raw])
+        else:
+            refs_formatted = str(refs_raw)
+
         md = f"""# {data.get('title', 'Paper Analysis')}
+
+**Authors**: {data.get('authors', 'N/A')}
+**Journal**: {data.get('journal', 'N/A')}
+**Year**: {data.get('year', 'N/A')}
 
 ## 1. 总体信息提取
 ### 研究背景
@@ -164,7 +186,7 @@ class LLMAnalyzer:
 {data.get('data_methods', {}).get('data_source', 'N/A')}
 
 ### 相关参考文献
-{data.get('data_methods', {}).get('references', 'N/A')}
+{refs_formatted}
 
 ## 4. Stata 代码建议
 ```stata
