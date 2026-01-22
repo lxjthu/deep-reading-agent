@@ -10,11 +10,25 @@ def main():
     parser.add_argument("input_path", help="Folder containing PDFs or path to a single PDF")
     parser.add_argument("--output", default="results.xlsx", help="Output Excel file path")
     parser.add_argument("--markdown_dir", default="reports", help="Directory to save individual markdown reports")
+    parser.add_argument("--force", action="store_true", help="Force re-process all files, ignoring existing results.")
     args = parser.parse_args()
 
     # Create markdown output directory
     if not os.path.exists(args.markdown_dir):
         os.makedirs(args.markdown_dir)
+
+    # 1. Load Existing Results (Incremental Logic)
+    existing_df = pd.DataFrame()
+    processed_files = set()
+    
+    if os.path.exists(args.output) and not args.force:
+        try:
+            existing_df = pd.read_excel(args.output)
+            if "Filename" in existing_df.columns:
+                processed_files = set(existing_df["Filename"].astype(str).tolist())
+            print(f"Loaded existing results: {len(processed_files)} files already processed.")
+        except Exception as e:
+            print(f"Warning: Could not read existing Excel file: {e}. Starting fresh.")
 
     files_to_process = []
     if os.path.isfile(args.input_path):
@@ -23,13 +37,19 @@ def main():
         for root, dirs, files in os.walk(args.input_path):
             for file in files:
                 if file.lower().endswith(".pdf"):
+                    # Check if already processed
+                    if not args.force and file in processed_files:
+                        continue
                     files_to_process.append(os.path.join(root, file))
     
     if not files_to_process:
-        print("No PDF files found.")
+        if processed_files:
+            print("All PDF files have already been processed. Use --force to re-run.")
+        else:
+            print("No PDF files found.")
         return
 
-    print(f"Found {len(files_to_process)} PDF files.")
+    print(f"Found {len(files_to_process)} NEW PDF files to process.")
 
     extractor = PDFExtractor()
     analyzer = LLMAnalyzer()
@@ -103,9 +123,24 @@ def main():
 
     # Save to Excel
     if results:
-        df = pd.DataFrame(results)
-        df.to_excel(args.output, index=False)
-        print(f"\nProcessing complete. Results saved to {args.output}")
+        new_df = pd.DataFrame(results)
+        
+        if not existing_df.empty and not args.force:
+            # Append new results to existing ones
+            final_df = pd.concat([existing_df, new_df], ignore_index=True)
+            print(f"Appending {len(new_df)} new records to existing {len(existing_df)} records.")
+        else:
+            final_df = new_df
+            
+        try:
+            final_df.to_excel(args.output, index=False)
+            print(f"\nProcessing complete. Results saved to {args.output}")
+        except PermissionError:
+            print(f"\nERROR: Could not write to {args.output}. File might be open.")
+            backup_name = args.output.replace(".xlsx", f"_new_{len(results)}.xlsx")
+            final_df.to_excel(backup_name, index=False)
+            print(f"Saved to backup file instead: {backup_name}")
+            
         print(f"Markdown reports saved to: {args.markdown_dir}")
     else:
         print("\nNo results extracted.")
