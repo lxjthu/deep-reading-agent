@@ -1,5 +1,7 @@
 PyPDF2
+pypdf
 pdfminer.six
+pdfplumber
 spacy
 nltk
 pandas
