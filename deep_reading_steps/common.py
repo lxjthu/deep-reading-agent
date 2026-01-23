@@ -16,6 +16,8 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-reasoner" # Using reasoner for Acemoglu-level thinking
 
+DEEP_READING_DIR = os.path.join(os.getcwd(), "deep_reading_results")
+
 def get_deepseek_client():
     if not DEEPSEEK_API_KEY:
         logger.error("DEEPSEEK_API_KEY not found in environment variables.")
@@ -72,7 +74,10 @@ def load_segmented_md(md_path):
 
     return sections
 
-def save_step_result(step_name, result, output_dir="deep_reading_results"):
+def save_step_result(step_name, result, output_dir=None):
+    if output_dir is None:
+        output_dir = DEEP_READING_DIR
+        
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
