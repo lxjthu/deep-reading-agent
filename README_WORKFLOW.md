@@ -1,0 +1,129 @@
+# 学术论文深度分析与知识管理工作流 (Deep Reading Workflow)
+
+本文档总结了从原始 PDF 文档到结构化知识库的全流程解决方案。该方案集成了 PDF 转换、批量信息提取、深度精读分析以及 Obsidian 知识库构建等功能。
+
+## 1. 核心功能模块
+
+### 1.1 PDF 转 Markdown (PDF Extraction)
+将原始 PDF 文档转换为适合 LLM 处理的 Markdown 格式，包含两种模式：
+- **Raw Extraction**: 直接提取文本，保留原始排版结构。
+- **Segmentation**: 基于论文结构的智能分块（引言、理论、实证等）。
+
+### 1.2 批量信息提取与制表 (Batch Analysis & Tabulation)
+对文件夹中的所有论文进行“Acemoglu 级”的核心要素提取，并生成 Excel 汇总表。
+- **提取维度**：全景扫描、理论基础、数据来源、变量定义、识别策略、结果与不足、Stata 代码。
+- **输出**：`xlsx` 汇总表 + 单篇 `md` 报告。
+
+### 1.3 深度精读 (Deep Reading Agent)
+针对单篇论文进行深入的、分章节的专家级研读。
+- **流程**：将论文切分为 7 个部分（Overview, Theory, Data, Vars, Identification, Results, Critique），分别调用 LLM 进行深度解析。
+- **输出**：包含 7 个分部文档和 1 个最终汇总报告 (`Final_Deep_Reading_Report.md`)。
+
+### 1.4 Obsidian 知识库构建 (Knowledge Base Integration)
+自动为生成的 Markdown 文档添加元数据和双向链接，使其直接成为 Obsidian 可用的知识节点。
+- **元数据**：标题、作者、期刊、年份、研究主题、核心变量等（YAML Frontmatter）。
+- **链接**：分部文档与总报告之间的双向导航链接。
+
+---
+
+## 2. 详细使用指南
+
+### 环境准备
+确保已安装 Python 环境及所需依赖，并配置好 `.env` 文件（包含 `OPENAI_API_KEY` 或 `DEEPSEEK_API_KEY`）。
+
+```powershell
+# 激活虚拟环境 (Windows)
+.\venv\Scripts\Activate.ps1
+```
+
+### 步骤一：PDF 转换 (PDF to Markdown)
+
+**功能**：将 PDF 转换为 Raw Markdown。
+
+**命令**：
+```powershell
+# 提取单个 PDF
+python anthropic_pdf_extract_raw.py "path\to\paper.pdf" --out_dir "pdf_raw_md"
+
+# (可选) 进一步分块
+python kimi_pdf_raw_segmenter.py "pdf_raw_md\paper_raw.md" --out_dir "pdf_segmented_md"
+```
+
+### 步骤二：批量信息提取 (Batch Analysis)
+
+**功能**：快速扫描文件夹下的所有 PDF/MD，提取关键信息生成 Excel 表格。
+
+**命令**：
+```powershell
+# 使用 PowerShell 封装脚本 (推荐)
+.\run_analyzer.ps1 -InputPath "d:\code\skill\pdf_raw_md" -Output "analysis_results.xlsx"
+
+# 或直接调用 Python
+python main.py "d:\code\skill\pdf_raw_md" --output "analysis_results.xlsx"
+```
+
+**产出**：
+- `analysis_results.xlsx`: 包含所有论文核心要素的对比表。
+- `reports/`: 每篇论文的独立 Markdown 报告。
+
+### 步骤三：深度精读 (Deep Reading)
+
+**功能**：对特定论文进行全流程深度精读（包含提取、分块、精读、补缺）。
+
+**场景 A：单篇精读**
+```powershell
+# 自动执行全流程
+python run_full_pipeline.py "path\to\paper.pdf"
+```
+
+**场景 B：批量精读 (跳过已读)**
+```powershell
+# 自动扫描文件夹，跳过已存在报告的论文
+.\run_batch_pipeline.ps1 "d:\code\skill\pdf"
+```
+
+**产出**：
+- 在 `deep_reading_results/` 下生成以论文名命名的文件夹。
+- 包含 `1_Overview.md` 到 `7_Critique.md` 及 `Final_Deep_Reading_Report.md`。
+
+### 步骤四：Obsidian 元数据注入 (Metadata Injection)
+
+**功能**：为精读结果添加 Dataview 可读的元数据和导航链接。通常包含在“步骤三”的自动化流程中，但也可手动运行修复。
+
+**命令**：
+```powershell
+# 1. 提取摘要元数据 (Dataview Summaries)
+.\run_dataview_summarizer.ps1 "d:\code\skill\deep_reading_results"
+
+# 2. 注入基础元数据 (Title/Author) 和导航
+python inject_obsidian_meta.py "source_raw.md" "target_folder"
+```
+
+---
+
+## 3. 常用脚本清单
+
+| 脚本名 | 功能描述 | 核心参数 |
+| :--- | :--- | :--- |
+| `anthropic_pdf_extract_raw.py` | PDF -> Raw Markdown | `input_pdf`, `--out_dir` |
+| `run_analyzer.ps1` | 批量提取信息制表 | `-InputPath`, `-Output` |
+| `run_full_pipeline.py` | 单篇全流程精读 | `pdf_path` |
+| `run_batch_pipeline.ps1` | 批量全流程精读 | `pdf_dir` |
+| `run_dataview_summarizer.ps1` | 注入内容摘要元数据 | `target_dir` |
+| `run_supplemental_reading.py` | 报告查漏补缺与整合 | `report_path`, `--regenerate` |
+
+## 4. 最佳实践 (Best Practices)
+
+1.  **先粗后细**：先用 **步骤二 (Batch Analysis)** 快速扫描一批文献，生成 Excel 表格筛选出值得精读的高价值论文。
+2.  **重点突破**：对筛选出的重点论文，使用 **步骤三 (Deep Reading)** 进行深度研读。
+3.  **知识管理**：将 `deep_reading_results` 文件夹作为 Obsidian 的一个 Vault 或子文件夹，利用 Dataview 插件进行跨文献检索和综述撰写。
+
+### Obsidian Dataview 示例
+在 Obsidian 中使用以下代码查询所有精读过的论文主题：
+
+```dataview
+TABLE research_theme, findings
+FROM #deep-reading
+WHERE file.name != "Final_Deep_Reading_Report"
+SORT file.name ASC
+```
