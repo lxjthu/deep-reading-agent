@@ -1,11 +1,12 @@
 ---
 name: "academic-pdf-analyzer"
-description: "Batch processes academic PDFs to extract research info, variables, and generate Stata code. Invoke when analyzing research papers or extracting data for econometrics."
+description: "Batch processes academic PDFs to extract structured research info (Deep Reading style) into a concise table and generate Stata code. Invoke when analyzing papers for econometrics."
 ---
 
 # Academic PDF Analyzer & Stata Code Generator
 
 This skill specializes in extracting structured academic information from PDF documents and generating corresponding Stata code for econometric analysis.
+It is optimized for **concise, table-ready output** based on the **Deep Reading Framework** (Acemoglu Level).
 
 ## Core Capabilities
 
@@ -14,21 +15,17 @@ This skill specializes in extracting structured academic information from PDF do
     - Handle encoding (UTF-8, GBK).
     - Suggest or implement OCR for scanned documents.
 
-2.  **Content Extraction**:
-    - **Background**: Summarize research background (200-300 words).
-    - **Significance**: Theoretical and practical significance.
-    - **Logic**: Describe research flow/process.
-    - **Methodology**: Detailed steps.
-    - **Conclusions**: 3-5 core findings.
+2.  **Structured Extraction (Table-Friendly)**:
+    Extracts key information into 7 dimensions (Simplified Chinese):
+    - **1. Big Picture**: Research Theme, Scientific Problem, Core Contribution.
+    - **2. Theory**: Theoretical Foundation, Core Hypothesis.
+    - **3. Data**: Data Source, Sample Characteristics.
+    - **4. Measurement**: Dependent Variable (Y), Independent Variable (X), Control Variables.
+    - **5. Identification**: Econometric Model, Identification Strategy (IV/DID etc.), Mechanism.
+    - **6. Results**: Core Findings.
+    - **7. Critique**: Weakness/Achilles' Heel.
 
-3.  **Variable Extraction (Econometrics Focus)**:
-    - **Dependent Variable (Y)**: Name and definition.
-    - **Independent Variable (X)**: Name and definition.
-    - **Mechanism/Mediator**: Name and definition.
-    - **Instrumental Variable (IV)**: Name and definition.
-    - **Control Variables**: List of controls.
-
-4.  **Stata Code Generation**:
+3.  **Stata Code Generation**:
     - Based on the extracted "Methodology" and "Variables", generate precise Stata code.
     - Include data loading, variable declaration, and regression commands (e.g., `reg`, `reghdfe`, `ivreg2`).
 
@@ -45,34 +42,36 @@ This skill specializes in extracting structured academic information from PDF do
       .\venv\Scripts\python main.py "path/to/pdfs" --output "results.xlsx"
       ```
 3.  **Output**:
-    - The script generates an Excel file with the results.
-    - **Read the Excel file** or the script output to present the key findings to the user in the conversation.
-    - Present extracted info in a Markdown table for immediate review.
-    - Provide the Stata code block.
+    - The script generates a Markdown report with a **Summary Table** for each paper.
+    - It also aggregates results into an Excel file (optional).
 
-## Output Template
-
-For each paper:
+## Output Template (Markdown)
 
 ### [Paper Title]
 
-**1. Research Summary**
-| Section | Content |
-| :--- | :--- |
-| **Background** | ... |
-| **Significance** | ... |
-| **Methodology** | ... |
-| **Conclusions** | ... |
+**Authors**: ... | **Journal**: ... | **Year**: ...
 
-**2. Variable Definitions**
-| Type | Variable Name | Definition | Measurement |
-| :--- | :--- | :--- | :--- |
-| Dependent | ... | ... | ... |
-| Independent | ... | ... | ... |
-| Mechanism | ... | ... | ... |
-| Control | ... | ... | ... |
+#### 核心要素提取表 (Deep Reading Extraction)
 
-**3. Stata Code**
+| 维度 | 要素 | 内容提取 |
+| :--- | :--- | :--- |
+| **1. 全景扫描** | **研究主题** | ... |
+| | **科学问题** | ... |
+| | **核心贡献** | ... |
+| **2. 理论基础** | **理论框架** | ... |
+| | **核心假说** | ... |
+| **3. 数据** | **数据来源** | ... |
+| | **样本特征** | ... |
+| **4. 变量** | **被解释变量 (Y)** | ... |
+| | **核心解释变量 (X)** | ... |
+| | **控制变量** | ... |
+| **5. 识别策略** | **计量模型** | ... |
+| | **识别挑战与策略** | ... |
+| | **工具/机制变量** | ... |
+| **6. 结果与评价** | **主要发现** | ... |
+| | **研究不足** | ... |
+
+#### Stata 代码建议
 ```stata
 * Code to replicate the methodology
 ...

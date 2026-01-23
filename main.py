@@ -81,39 +81,43 @@ def main():
             md_path = os.path.join(args.markdown_dir, f"{os.path.splitext(filename)[0]}_report.md")
             analyzer.generate_markdown_report(analysis, md_path)
             
-            # 4. Compile Result for Excel
-            # Helper to truncate references for Excel (take top 5 lines)
-            refs = analysis.get("data_methods", {}).get("references", "")
-            
-            # Handle list or string format for references
-            if isinstance(refs, list):
-                refs_short = "\n".join([str(r) for r in refs[:5]])
-                # Convert list to string for Markdown report if needed later
-                # But here we just need refs_short string for Excel
-            elif isinstance(refs, str):
-                refs_short = "\n".join(refs.split('\n')[:5])
-            else:
-                refs_short = str(refs)
-            
+            # 4. Compile Result for Excel (New Structure)
+            b = analysis.get('basic', {})
+            o = analysis.get('overview', {})
+            t = analysis.get('theory', {})
+            d = analysis.get('data', {})
+            m = analysis.get('measurement', {})
+            i = analysis.get('identification', {})
+            r = analysis.get('results', {})
+
             row = {
                 "Filename": filename,
-                "Title": analysis.get("title", ""),
-                "Authors": analysis.get("authors", ""),
-                "Journal": analysis.get("journal", ""),
-                "Year": analysis.get("year", ""),
-                "Background": analysis.get("background", ""),
-                "Significance": analysis.get("significance", ""),
-                "Logic": analysis.get("logic", ""),
-                "Methodology": analysis.get("methodology_summary", ""),
-                "Conclusions": analysis.get("conclusions", ""),
-                "Dep. Var": analysis.get("variables", {}).get("dependent", ""),
-                "Indep. Var": analysis.get("variables", {}).get("independent", ""),
-                "Mechanism": analysis.get("variables", {}).get("mechanism", ""),
-                "Instrumental": analysis.get("variables", {}).get("instrumental", ""),
-                "Controls": analysis.get("variables", {}).get("controls", ""),
-                "Data Source": analysis.get("data_methods", {}).get("data_source", ""),
-                "Measurements": analysis.get("data_methods", {}).get("measurements", ""),
-                "References (Top 5)": refs_short,
+                "Title": b.get("title", ""),
+                "Authors": b.get("authors", ""),
+                "Journal": b.get("journal", ""),
+                "Year": b.get("year", ""),
+                
+                "Research Theme": o.get("theme", ""),
+                "Problem": o.get("problem", ""),
+                "Contribution": o.get("contribution", ""),
+                
+                "Theory Base": t.get("theory_base", ""),
+                "Hypothesis": t.get("hypothesis", ""),
+                
+                "Data Source": d.get("data_source", ""),
+                "Sample Info": d.get("sample_info", ""),
+                
+                "Dep. Var (Y)": m.get("dep_var", ""),
+                "Indep. Var (X)": m.get("indep_var", ""),
+                "Controls": m.get("controls", ""),
+                
+                "Model": i.get("model", ""),
+                "Strategy": i.get("strategy", ""),
+                "IV/Mechanism": i.get("iv_mechanism", ""),
+                
+                "Findings": r.get("findings", ""),
+                "Weakness": r.get("weakness", ""),
+                
                 "Stata Code": analysis.get("stata_code", "")
             }
             results.append(row)
@@ -127,6 +131,7 @@ def main():
         
         if not existing_df.empty and not args.force:
             # Append new results to existing ones
+            # Align columns
             final_df = pd.concat([existing_df, new_df], ignore_index=True)
             print(f"Appending {len(new_df)} new records to existing {len(existing_df)} records.")
         else:

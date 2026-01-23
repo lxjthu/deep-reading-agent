@@ -28,80 +28,70 @@ class LLMAnalyzer:
         if not self.client:
             return {"error": "No API Key configured"}
 
-        # Kimi (Moonshot AI) supports very long context (up to 128k tokens).
-        # We can be much more generous with the input limit.
-        # 1 token approx 1.5 - 2 chars for Chinese/English mix. 
-        # 128k tokens ~ 200k chars. Let's set a safe limit of 150k chars.
         if len(text) > 150000:
             text_input = text[:100000] + "\n\n...[Middle section omitted]...\n\n" + text[-50000:]
         else:
             text_input = text
 
         prompt = f"""
-        You are an expert in Econometrics and Academic Research. 
-        Analyze the following academic paper content (extracted from PDF) and extract structured information.
+        You are an expert in Econometrics and Academic Research (Acemoglu Level).
+        Analyze the following academic paper content (extracted from PDF) and extract structured information for a **Meta-Analysis Table**.
         
         Paper Filename: {filename}
         
-        # CRITICAL LANGUAGE INSTRUCTION
-        Regardless of the paper's original language (English or Chinese), you **MUST** extract and summarize all information **in Chinese (Simplified Chinese)**.
-        - Exception: Keep proper nouns (e.g., author names, specific algorithm names, journal titles) in their original language if translation would cause ambiguity.
-        - Exception: Keep the 'Stata Code' in English/Stata syntax.
+        # CRITICAL INSTRUCTION
+        1. Extract information in **Simplified Chinese**.
+        2. Be **CONCISE**. The output is for a table, so keep descriptions short (1-2 sentences max per field).
+        3. Focus on "Acemoglu-level" precision: Identification Strategy, Mechanisms, Data Quality.
         
-        # Requirements
-        Extract the following fields and return them in a valid JSON format.
+        # Extraction Fields (JSON Keys)
         
-        1. **General Info**:
-           - title: Paper title (Translate to Chinese if it is English)
-           - authors: Authors list (Keep original language)
-           - journal: Journal name (Keep original language)
+        1. **Basic Info**:
+           - title: Paper title
+           - authors: Authors list
+           - journal: Journal name
            - year: Publication year
-           - background: Research background (200-300 words summary in Chinese)
-           - significance: Theoretical and Practical significance (in Chinese)
-           - logic: Research logic/flow (describe as text in Chinese, mentions of flowcharts)
-           - methodology_summary: Detailed step-by-step methodology (in Chinese)
-           - conclusions: 3-5 core findings (in Chinese)
            
-        2. **Academic Variables** (Crucial) - Definitions MUST be in Chinese:
-           - dependent_variable: Name + Definition (in Chinese)
-           - independent_variable: Name + Definition (in Chinese)
-           - mechanism_variable: Name + Definition (in Chinese)
-           - instrumental_variable: Name + Definition (in Chinese)
-           - control_variables: List of controls (Names can be original if standard, descriptions in Chinese)
+        2. **Big Picture** (Part 1):
+           - theme: Research Theme (研究主题) - 1 sentence.
+           - problem: Research Question (科学问题) - What specific problem is solved?
+           - contribution: Contribution (核心贡献) - Theory or Practice.
            
-        3. **Data & Methods**:
-           - variable_measurements: How variables are measured (in Chinese)
-           - data_source: Data sources description (in Chinese)
-           - references: List ALL references found in the 'References' section at the end of the paper. Return them as a markdown list.
+        3. **Theory & Hypotheses** (Part 2):
+           - theory_base: Theoretical Foundation (理论基础) - e.g., "Human Capital Theory".
+           - hypothesis: Core Hypothesis (核心假说).
            
-        4. **Stata Code**:
-           - stata_code: Generate expert-level Stata code corresponding to the methodology mentioned (e.g., DID, IV, Fixed Effects). Include comments.
+        4. **Data** (Part 3):
+           - data_source: Data Source (数据来源) - e.g., "CHFS 2019", "World Bank".
+           - sample_info: Sample Characteristics (样本特征) - e.g., "3000 rural households in China".
+           
+        5. **Measurement** (Part 4):
+           - dep_var: Dependent Variable Y (被解释变量) - Name & Measure.
+           - indep_var: Independent Variable X (核心解释变量) - Name & Measure.
+           - controls: Control Variables (控制变量) - Brief list.
+           
+        6. **Identification** (Part 5):
+           - model: Econometric Model (计量模型) - e.g., "Fixed Effects", "DID".
+           - strategy: Identification Strategy (识别策略) - How endogeneity is handled?
+           - iv_mechanism: IV or Mechanism (工具/机制变量).
+           
+        7. **Results & Critique** (Part 6 & 7):
+           - findings: Core Findings (主要结论) - 1-2 key results.
+           - weakness: Weakness/Critique (潜在不足/致命伤) - e.g., "Weak IV", "External validity".
+           
+        8. **Stata Code**:
+           - stata_code: Generate expert-level Stata code (in English) for the main regression.
            
         # Output Format
-        Return ONLY valid JSON. No markdown formatting like ```json ... ```.
-        Structure:
+        Return ONLY valid JSON.
         {{
-            "title": "...",
-            "authors": "...",
-            "journal": "...",
-            "year": "...",
-            "background": "...",
-            "significance": "...",
-            "logic": "...",
-            "methodology_summary": "...",
-            "conclusions": "...",
-            "variables": {{
-                "dependent": "...",
-                "independent": "...",
-                "mechanism": "...",
-                "instrumental": "...",
-                "controls": "..."
-            }},
-            "data_methods": {{
-                "measurements": "...",
-                "data_source": "...",
-                "references": "..."
-            }},
+            "basic": {{ "title": "...", "authors": "...", "journal": "...", "year": "..." }},
+            "overview": {{ "theme": "...", "problem": "...", "contribution": "..." }},
+            "theory": {{ "theory_base": "...", "hypothesis": "..." }},
+            "data": {{ "data_source": "...", "sample_info": "..." }},
+            "measurement": {{ "dep_var": "...", "indep_var": "...", "controls": "..." }},
+            "identification": {{ "model": "...", "strategy": "...", "iv_mechanism": "..." }},
+            "results": {{ "findings": "...", "weakness": "..." }},
             "stata_code": "..."
         }}
         
@@ -113,21 +103,18 @@ class LLMAnalyzer:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a helpful academic research assistant."},
+                    {"role": "system", "content": "You are a precise academic research assistant."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1, # Low temperature for factual extraction
+                temperature=0.1,
                 response_format={"type": "json_object"}
             )
             
             content = response.choices[0].message.content
-            
-            # Use json_repair to handle potentially malformed JSON
             try:
                 return json_repair.repair_json(content, return_objects=True)
             except Exception as json_err:
-                self.logger.error(f"JSON Parsing failed even with repair: {json_err}")
-                self.logger.debug(f"Raw content: {content}")
+                self.logger.error(f"JSON Parsing failed: {json_err}")
                 return {"error": f"JSON Parse Error: {str(json_err)}"}
             
         except Exception as e:
@@ -136,59 +123,45 @@ class LLMAnalyzer:
 
     def generate_markdown_report(self, data, output_path):
         """
-        Converts the JSON analysis into a readable Markdown report.
+        Converts the JSON analysis into a readable Markdown Table report.
         """
         if "error" in data:
             return
             
-        # Format references: handle list or string
-        refs_raw = data.get('data_methods', {}).get('references', 'N/A')
-        if isinstance(refs_raw, list):
-            refs_formatted = "\n".join([f"- {str(r)}" for r in refs_raw])
-        else:
-            refs_formatted = str(refs_raw)
+        b = data.get('basic', {})
+        o = data.get('overview', {})
+        t = data.get('theory', {})
+        d = data.get('data', {})
+        m = data.get('measurement', {})
+        i = data.get('identification', {})
+        r = data.get('results', {})
+        
+        md = f"""# {b.get('title', 'Paper Analysis')}
 
-        md = f"""# {data.get('title', 'Paper Analysis')}
+**Authors**: {b.get('authors', 'N/A')} | **Journal**: {b.get('journal', 'N/A')} | **Year**: {b.get('year', 'N/A')}
 
-**Authors**: {data.get('authors', 'N/A')}
-**Journal**: {data.get('journal', 'N/A')}
-**Year**: {data.get('year', 'N/A')}
+## 核心要素提取表 (Deep Reading Extraction)
 
-## 1. 总体信息提取
-### 研究背景
-{data.get('background', 'N/A')}
+| 维度 | 要素 | 内容提取 |
+| :--- | :--- | :--- |
+| **1. 全景扫描** | **研究主题** | {o.get('theme', '')} |
+| | **科学问题** | {o.get('problem', '')} |
+| | **核心贡献** | {o.get('contribution', '')} |
+| **2. 理论基础** | **理论框架** | {t.get('theory_base', '')} |
+| | **核心假说** | {t.get('hypothesis', '')} |
+| **3. 数据** | **数据来源** | {d.get('data_source', '')} |
+| | **样本特征** | {d.get('sample_info', '')} |
+| **4. 变量** | **被解释变量 (Y)** | {m.get('dep_var', '')} |
+| | **核心解释变量 (X)** | {m.get('indep_var', '')} |
+| | **控制变量** | {m.get('controls', '')} |
+| **5. 识别策略** | **计量模型** | {i.get('model', '')} |
+| | **识别挑战与策略** | {i.get('strategy', '')} |
+| | **工具/机制变量** | {i.get('iv_mechanism', '')} |
+| **6. 结果与评价** | **主要发现** | {r.get('findings', '')} |
+| | **研究不足** | {r.get('weakness', '')} |
 
-### 研究意义
-{data.get('significance', 'N/A')}
+## Stata 代码建议
 
-### 研究思路
-{data.get('logic', 'N/A')}
-
-### 研究方法
-{data.get('methodology_summary', 'N/A')}
-
-### 研究结论
-{data.get('conclusions', 'N/A')}
-
-## 2. 具体学术要素提取
-### 变量信息
-- **关键被解释变量**: {data.get('variables', {}).get('dependent', 'N/A')}
-- **解释变量**: {data.get('variables', {}).get('independent', 'N/A')}
-- **机制变量**: {data.get('variables', {}).get('mechanism', 'N/A')}
-- **工具变量**: {data.get('variables', {}).get('instrumental', 'N/A')}
-- **控制变量**: {data.get('variables', {}).get('controls', 'N/A')}
-
-## 3. 数据与方法
-### 变量测算
-{data.get('data_methods', {}).get('measurements', 'N/A')}
-
-### 数据来源
-{data.get('data_methods', {}).get('data_source', 'N/A')}
-
-### 相关参考文献
-{refs_formatted}
-
-## 4. Stata 代码建议
 ```stata
 {data.get('stata_code', '')}
 ```
