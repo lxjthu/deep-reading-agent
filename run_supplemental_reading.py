@@ -7,6 +7,20 @@ import argparse
 # Ensure we can import deep_reading_steps
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# Import metadata injector
+try:
+    from inject_obsidian_meta import extract_metadata_from_text, read_first_two_pages, inject_frontmatter, add_bidirectional_links
+except ImportError:
+    # If running from root, simple import works if path is right, but inject_obsidian_meta is in root
+    # sys.path is already current dir usually
+    try:
+        sys.path.append(r"d:\code\skill")
+        from inject_obsidian_meta import extract_metadata_from_text, read_first_two_pages, inject_frontmatter, add_bidirectional_links
+    except ImportError:
+        print("Warning: Could not import inject_obsidian_meta. Metadata injection will be skipped.")
+        extract_metadata_from_text = None
+
+
 from deep_reading_steps import (
     step_1_overview, step_2_theory, step_3_data, 
     step_4_vars, step_5_identification, step_6_results, step_7_critique
@@ -15,13 +29,13 @@ from deep_reading_steps import (
 from deep_reading_steps.common import DEEP_READING_DIR, save_step_result
 
 STEP_MAPPING = {
-    "1 Overview": {"module": step_1_overview, "keywords": ["Introduction", "Overview", "引言"]},
-    "2 Theory": {"module": step_2_theory, "keywords": ["Theory", "Model", "Hypothesis", "Theoretical", "理论"]},
-    "3 Data": {"module": step_3_data, "keywords": ["Data", "Sample", "Source", "数据"]},
-    "4 Variables": {"module": step_4_vars, "keywords": ["Variable", "Measure", "Measurement", "变量"]},
-    "5 Identification": {"module": step_5_identification, "keywords": ["Identification", "Strategy", "Empirical", "Equation", "识别"]},
-    "6 Results": {"module": step_6_results, "keywords": ["Result", "Finding", "Estimate", "结果"]},
-    "7 Critique": {"module": step_7_critique, "keywords": ["Conclusion", "Discussion", "Limitation", "结论"]}
+    "1 Overview": {"module": step_1_overview, "keywords": ["Introduction", "Overview", "引言"], "file": "1_Overview.md"},
+    "2 Theory": {"module": step_2_theory, "keywords": ["Theory", "Model", "Hypothesis", "Theoretical", "理论"], "file": "2_Theory.md"},
+    "3 Data": {"module": step_3_data, "keywords": ["Data", "Sample", "Source", "数据"], "file": "3_Data.md"},
+    "4 Variables": {"module": step_4_vars, "keywords": ["Variable", "Measure", "Measurement", "变量"], "file": "4_Variables.md"},
+    "5 Identification": {"module": step_5_identification, "keywords": ["Identification", "Strategy", "Empirical", "Equation", "识别"], "file": "5_Identification.md"},
+    "6 Results": {"module": step_6_results, "keywords": ["Result", "Finding", "Estimate", "结果"], "file": "6_Results.md"},
+    "7 Critique": {"module": step_7_critique, "keywords": ["Conclusion", "Discussion", "Limitation", "结论"], "file": "7_Critique.md"}
 }
 
 REPORT_PATH = r"d:\code\skill\deep_reading_results\Final_Deep_Reading_Report.md"
@@ -125,6 +139,14 @@ def main():
     else:
         print("Could not identify Raw MD file from report.")
 
+    # Prepare metadata if possible (lazy load)
+    metadata = None
+    if raw_file and extract_metadata_from_text:
+        print("Extracting metadata for injection...")
+        raw_text = read_first_two_pages(raw_file)
+        metadata = extract_metadata_from_text(raw_text)
+        print(f"Metadata ready: {metadata['title']}")
+
     section_matches = list(re.finditer(r"^## (\d+ [A-Za-z]+|Overview|Theory|Data|Variables|Identification|Results|Critique)", report_content, re.MULTILINE))
     
     processed_any = False
@@ -175,6 +197,23 @@ def main():
                     result = step_info['module'].run(sections)
                     if result:
                         print(f"Step {map_key} completed successfully.")
+                        
+                        # INJECT METADATA IMMEDIATELY
+                        if metadata and 'file' in step_info:
+                            out_file = os.path.join(DEEP_READING_DIR, step_info['file'])
+                            if os.path.exists(out_file):
+                                print(f"Injecting metadata into {step_info['file']}...")
+                                with open(out_file, 'r', encoding='utf-8') as f:
+                                    f_content = f.read()
+                                
+                                # All files list for links
+                                all_files = [f for f in os.listdir(DEEP_READING_DIR) if f.endswith(".md")]
+                                
+                                new_content = inject_frontmatter(f_content, metadata)
+                                new_content = add_bidirectional_links(new_content, step_info['file'], all_files)
+                                
+                                with open(out_file, 'w', encoding='utf-8') as f:
+                                    f.write(new_content)
                     else:
                         print(f"Step {map_key} returned no result.")
                 except Exception as e:
@@ -191,14 +230,31 @@ def main():
         final_report = ""
         
         # Header (Metadata) - preserve from original report (or could re-extract from raw if needed)
-        # We assume the original report has the correct top-level metadata
-        header_match = re.search(r"^---.*?---\n", report_content, re.DOTALL)
-        if header_match:
-            final_report += header_match.group(0)
+        # We use the newly extracted metadata if available, otherwise fallback to existing header
+        if metadata:
+            # Generate clean YAML header
+            yaml_str = yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False).strip()
+            final_report += f"---\n{yaml_str}\n---\n\n"
+        else:
+            header_match = re.search(r"^---.*?---\n", report_content, re.DOTALL)
+            if header_match:
+                final_report += header_match.group(0)
         
-        title_line_match = re.search(r"^# Deep Reading Report:.*$", report_content, re.MULTILINE)
-        if title_line_match:
-            final_report += "\n" + title_line_match.group(0) + "\n\n"
+        # Title line
+        # If we have metadata, we can construct the title line cleanly
+        if metadata:
+            base_name = os.path.basename(report_path).replace("Final_Deep_Reading_Report", "").replace(".md", "")
+            # Actually the original format was "# Deep Reading Report: {filename}"
+            # Let's try to preserve the existing title line or reconstruct it
+            title_line_match = re.search(r"^# Deep Reading Report:.*$", report_content, re.MULTILINE)
+            if title_line_match:
+                final_report += "\n" + title_line_match.group(0) + "\n\n"
+            else:
+                 final_report += "\n# Deep Reading Report\n\n"
+        else:
+            title_line_match = re.search(r"^# Deep Reading Report:.*$", report_content, re.MULTILINE)
+            if title_line_match:
+                final_report += "\n" + title_line_match.group(0) + "\n\n"
             
         files_order = [
             "1_Overview.md", "2_Theory.md", "3_Data.md", "4_Variables.md", 
