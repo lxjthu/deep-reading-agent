@@ -9,3 +9,5 @@ openpyxl
 tqdm
 openai
 python-dotenv
+pyyaml
+json_repair
