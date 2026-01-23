@@ -3,6 +3,7 @@ import sys
 import re
 import glob
 import argparse
+import yaml  # Make sure pyyaml is installed: pip install pyyaml
 
 # Ensure we can import deep_reading_steps
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -118,6 +119,8 @@ def strip_frontmatter_and_nav(content):
     return content
 
 def main():
+    print(f"Imported yaml module: {yaml}")
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("report_path", nargs="?", default=REPORT_PATH)
     parser.add_argument("--regenerate", action="store_true", help="Force regenerate the final report from sub-files")
@@ -128,6 +131,14 @@ def main():
     if not os.path.exists(report_path):
         print(f"Report not found: {report_path}")
         return
+        
+    # Dynamically determine DEEP_READING_DIR from report_path
+    # This overrides the import from common.py which might use default or env var from parent process
+    # but run_supplemental_reading.py is often run as subprocess.
+    # The report is always inside the DEEP_READING_DIR.
+    global DEEP_READING_DIR
+    DEEP_READING_DIR = os.path.dirname(os.path.abspath(report_path))
+    print(f"Set DEEP_READING_DIR to: {DEEP_READING_DIR}")
 
     print(f"Checking report: {report_path}")
     with open(report_path, 'r', encoding='utf-8') as f:
@@ -143,9 +154,13 @@ def main():
     metadata = None
     if raw_file and extract_metadata_from_text:
         print("Extracting metadata for injection...")
-        raw_text = read_first_two_pages(raw_file)
-        metadata = extract_metadata_from_text(raw_text)
-        print(f"Metadata ready: {metadata['title']}")
+        try:
+            raw_text = read_first_two_pages(raw_file)
+            metadata = extract_metadata_from_text(raw_text)
+            if metadata:
+                print(f"Metadata ready: {metadata.get('title', 'Unknown')}")
+        except Exception as e:
+            print(f"Error extracting metadata: {e}")
 
     section_matches = list(re.finditer(r"^## (\d+ [A-Za-z]+|Overview|Theory|Data|Variables|Identification|Results|Critique)", report_content, re.MULTILINE))
     
@@ -229,32 +244,33 @@ def main():
         
         final_report = ""
         
-        # Header (Metadata) - preserve from original report (or could re-extract from raw if needed)
-        # We use the newly extracted metadata if available, otherwise fallback to existing header
+        # Header (Metadata)
         if metadata:
-            # Generate clean YAML header
-            yaml_str = yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False).strip()
-            final_report += f"---\n{yaml_str}\n---\n\n"
+            try:
+                # Use yaml.safe_dump
+                yaml_str = yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False).strip()
+                final_report += f"---\n{yaml_str}\n---\n\n"
+            except Exception as e:
+                print(f"Error dumping yaml: {e}")
+                header_match = re.search(r"^---.*?---\n", report_content, re.DOTALL)
+                if header_match:
+                    final_report += header_match.group(0)
         else:
             header_match = re.search(r"^---.*?---\n", report_content, re.DOTALL)
             if header_match:
                 final_report += header_match.group(0)
         
         # Title line
-        # If we have metadata, we can construct the title line cleanly
         if metadata:
-            base_name = os.path.basename(report_path).replace("Final_Deep_Reading_Report", "").replace(".md", "")
-            # Actually the original format was "# Deep Reading Report: {filename}"
-            # Let's try to preserve the existing title line or reconstruct it
-            title_line_match = re.search(r"^# Deep Reading Report:.*$", report_content, re.MULTILINE)
-            if title_line_match:
-                final_report += "\n" + title_line_match.group(0) + "\n\n"
-            else:
-                 final_report += "\n# Deep Reading Report\n\n"
+            # We don't have base_name here easily unless we parse report_path again
+            # But we can just use the Title from metadata
+            final_report += f"# Deep Reading Report: {metadata.get('title', 'Untitled')}\n\n"
         else:
             title_line_match = re.search(r"^# Deep Reading Report:.*$", report_content, re.MULTILINE)
             if title_line_match:
                 final_report += "\n" + title_line_match.group(0) + "\n\n"
+            else:
+                final_report += "\n# Deep Reading Report\n\n"
             
         files_order = [
             "1_Overview.md", "2_Theory.md", "3_Data.md", "4_Variables.md", 
@@ -266,7 +282,6 @@ def main():
             if os.path.exists(fpath):
                 with open(fpath, 'r', encoding='utf-8') as f:
                     content = f.read()
-                    # Strip metadata and nav from sub-files to avoid duplication
                     clean_content = strip_frontmatter_and_nav(content)
                     final_report += clean_content + "\n\n"
             else:
