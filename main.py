@@ -7,7 +7,7 @@ from llm_analyzer import LLMAnalyzer
 
 def main():
     parser = argparse.ArgumentParser(description="Academic PDF Analyzer (LLM-Enhanced)")
-    parser.add_argument("input_path", help="Folder containing PDFs or path to a single PDF")
+    parser.add_argument("input_path", help="Folder containing PDFs or path to a single PDF (or markdown file)")
     parser.add_argument("--output", default="results.xlsx", help="Output Excel file path")
     parser.add_argument("--markdown_dir", default="reports", help="Directory to save individual markdown reports")
     parser.add_argument("--force", action="store_true", help="Force re-process all files, ignoring existing results.")
@@ -36,7 +36,8 @@ def main():
     elif os.path.isdir(args.input_path):
         for root, dirs, files in os.walk(args.input_path):
             for file in files:
-                if file.lower().endswith(".pdf"):
+                # Modified to accept both .pdf and .md files
+                if file.lower().endswith(".pdf") or file.lower().endswith(".md"):
                     # Check if already processed
                     if not args.force and file in processed_files:
                         continue
@@ -44,12 +45,12 @@ def main():
     
     if not files_to_process:
         if processed_files:
-            print("All PDF files have already been processed. Use --force to re-run.")
+            print("All files have already been processed. Use --force to re-run.")
         else:
-            print("No PDF files found.")
+            print("No PDF or Markdown files found.")
         return
 
-    print(f"Found {len(files_to_process)} NEW PDF files to process.")
+    print(f"Found {len(files_to_process)} NEW files to process.")
 
     extractor = PDFExtractor()
     analyzer = LLMAnalyzer()
@@ -60,12 +61,19 @@ def main():
         
     results = []
 
-    for file_path in tqdm(files_to_process, desc="Processing PDFs with LLM"):
+    for file_path in tqdm(files_to_process, desc="Processing Files with LLM"):
         try:
             filename = os.path.basename(file_path)
             
             # 1. Extract Text
-            text = extractor.extract_content(file_path)
+            if file_path.lower().endswith(".md"):
+                # Direct read for markdown files
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    text = f.read()
+            else:
+                # Use extractor for PDFs
+                text = extractor.extract_content(file_path)
+                
             if not text:
                 print(f"Skipping {filename} (empty text)")
                 continue

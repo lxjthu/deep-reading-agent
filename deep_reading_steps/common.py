@@ -16,7 +16,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-reasoner" # Using reasoner for Acemoglu-level thinking
 
-DEEP_READING_DIR = os.path.join(os.getcwd(), "deep_reading_results")
+DEEP_READING_DIR = os.getenv("DEEP_READING_OUTPUT_DIR", os.path.join(os.getcwd(), "deep_reading_results"))
 
 def get_deepseek_client():
     if not DEEPSEEK_API_KEY:

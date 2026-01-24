@@ -45,10 +45,6 @@ def extract_metadata_from_text(text):
     """
 
     try:
-        # Use deepseek-reasoner or chat model for better extraction? 
-        # Since this is simple extraction, the default model (moonshot or whatever is configured) is fine.
-        # But user mentioned DeepSeek explicitly. Let's try to respect env config which might point to DeepSeek.
-        
         resp = client.chat.completions.create(
             model=_env("OPENAI_MODEL", "moonshot-v1-auto"),
             messages=[
@@ -98,35 +94,57 @@ def has_frontmatter(content):
     return content.startswith("---\n")
 
 def inject_frontmatter(content, metadata):
-    # Prepare YAML
-    # We want tags to be a list
-    meta_copy = metadata.copy()
-    if "tags" not in meta_copy:
-        meta_copy["tags"] = ["paper", "deep-reading"]
-    else:
-        if isinstance(meta_copy["tags"], str):
-            meta_copy["tags"] = [meta_copy["tags"]]
-        if "deep-reading" not in meta_copy["tags"]:
-            meta_copy["tags"].append("deep-reading")
+    # 1. Parse existing frontmatter if present
+    existing_meta = {}
+    body_content = content
+    
+    if has_frontmatter(content):
+        end_idx = content.find("\n---\n", 4)
+        if end_idx != -1:
+            try:
+                fm_str = content[4:end_idx]
+                existing_meta = yaml.safe_load(fm_str) or {}
+                body_content = content[end_idx+5:]
+            except Exception as e:
+                print(f"Warning: Failed to parse existing frontmatter: {e}")
+    
+    # 2. Merge metadata (Priority: New Metadata > Existing Metadata for core fields, but keep other existing fields)
+    # Actually, for core fields (Title, Authors), we probably trust the dedicated extraction more than random previous runs?
+    # BUT, wait. Dataview Summarizer injected rich fields (e.g. research_theme). We MUST preserve them.
+    # The 'metadata' argument contains only basic info (Title, Author...).
+    
+    merged_meta = existing_meta.copy()
+    merged_meta.update(metadata) # Overwrite basic info with fresh extraction (or keep existing if we trust it more? Let's overwrite to ensure consistency)
+    
+    # Special handling for tags: merge them
+    tags = set()
+    
+    # Add existing tags
+    if "tags" in existing_meta:
+        if isinstance(existing_meta["tags"], list):
+            tags.update(existing_meta["tags"])
+        elif isinstance(existing_meta["tags"], str):
+            tags.add(existing_meta["tags"])
+            
+    # Add new tags
+    if "tags" in metadata:
+        if isinstance(metadata["tags"], list):
+            tags.update(metadata["tags"])
+        elif isinstance(metadata["tags"], str):
+            tags.add(metadata["tags"])
+            
+    # Always ensure deep-reading tag
+    tags.add("paper")
+    tags.add("deep-reading")
+    
+    merged_meta["tags"] = list(tags)
 
-    # Use yaml dump
-    # safe_dump handles lists and basic types well
-    # allow_unicode=True for Chinese chars
-    yaml_str = yaml.safe_dump(meta_copy, allow_unicode=True, sort_keys=False).strip()
+    # 3. Dump to YAML
+    yaml_str = yaml.safe_dump(merged_meta, allow_unicode=True, sort_keys=False).strip()
     
     frontmatter_block = f"---\n{yaml_str}\n---\n\n"
     
-    if has_frontmatter(content):
-        # Find end of existing frontmatter
-        end_idx = content.find("\n---\n", 4)
-        if end_idx != -1:
-            # Replace existing
-            return frontmatter_block + content[end_idx+5:]
-        else:
-            # Malformed? Prepend anyway
-            return frontmatter_block + content
-    else:
-        return frontmatter_block + content
+    return frontmatter_block + body_content
 
 def add_bidirectional_links(content, filename, all_files):
     # Strategy:
@@ -193,7 +211,7 @@ def main():
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
             
-        # 1. Inject Frontmatter
+        # 1. Inject Frontmatter (with MERGE now)
         new_content = inject_frontmatter(content, metadata)
         
         # 2. Add Links

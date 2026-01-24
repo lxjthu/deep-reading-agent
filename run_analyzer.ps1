@@ -1,6 +1,7 @@
 param (
     [string]$InputPath,
-    [string]$Output = "results.xlsx"
+    [string]$Output = "results.xlsx",
+    [switch]$Force
 )
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -12,4 +13,16 @@ if (-not (Test-Path $VenvPython)) {
     exit 1
 }
 
-& $VenvPython $MainScript $InputPath --output $Output
+# When using Splatting (@pyArgs), PowerShell might be passing empty strings if variables are null
+# Let's construct the command string explicitly to be safe
+$cmdArgs = @()
+$cmdArgs += $InputPath
+$cmdArgs += "--output"
+$cmdArgs += $Output
+
+if ($Force) {
+    $cmdArgs += "--force"
+}
+
+# Use Start-Process or direct invocation
+& $VenvPython $MainScript $cmdArgs

@@ -4,20 +4,22 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 
 import json_repair
 from dotenv import load_dotenv
 from openai import OpenAI
 
-
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Page:
     number: int
     text: str
-
 
 def parse_raw_page_md(raw_md_path: str) -> list[Page]:
     pages: list[Page] = []
@@ -57,12 +59,10 @@ def parse_raw_page_md(raw_md_path: str) -> list[Page]:
     flush()
     return pages
 
-
 def normalize_newlines(text: str) -> str:
     text = text.replace("\r\n", "\n")
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip("\n")
-
 
 def build_full_text_with_page_tags(pages: list[Page]) -> str:
     parts: list[str] = []
@@ -74,6 +74,39 @@ def build_full_text_with_page_tags(pages: list[Page]) -> str:
         parts.append("\n")
     return "".join(parts)
 
+def extract_skeleton(pages: list[Page]) -> str:
+    """
+    Extracts a 'skeleton' of the document for long-context processing.
+    Keeps:
+    - [PAGE N] tags
+    - Lines that look like headers (short, starts with number/caps)
+    - First and last few lines of each page (context)
+    Discards:
+    - Long paragraph text
+    """
+    parts: list[str] = []
+    for p in pages:
+        parts.append(f"[PAGE {p.number}]\n")
+        
+        lines = p.text.splitlines()
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+                
+            # Heuristics to keep the line
+            # 1. Short lines (potential headers)
+            is_short = len(line_stripped) < 150
+            # 2. Header-like patterns (1. Introduction, ABSTRACT, etc.)
+            is_header_like = re.match(r"^(\d+|[A-Z]).*", line_stripped) or line_stripped.isupper() or line_stripped.endswith(":")
+            # 3. Context (first 3 and last 3 lines of page)
+            is_context = i < 3 or i > len(lines) - 3 
+            
+            if is_short or is_header_like or is_context:
+                parts.append(line + "\n")
+            
+        parts.append("\n")
+    return "".join(parts)
 
 def _env(name: str, default: str | None = None) -> str | None:
     v = os.getenv(name)
@@ -81,50 +114,57 @@ def _env(name: str, default: str | None = None) -> str | None:
         return default
     return v
 
-
-def call_kimi_boundaries(full_text: str, model: str | None = None) -> dict:
-    api_key = _env("OPENAI_API_KEY")
-    base_url = _env("OPENAI_BASE_URL", "https://api.moonshot.cn/v1")
-    model_name = model or _env("OPENAI_MODEL", "moonshot-v1-auto")
+def call_deepseek_boundaries(text: str, is_skeleton: bool = False) -> dict:
+    api_key = _env("DEEPSEEK_API_KEY")
+    base_url = "https://api.deepseek.com"
+    model_name = "deepseek-chat" # V3 is excellent for JSON
 
     if not api_key:
-        raise RuntimeError("Missing OPENAI_API_KEY in environment")
+        raise RuntimeError("Missing DEEPSEEK_API_KEY in environment")
 
     client = OpenAI(api_key=api_key, base_url=base_url)
 
+    context_desc = "summary skeleton (titles and key lines)" if is_skeleton else "full raw text"
+
     prompt = f"""
-你将收到一篇论文的逐页原文（带有 [PAGE N] 标签）。
+You will receive the {context_desc} of an academic paper (with [PAGE N] tags).
 
-任务：
-1) 请浏览全文，提取出这篇论文**实际的章节结构**（顶级目录）。
-   - 必须包含 "Abstract"（如果有）。
-   - 必须包含正文中的所有一级标题（如 "1 Introduction", "2 Data" 等）。
-   - 必须包含 "References" 或 "Bibliography"。
-   - 必须包含 "Appendices"（如果有）。
+Task:
+1. Extract the **actual section structure** (Top-level TOC).
+   - Must include "Abstract" (if any).
+   - Must include all main sections (e.g., "1 Introduction", "2 Data").
+   - **MANDATORY**: Must include "References" or "Bibliography" as the last section if present.
+   - Must include "Appendices" (if any).
 
-2) 对于每个提取出的章节，找出其在原文中的**精确起始标记**（start_marker）和大致起始页码（start_page）。
-   - start_marker 必须是原文中存在的、用于作为该章节开头的**短文本片段**（通常就是标题行）。
-   - **关键要求**：请务必确保每个章节的 start_marker 能够正确覆盖该章节的实质内容。如果某个章节标题后紧接着正文，请使用标题行作为 marker；如果标题和正文之间有大量空行或分页符，请确保 marker 能够定位到该章节真正开始的地方。
-   - **避免空章节**：请预判分段结果。如果发现某个章节（如 "3 Data"）的内容非常短（例如只有几行，或者只有标题），这通常意味着切分错误或该内容应属于上一节/下一节。请调整 marker 位置或合并章节，确保每个分出来的部分都有实质性的正文内容（至少几百字）。
+2. For each section, identify the **exact start marker** (text snippet) and start page.
+   - `start_marker`: A unique short text snippet from the document that marks the beginning (usually the title).
+   - `start_page`: The page number where this marker appears.
 
-输出：只返回严格 JSON（不要 markdown），格式如下：
+3. **Special Handling for References**:
+   - Look for "References", "Bibliography", or "Works Cited".
+   - It usually appears at the end. Ensure it is captured as a separate section.
+
+Output JSON only:
 {{
   "boundaries": [
     {{"section_id": 1, "section_name": "Abstract", "start_page": 1, "start_marker": "Abstract"}},
     {{"section_id": 2, "section_name": "1. Introduction", "start_page": 2, "start_marker": "1 Introduction"}},
     ...
+    {{"section_id": 9, "section_name": "References", "start_page": 25, "start_marker": "References"}}
   ],
   "notes": ["..."]
 }}
 
-原文：
-{full_text}
+Input Text:
+{text}
 """
 
+    logger.info(f"Sending request to DeepSeek ({model_name})... Text len: {len(text)}")
+    
     resp = client.chat.completions.create(
         model=model_name,
         messages=[
-            {"role": "system", "content": "你是严谨的学术编辑助手。只输出 JSON。"},
+            {"role": "system", "content": "You are a precise academic structure analyzer. Output strict JSON."},
             {"role": "user", "content": prompt},
         ],
         temperature=0.0,
@@ -135,7 +175,6 @@ def call_kimi_boundaries(full_text: str, model: str | None = None) -> dict:
         return json_repair.repair_json(content, return_objects=True)
     except Exception:
         return {"error": "json_parse_failed", "raw": content}
-
 
 def locate_marker(pages: list[Page], start_page: int, marker: str) -> tuple[int, int] | None:
     if not marker:
@@ -165,7 +204,6 @@ def locate_marker(pages: list[Page], start_page: int, marker: str) -> tuple[int,
         if found:
             return found
     return None
-
 
 def slice_segments(pages: list[Page], boundaries: list[dict]) -> list[dict]:
     boundaries_sorted = sorted(boundaries, key=lambda x: (int(x.get("start_page", 1)), int(x.get("section_id", 0))))
@@ -234,18 +272,17 @@ def slice_segments(pages: list[Page], boundaries: list[dict]) -> list[dict]:
 
     return segments
 
-
-def render_segmented_md(raw_md_path: str, segments: list[dict], kimi_info: dict) -> str:
+def render_segmented_md(raw_md_path: str, segments: list[dict], info: dict) -> str:
     now = datetime.now().isoformat(timespec="seconds")
     header = [
-        "# 论文原文结构化分段（Kimi 自然结构版）",
+        "# 论文原文结构化分段（DeepSeek 版）",
         "",
         f"- Source: {raw_md_path}",
         f"- Generated At: {now}",
         "",
     ]
 
-    notes = kimi_info.get("notes")
+    notes = info.get("notes")
     if isinstance(notes, list) and notes:
         header.append("## 说明")
         for n in notes:
@@ -266,12 +303,10 @@ def render_segmented_md(raw_md_path: str, segments: list[dict], kimi_info: dict)
         out.append("")
     return "\n".join(out).rstrip() + "\n"
 
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Segment raw per-page PDF Markdown into 7 paper sections using Kimi")
+    parser = argparse.ArgumentParser(description="Segment raw per-page PDF Markdown into paper sections using DeepSeek")
     parser.add_argument("raw_md_path", help="Path to per-page raw markdown, e.g. pdf_raw_md/*_raw.md")
     parser.add_argument("--out_dir", default="pdf_segmented_md", help="Output directory")
-    parser.add_argument("--model", default=None, help="Override model name")
     args = parser.parse_args()
 
     pages = parse_raw_page_md(args.raw_md_path)
@@ -279,44 +314,43 @@ def main() -> None:
         raise RuntimeError("No pages parsed from raw markdown")
 
     full_text = build_full_text_with_page_tags(pages)
-    kimi_info = call_kimi_boundaries(full_text, model=args.model)
+    
+    # Strategy: Use skeleton if text is too long (e.g., > 40k chars)
+    # DeepSeek V3 handles 64k easily, but skeleton is faster and cheaper.
+    use_skeleton = len(full_text) > 40000
+    
+    if use_skeleton:
+        logger.info(f"Document length {len(full_text)} > 40k. Using Skeleton Extraction.")
+        input_text = extract_skeleton(pages)
+    else:
+        logger.info(f"Document length {len(full_text)}. Using Full Text.")
+        input_text = full_text
 
-    if isinstance(kimi_info, dict) and kimi_info.get("error"):
-        raise RuntimeError(f"Kimi boundary JSON parse failed: {kimi_info.get('error')}")
+    deepseek_info = call_deepseek_boundaries(input_text, is_skeleton=use_skeleton)
 
-    boundaries = kimi_info.get("boundaries")
+    if isinstance(deepseek_info, dict) and deepseek_info.get("error"):
+        raise RuntimeError(f"DeepSeek boundary JSON parse failed: {deepseek_info.get('error')}")
+
+    boundaries = deepseek_info.get("boundaries")
     if not isinstance(boundaries, list) or len(boundaries) == 0:
-        raise RuntimeError("Kimi returned no boundaries.")
+        raise RuntimeError("DeepSeek returned no boundaries.")
 
     segments = slice_segments(pages, boundaries)
 
-    # --- Post-processing: Check for too short segments ---
-    # Heuristic: If a segment has < 100 chars, it might be just a title or empty.
-    # Try to merge it with the next one or flag it.
-    
-    # Filter out empty segments that are not meaningful (keep them but maybe mark them?)
-    # Or better, just let the user know. 
-    # Current logic: "filled_to_next" is used for missing start markers.
-    # Let's add a check here.
-    
+    # Short segment warning
     for seg in segments:
         content_len = len(seg.get("text", ""))
         if content_len < 200:
-            print(f"Warning: Section '{seg.get('section_name')}' is very short ({content_len} chars).")
-            # Potential auto-fix logic could go here, e.g. merge with previous if it's just a header?
-            # For now, just logging is safer than auto-merging which might break structure.
-            # But the user asked to "re-check". 
-            # If we really want to fix it, we might need to adjust the start_marker search range or fallback.
+            logger.warning(f"Section '{seg.get('section_name')}' is very short ({content_len} chars). Check if cut correctly.")
 
     os.makedirs(args.out_dir, exist_ok=True)
     base = os.path.splitext(os.path.basename(args.raw_md_path))[0]
     out_path = os.path.join(args.out_dir, base.replace("_raw", "") + "_segmented.md")
-    md = render_segmented_md(args.raw_md_path, segments, kimi_info)
+    md = render_segmented_md(args.raw_md_path, segments, deepseek_info)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(md)
 
     print(out_path)
-
 
 if __name__ == "__main__":
     main()

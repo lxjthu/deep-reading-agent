@@ -7,5 +7,10 @@ deep_reading_results/
 pdf_raw_md/
 pdf_segmented_md/
 reports/
+deep_reports/
 pdf/
 .trae/
+references/
+*.log
+.DS_Store
+Thumbs.db
