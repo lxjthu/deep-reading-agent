@@ -41,9 +41,11 @@ python run_social_science_task.py
   - `*_L3_Logic.md`
   - `*_L4_Value.md`
   - `*_Full_Report.md` (全景整合报告)
+  - 文档间包含双向链接 (`[[Link]]`)，支持在 L1-L4 与 Full Report 之间快速跳转。
 
 ## 3. 核心代码文件
 - `social_science_analyzer.py`: 核心分析逻辑（Prompt 工程、分层提取）。
+- `link_social_science_docs.py`: 文档双向链接注入工具（自动运行）。
 - `deepseek_segment_raw_md.py`: 基于 LLM 的文档智能分块工具。
 - `anthropic_pdf_extract_raw.py`: PDF 转 Markdown 工具。
 
