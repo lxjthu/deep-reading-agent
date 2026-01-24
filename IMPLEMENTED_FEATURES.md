@@ -193,6 +193,19 @@
   - `Citation_Chinese_All`（英文引用的中文重述拼接；中文引用默认留空）
   - `Citation_1..N` / `Citation_1_ZH..N_ZH`（便于筛选与人工复核，N 默认最多 8）
 
+### 3.11 社科文献深度阅读（Social Science Scholar）
+
+目标：针对管理学/社会学文献，执行“4层金字塔”深度提取，生成分层报告、全景报告与 Excel 汇总。
+
+- 入口（Python CLI）：[run_social_science_task.py](file:///d:/code/skill/run_social_science_task.py)
+  - 流程：`deepseek_segment_raw_md` (切分) -> `social_science_analyzer` (分析) -> `link_social_science_docs` (链接注入)。
+  - 筛选：脚本内 `KEYWORDS` 列表控制处理哪些论文。
+- 核心实现：[social_science_analyzer.py](file:///d:/code/skill/social_science_analyzer.py)
+  - 4层 Prompt 定义：`analyze_l1_context` 等方法。
+  - 报告生成：`generate_full_report` / `generate_markdown`。
+- 辅助工具：[link_social_science_docs.py](file:///d:/code/skill/link_social_science_docs.py)
+  - 功能：为生成的 L1-L4 及 Full Report 注入双向导航链接。
+
 ## 4. 另一条“深读”路线（不依赖 segmented md）
 
 仓库还实现了另一套“对单篇 PDF 全文进行串行抽取与合成”的深度研读工具（与 7-step pipeline 并行存在）。
@@ -227,6 +240,7 @@
 - `supplemental-reading-skill` → `run_supplemental_reading.ps1` / `run_supplemental_reading.py`：[SKILL.md](file:///d:/code/skill/.trae/skills/supplemental-reading-skill/SKILL.md)
 - `obsidian-dataview-summarizer` → `run_dataview_summarizer.ps1` / `inject_dataview_summaries.py`：[SKILL.md](file:///d:/code/skill/.trae/skills/obsidian-dataview-summarizer/SKILL.md)
 - `obsidian-metadata-injector` → `run_obsidian_injector.ps1` / `inject_obsidian_meta.py`：[SKILL.md](file:///d:/code/skill/.trae/skills/obsidian-metadata-injector/SKILL.md)
+- `social-science-scholar` → `run_social_science_task.py` / `social_science_analyzer.py`：[README_SOCIAL_SCIENCE.md](file:///d:/code/skill/README_SOCIAL_SCIENCE.md)
 
 ## 7. 第三方代码
 
