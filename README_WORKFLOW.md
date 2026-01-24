@@ -31,6 +31,11 @@
   - `references\*_references_citation_trace.md`
   - `references\*_references_with_citations.xlsx`
 
+### 1.6 社科文献深度阅读 (Social Science Scholar)
+专为管理学、社会学设计，采用“四层金字塔”模型（L1背景、L2理论、L3逻辑、L4价值）进行分层提取。
+- **流程**: PDF -> 智能切分 -> 4层深度分析 -> 生成全景报告 & Excel -> 注入双向链接。
+- **产出**: 4个分层 MD、1个全景 MD、1个汇总 Excel。
+
 ---
 
 ## 2. 详细使用指南
@@ -119,6 +124,21 @@ python inject_obsidian_meta.py "source_raw.md" "target_folder"
 .\run_citation_tracer.ps1 "pdf_segmented_md\paper_segmented.md" "references\paper_references.xlsx"
 ```
 
+### 步骤六：社科文献深度阅读 (Social Science Scholar)
+
+**功能**：针对社科类文献（案例/定性/组态）进行“四层金字塔”深度分析。自动完成“切分-分析-整合-链接”全流程。
+
+**命令**：
+```bash
+# 推荐：使用 Python 脚本（需在脚本中配置 KEYWORDS 筛选文献）
+python run_social_science_task.py
+```
+
+**产出**：
+- 文件夹 `social_science_results_v2/`
+- **Excel**: `Social_Science_Analysis_4Layer.xlsx`
+- **Docs**: 每篇论文 5 个 MD 文件（L1-L4 分层报告 + Full Report），均包含双向链接和元数据。
+
 ---
 
 ## 3. 常用脚本清单
@@ -135,6 +155,8 @@ python inject_obsidian_meta.py "source_raw.md" "target_folder"
 | `run_reference_extractor.ps1` | 抽取参考文献（封装） | `segmented_md` |
 | `citation_tracer.py` | 引用追踪（反向定位正文引用） | `segmented_md`, `references_xlsx` |
 | `run_citation_tracer.ps1` | 引用追踪（封装） | `segmented_md`, `references_xlsx` |
+| `run_social_science_task.py` | 社科文献深度阅读全流程 | `KEYWORDS` (in script) |
+| `social_science_analyzer.py` | 社科文献分析核心逻辑 | N/A |
 
 ## 4. 最佳实践 (Best Practices)
 

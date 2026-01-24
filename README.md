@@ -47,6 +47,11 @@ graph TD
 - **工具**: `obsidian-metadata-injector` & `obsidian-dataview-summarizer`
 - **输出**: 包含 YAML 头（含内容摘要）和导航链接的 Markdown 文件群。
 
+### 6. 社科文献深度阅读 (Social Science Scholar)
+- **目标**: 针对管理学/社会学文献，采用“四层金字塔”模型（背景-理论-逻辑-价值）进行深度情报提取。
+- **工具**: `social_science_analyzer.py`
+- **特点**: 4+1+1 输出结构（4分层MD + 1全景MD + 1汇总Excel），强制中文输出，支持文档间双向跳转。
+
 ### 附加能力：参考文献抽取与引用追踪 (References & Citation Tracing)
 - **目标**: 从论文原文中抽取“参考文献列表”，并在正文中反向定位每条参考文献的引用位置。
 - **入口脚本**:
