@@ -13,6 +13,8 @@ graph TD
     B -->|Step 3: 结构化切分| C(分段 Segmented Markdown)
     C -->|Step 4: 深度精读| D(分步深度报告 Step Reports)
     D -->|Step 5: 知识图谱化| E(Obsidian Ready 知识库)
+    C -->|可选: 参考文献抽取| R(References Excel)
+    R -->|可选: 引用追踪| T(Citation Trace MD/Excel)
 
     style A fill:#f9f,stroke:#333,stroke-width:2px
     style F fill:#ff9,stroke:#333,stroke-width:2px
@@ -45,6 +47,16 @@ graph TD
 - **工具**: `obsidian-metadata-injector` & `obsidian-dataview-summarizer`
 - **输出**: 包含 YAML 头（含内容摘要）和导航链接的 Markdown 文件群。
 
+### 附加能力：参考文献抽取与引用追踪 (References & Citation Tracing)
+- **目标**: 从论文原文中抽取“参考文献列表”，并在正文中反向定位每条参考文献的引用位置。
+- **入口脚本**:
+  - 参考文献抽取：`extract_references.py` / `run_reference_extractor.ps1`
+  - 引用追踪：`citation_tracer.py` / `run_citation_tracer.ps1`
+- **输出**（位于 `references/`，通常不提交 Git）:
+  - `*_references.xlsx`：结构化参考文献表
+  - `*_references_with_citations.xlsx`：在参考文献表上追加引用次数与上下文
+  - `*_references_citation_trace.md`：按参考文献序号输出的可读追踪日志
+
 ## 快速开始
 
 详细的使用指南和命令说明，请参阅 **[工作流手册 (Workflow Guide)](README_WORKFLOW.md)**。
@@ -60,6 +72,12 @@ python run_full_pipeline.py "paper.pdf"
 
 # 3. 批量全流程精读 (跳过已读)
 .\run_batch_pipeline.ps1 "path/to/pdfs"
+
+# 4. (可选) 抽取参考文献（基于 segmented md）
+.\run_reference_extractor.ps1 "pdf_segmented_md\paper_segmented.md"
+
+# 5. (可选) 引用追踪：从 references.xlsx 反向定位正文引用位置
+.\run_citation_tracer.ps1 "pdf_segmented_md\paper_segmented.md" "references\paper_references.xlsx"
 ```
 
 ## 目录结构
@@ -71,6 +89,7 @@ python run_full_pipeline.py "paper.pdf"
 ├── pdf_segmented_md/           # Step 3 产物
 ├── deep_reading_results/       # Step 4 & 5 产物 (最终报告)
 ├── deep_reading_steps/         # 精读子任务 Python 脚本
+├── references/                 # (可选) 参考文献抽取/引用追踪产物
 ├── *.py / *.ps1                # 各步骤主控脚本
 ├── README_WORKFLOW.md          # 详细使用手册
 └── requirements.txt

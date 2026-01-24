@@ -32,8 +32,10 @@ def extract_raw_references(md_path):
     if not os.path.exists(md_path):
         raise FileNotFoundError(f"File not found: {md_path}")
         
-    with open(md_path, 'r', encoding='utf-8') as f:
+    with open(md_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
+
+    content = content.replace("\x00", "")
         
     lines = content.split('\n')
     ref_content = []
@@ -41,13 +43,29 @@ def extract_raw_references(md_path):
     ref_keywords = ["References", "Bibliography", "Works Cited", "参考文献"]
     
     for line in lines:
+        stripped = line.strip()
         if line.startswith("## "):
-            is_target = any(kw in line for kw in ref_keywords)
+            header = stripped[3:].strip()
+            header_norm = re.sub(r"\s+", " ", header)
+            is_target = False
+            if len(header_norm) <= 30:
+                is_target = (
+                    header_norm in ref_keywords
+                    or bool(re.match(r"^\d+(\.\d+)*\s*(References|Bibliography|Works Cited|参考文献)\s*$", header_norm))
+                )
             if is_target:
                 in_ref = True
-                continue 
+                continue
             elif in_ref:
                 break
+
+        if not in_ref:
+            is_plain_ref = stripped in ref_keywords
+            is_plain_ref_cn = bool(re.match(r"^参考文献\s*[:：]?\s*$", stripped))
+            is_numbered_ref = bool(re.match(r"^\d+[\.\s、-]*参考文献\s*[:：]?\s*$", stripped))
+            if is_plain_ref or is_plain_ref_cn or is_numbered_ref:
+                in_ref = True
+                continue
         
         if in_ref:
             if line.strip().startswith("- start_page:") or \
@@ -99,6 +117,7 @@ def segment_references(full_text, split_pattern):
     Stage 2b: Execute split.
     """
     try:
+        full_text = full_text.replace("［", "[").replace("］", "]")
         # Use re.split but keep delimiters if possible? 
         # Usually split pattern matches the delimiter (newline).
         entries = re.split(split_pattern, full_text)

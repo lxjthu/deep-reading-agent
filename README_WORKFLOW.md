@@ -24,6 +24,13 @@
 - **元数据**：标题、作者、期刊、年份、研究主题、核心变量等（YAML Frontmatter）。
 - **链接**：分部文档与总报告之间的双向导航链接。
 
+### 1.5 参考文献抽取与引用追踪 (References & Citation Tracing)
+将“参考文献表”从论文中结构化抽取，并反向定位每条参考文献在正文中的引用位置（含上下文摘录）。
+- **参考文献抽取产出**：`references\*_references.xlsx`
+- **引用追踪产出**：
+  - `references\*_references_citation_trace.md`
+  - `references\*_references_with_citations.xlsx`
+
 ---
 
 ## 2. 详细使用指南
@@ -99,6 +106,19 @@ python run_full_pipeline.py "path\to\paper.pdf"
 python inject_obsidian_meta.py "source_raw.md" "target_folder"
 ```
 
+### 步骤五：（可选）参考文献抽取与引用追踪
+
+**功能**：从 `*_segmented.md` 中抽取参考文献列表，并反向追踪正文引用位置。
+
+**命令**：
+```powershell
+# 1) 抽取参考文献（输出到 references\*_references.xlsx）
+.\run_reference_extractor.ps1 "pdf_segmented_md\paper_segmented.md"
+
+# 2) 引用追踪（输出 MD 追踪日志 + 增强版 Excel）
+.\run_citation_tracer.ps1 "pdf_segmented_md\paper_segmented.md" "references\paper_references.xlsx"
+```
+
 ---
 
 ## 3. 常用脚本清单
@@ -111,6 +131,10 @@ python inject_obsidian_meta.py "source_raw.md" "target_folder"
 | `run_batch_pipeline.ps1` | 批量全流程精读 | `pdf_dir` |
 | `run_dataview_summarizer.ps1` | 注入内容摘要元数据 | `target_dir` |
 | `run_supplemental_reading.py` | 报告查漏补缺与整合 | `report_path`, `--regenerate` |
+| `extract_references.py` | 从分段论文抽取参考文献 | `segmented_md`, `--out_xlsx` |
+| `run_reference_extractor.ps1` | 抽取参考文献（封装） | `segmented_md` |
+| `citation_tracer.py` | 引用追踪（反向定位正文引用） | `segmented_md`, `references_xlsx` |
+| `run_citation_tracer.ps1` | 引用追踪（封装） | `segmented_md`, `references_xlsx` |
 
 ## 4. 最佳实践 (Best Practices)
 

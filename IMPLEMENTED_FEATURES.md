@@ -25,7 +25,7 @@
 
 仓库已有 `.gitignore`，用于避免将 PDF 原文与生成结果提交到 Git：[.gitignore](file:///d:/code/skill/.gitignore)
 
-典型包括：`pdf/`、`reports/`、`deep_reading_results/`、`pdf_raw_md/`、`pdf_segmented_md/` 等。
+典型包括：`pdf/`、`reports/`、`deep_reading_results/`、`pdf_raw_md/`、`pdf_segmented_md/`、`references/` 等。
 
 ## 3. 主功能与入口脚本
 
@@ -169,6 +169,30 @@
   - 生成/精修：`refine_code()`：[stata_refiner.py:L10-L73](file:///d:/code/skill/stata_refiner.py#L10-L73)
   - 写回报告：`update_markdown_report()`：[stata_refiner.py:L74-L106](file:///d:/code/skill/stata_refiner.py#L74-L106)
 
+### 3.10 参考文献抽取与引用追踪（DeepSeek）
+
+目标：从论文 `*_segmented.md` 中抽取参考文献列表形成结构化 Excel，并反向追踪正文引用位置（含上下文摘录）。
+
+- 参考文献抽取入口（PowerShell）：[run_reference_extractor.ps1](file:///d:/code/skill/run_reference_extractor.ps1)
+- 参考文献抽取实现（Python CLI）：[extract_references.py](file:///d:/code/skill/extract_references.py)
+  - 核心阶段：`extract_raw_references()` → `get_segmentation_pattern()` → `segment_references()` → `get_parsing_pattern()` → `batch_llm_parse()` → 写入 Excel
+
+- 引用追踪入口（PowerShell）：[run_citation_tracer.ps1](file:///d:/code/skill/run_citation_tracer.ps1)
+- 引用追踪实现（Python CLI）：[citation_tracer.py](file:///d:/code/skill/citation_tracer.py)
+  - 文本预处理：`preprocess_text()`（去页码标记、去除 ```text 块标记、截断参考文献段）
+  - 指纹生成：`generate_fingerprints()`（作者-年份 / 数字编号两类）
+  - 候选检索：`find_candidates()`（正则宽召回）
+  - LLM 核验与摘录：`verify_citations_with_llm()`（输出精确原句，并由本地逻辑扩展上下文）
+
+输出约定（默认写入 `references/` 目录）：
+- `*_references.xlsx`：结构化参考文献表（含 `raw_text` 等字段）
+- `*_references_citation_trace.md`：引用追踪日志（按参考文献条目输出引用摘录）
+- `*_references_with_citations.xlsx`：在原表基础上追加：
+  - `Citation_Count`
+  - `Citation_Contexts_All`（多条引用用 ` || ` 拼接）
+  - `Citation_Chinese_All`（英文引用的中文重述拼接；中文引用默认留空）
+  - `Citation_1..N` / `Citation_1_ZH..N_ZH`（便于筛选与人工复核，N 默认最多 8）
+
 ## 4. 另一条“深读”路线（不依赖 segmented md）
 
 仓库还实现了另一套“对单篇 PDF 全文进行串行抽取与合成”的深度研读工具（与 7-step pipeline 并行存在）。
@@ -207,4 +231,3 @@
 ## 7. 第三方代码
 
 - `third_party/anthropics-skills/` 为外部技能库镜像（仓库内存在，但根目录主流程代码未检索到对 `third_party` 的 import/调用）：[anthropics-skills](file:///d:/code/skill/third_party/anthropics-skills/)
-
