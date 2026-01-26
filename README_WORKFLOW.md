@@ -36,6 +36,12 @@
 - **流程**: PDF -> 智能切分 -> 4层深度分析 -> 生成全景报告 & Excel -> 注入双向链接。
 - **产出**: 4个分层 MD、1个全景 MD、1个汇总 Excel。
 
+### 1.7 智能科研助理 (Smart Scholar)
+集成式入口，通过 AI 自动判断论文类型并分发任务。
+- **输入**: PDF 文件或文件夹。
+- **分类**: 识别为 `QUANT` (定量) 或 `QUAL` (定性)。
+- **路由**: 自动调用对应的深度阅读 Skill。
+
 ---
 
 ## 2. 详细使用指南
@@ -138,6 +144,19 @@ python run_social_science_task.py
 - 文件夹 `social_science_results_v2/`
 - **Excel**: `Social_Science_Analysis_4Layer.xlsx`
 - **Docs**: 每篇论文 5 个 MD 文件（L1-L4 分层报告 + Full Report），均包含双向链接和元数据。
+
+### 步骤七：智能科研助理 (Smart Scholar)
+
+**功能**：一键式“傻瓜”操作，自动完成 PDF 转换、切分、分类和深度阅读。
+
+**命令**：
+```bash
+# 分析单个文件
+python smart_scholar.py "path/to/paper.pdf"
+
+# 分析整个目录
+python smart_scholar.py "path/to/pdf_folder"
+```
 
 ---
 

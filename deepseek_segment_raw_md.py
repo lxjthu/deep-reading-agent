@@ -176,6 +176,65 @@ Input Text:
     except Exception:
         return {"error": "json_parse_failed", "raw": content}
 
+
+def call_deepseek_direct_segment(full_text: str) -> dict:
+    """
+    直接分片模式：让 LLM 返回每个章节的完整内容（而非仅边界）。
+    适用于需要更精确分片的场景。
+    """
+    api_key = _env("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing DEEPSEEK_API_KEY in environment")
+
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    model_name = "deepseek-chat"
+
+    prompt = f"""你是一位严谨的学术编辑助手。请将以下论文全文切分为标准章节结构。
+
+任务：
+1. 识别论文的所有一级章节（如 Abstract, Introduction, Data, Model, Results, Conclusion, References, Appendix 等）
+2. 对每个章节，提取其完整内容（包含所有文字）
+3. 记录每个章节的起始页码（从 [PAGE N] 标签推断）
+
+输出格式（严格 JSON）：
+{{
+  "sections": [
+    {{"id": 1, "name": "Abstract", "start_page": 1, "text": "摘要的完整文本..."}},
+    {{"id": 2, "name": "1. Introduction", "start_page": 2, "text": "引言的完整文本..."}},
+    ...
+  ],
+  "notes": ["可选的备注信息"]
+}}
+
+重要规则：
+- 每个章节的 "text" 必须是该章节的完整原文，不要截断或摘要
+- 如果某个章节内容很短（<200字符），考虑将其合并到相邻章节
+- 保持原文格式，包括换行符
+- References 章节只需包含前若干条作为示例，可适当截断（避免输出过长）
+
+论文全文：
+{full_text}
+"""
+
+    logger.info(f"Sending DIRECT SEGMENT request to DeepSeek ({model_name})... Text len: {len(full_text)}")
+
+    try:
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": "你是严谨的学术编辑助手。只输出 JSON，不要添加任何解释。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content
+        return json_repair.repair_json(content, return_objects=True)
+    except Exception as e:
+        logger.error(f"DeepSeek Direct Segment API call failed: {e}")
+        return {"error": str(e)}
+
+
 def locate_marker(pages: list[Page], start_page: int, marker: str) -> tuple[int, int] | None:
     if not marker:
         return None
@@ -307,6 +366,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Segment raw per-page PDF Markdown into paper sections using DeepSeek")
     parser.add_argument("raw_md_path", help="Path to per-page raw markdown, e.g. pdf_raw_md/*_raw.md")
     parser.add_argument("--out_dir", default="pdf_segmented_md", help="Output directory")
+    parser.add_argument("--direct", action="store_true", help="Use direct segment mode (LLM returns full section text)")
     args = parser.parse_args()
 
     pages = parse_raw_page_md(args.raw_md_path)
@@ -314,34 +374,61 @@ def main() -> None:
         raise RuntimeError("No pages parsed from raw markdown")
 
     full_text = build_full_text_with_page_tags(pages)
-    
-    # Strategy: Use skeleton if text is too long (e.g., > 40k chars)
-    # DeepSeek V3 handles 64k easily, but skeleton is faster and cheaper.
-    use_skeleton = len(full_text) > 40000
-    
-    if use_skeleton:
-        logger.info(f"Document length {len(full_text)} > 40k. Using Skeleton Extraction.")
-        input_text = extract_skeleton(pages)
+    logger.info(f"Document length: {len(full_text)} characters, {len(pages)} pages")
+
+    if args.direct:
+        # ========== 直接分片模式 ==========
+        logger.info("Using DIRECT SEGMENT mode (LLM returns full section content)")
+        result = call_deepseek_direct_segment(full_text)
+        
+        if result.get("error"):
+            raise RuntimeError(f"DeepSeek API error: {result['error']}")
+        
+        raw_sections = result.get("sections", [])
+        if not raw_sections:
+            raise RuntimeError("DeepSeek returned no sections")
+        
+        # 转换为 segments 格式
+        segments = []
+        for s in raw_sections:
+            segments.append({
+                "section_id": s.get("id", len(segments) + 1),
+                "section_name": s.get("name", "Unknown"),
+                "start_page": s.get("start_page", 1),
+                "start_marker": s.get("name", ""),  # 直接模式用 name 作为 marker
+                "boundary_source": "llm_direct",
+                "text": normalize_newlines(s.get("text", "")),
+            })
+        deepseek_info = {"notes": result.get("notes", ["使用直接分片模式"])}
     else:
-        logger.info(f"Document length {len(full_text)}. Using Full Text.")
-        input_text = full_text
+        # ========== 边界检测 + 本地切片模式（原有逻辑，保留作为 fallback） ==========
+        use_skeleton = len(full_text) > 40000
+        
+        if use_skeleton:
+            logger.info(f"Document > 40k chars. Using Skeleton Extraction for boundary detection.")
+            input_text = extract_skeleton(pages)
+        else:
+            logger.info(f"Using Full Text for boundary detection.")
+            input_text = full_text
 
-    deepseek_info = call_deepseek_boundaries(input_text, is_skeleton=use_skeleton)
+        deepseek_info = call_deepseek_boundaries(input_text, is_skeleton=use_skeleton)
 
-    if isinstance(deepseek_info, dict) and deepseek_info.get("error"):
-        raise RuntimeError(f"DeepSeek boundary JSON parse failed: {deepseek_info.get('error')}")
+        if isinstance(deepseek_info, dict) and deepseek_info.get("error"):
+            raise RuntimeError(f"DeepSeek boundary JSON parse failed: {deepseek_info.get('error')}")
 
-    boundaries = deepseek_info.get("boundaries")
-    if not isinstance(boundaries, list) or len(boundaries) == 0:
-        raise RuntimeError("DeepSeek returned no boundaries.")
+        boundaries = deepseek_info.get("boundaries")
+        if not isinstance(boundaries, list) or len(boundaries) == 0:
+            raise RuntimeError("DeepSeek returned no boundaries.")
 
-    segments = slice_segments(pages, boundaries)
+        segments = slice_segments(pages, boundaries)
 
     # Short segment warning
     for seg in segments:
         content_len = len(seg.get("text", ""))
         if content_len < 200:
             logger.warning(f"Section '{seg.get('section_name')}' is very short ({content_len} chars). Check if cut correctly.")
+
+    logger.info(f"Segmented into {len(segments)} sections")
 
     os.makedirs(args.out_dir, exist_ok=True)
     base = os.path.splitext(os.path.basename(args.raw_md_path))[0]

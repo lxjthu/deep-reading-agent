@@ -76,10 +76,16 @@
 
 目标：针对“已分段的论文原文 Markdown”，分 7 步进行深度分析，每一步生成一个子报告，最后合成为总报告。
 
+- **核心升级**：
+  - **语义索引 (Semantic Indexing)**：引入 `semantic_router.py`，对全文进行智能分块与打标，生成 `semantic_index.json`，解决物理分段混乱问题。
+  - **混合路由 (Hybrid Routing)**：结合 LLM 动态映射、本地规则兜底和语义索引，确保内容分发准确无误。
+  - **防幻觉机制**：通过“原文原样打标”策略与系统提示词约束，杜绝 LLM 编造数据。
+  - **按篇归档**：结果输出到 `deep_reading_results/{Paper_Name}/` 独立文件夹。
+
 - 入口（Python CLI）：[deep_read_pipeline.py](file:///d:/code/skill/deep_read_pipeline.py)
-  - `main()`：[deep_read_pipeline.py:L19-L92](file:///d:/code/skill/deep_read_pipeline.py#L19-L92)
+  - `main()`：[deep_read_pipeline.py:L19-L134](file:///d:/code/skill/deep_read_pipeline.py#L19-L134)
 - 运行封装（PowerShell）：[run_deep_reading_pipeline.ps1](file:///d:/code/skill/run_deep_reading_pipeline.ps1)
-- 步骤实现（每个文件提供 `run(sections)`）：
+- 步骤实现（每个文件提供 `run(sections, titles, output_dir, step_id)`）：
   - Step1：Overview：[step_1_overview.py](file:///d:/code/skill/deep_reading_steps/step_1_overview.py)
   - Step2：Theory：[step_2_theory.py](file:///d:/code/skill/deep_reading_steps/step_2_theory.py)
   - Step3：Data：[step_3_data.py](file:///d:/code/skill/deep_reading_steps/step_3_data.py)
@@ -88,10 +94,11 @@
   - Step6：Results：[step_6_results.py](file:///d:/code/skill/deep_reading_steps/step_6_results.py)
   - Step7：Critique：[step_7_critique.py](file:///d:/code/skill/deep_reading_steps/step_7_critique.py)
 - 公共能力（DeepSeek 调用、加载 segmented md、保存产物）：[common.py](file:///d:/code/skill/deep_reading_steps/common.py)
-  - `call_deepseek()` / `load_segmented_md()` / `save_step_result()`：[common.py:L21-L88](file:///d:/code/skill/deep_reading_steps/common.py#L21-L88)
-  - 输出目录可通过 `DEEP_READING_OUTPUT_DIR` 控制，默认 `deep_reading_results/`：[common.py:L19-L21](file:///d:/code/skill/deep_reading_steps/common.py#L19-L21)
-
-已知实现细节（来自代码）：`deep_read_pipeline.py` 在拼接 Final 报告时读取 step 文件使用了硬编码相对目录 `deep_reading_results`：[deep_read_pipeline.py:L70-L88](file:///d:/code/skill/deep_read_pipeline.py#L70-L88)
+  - `get_combined_text_for_step()`：优先从 Semantic Index 读取，失败则回退到 Section Dict，支持 Next-Section Fallback。
+  - `smart_chunk()`：智能分块函数，按段落边界切分长文本。
+  - `route_sections_to_steps()`：混合路由逻辑。
+- 语义路由能力：[semantic_router.py](file:///d:/code/skill/deep_reading_steps/semantic_router.py)
+  - `generate_semantic_index()`：生成语义索引文件。
 
 ### 3.5 “全流程一键跑”（单篇）
 
@@ -175,7 +182,8 @@
 
 - 参考文献抽取入口（PowerShell）：[run_reference_extractor.ps1](file:///d:/code/skill/run_reference_extractor.ps1)
 - 参考文献抽取实现（Python CLI）：[extract_references.py](file:///d:/code/skill/extract_references.py)
-  - 核心阶段：`extract_raw_references()` → `get_segmentation_pattern()` → `segment_references()` → `get_parsing_pattern()` → `batch_llm_parse()` → 写入 Excel
+  - 两阶段流程：`extract_raw_references()` 提取原始文本 → `extract_references_with_llm()` 直接调用 DeepSeek 进行结构化解析 → 写入 Excel
+  - 分批处理：自动按约 8000 字符分批，避免单次请求过长
 
 - 引用追踪入口（PowerShell）：[run_citation_tracer.ps1](file:///d:/code/skill/run_citation_tracer.ps1)
 - 引用追踪实现（Python CLI）：[citation_tracer.py](file:///d:/code/skill/citation_tracer.py)
@@ -206,6 +214,17 @@
 - 辅助工具：[link_social_science_docs.py](file:///d:/code/skill/link_social_science_docs.py)
   - 功能：为生成的 L1-L4 及 Full Report 注入双向导航链接。
 
+### 3.12 智能科研助理（Smart Scholar）
+
+目标：作为统一入口，智能分类并路由论文到最佳分析管线。
+
+- 入口（Python CLI）：[smart_scholar.py](file:///d:/code/skill/smart_scholar.py)
+  - 流程：PDF -> Raw MD -> Segmented MD -> `classify_paper` (LLM) -> `dispatch`.
+  - 分类逻辑：基于摘要和方法论关键词判断 `QUANT` vs `QUAL`。
+  - 路由目标：
+    - `QUANT` -> [deep_read_pipeline.py](file:///d:/code/skill/deep_read_pipeline.py)
+    - `QUAL` -> [social_science_analyzer.py](file:///d:/code/skill/social_science_analyzer.py)
+
 ## 4. 另一条“深读”路线（不依赖 segmented md）
 
 仓库还实现了另一套“对单篇 PDF 全文进行串行抽取与合成”的深度研读工具（与 7-step pipeline 并行存在）。
@@ -235,6 +254,24 @@
 
 - `academic-pdf-analyzer` → `run_analyzer.ps1` / `main.py`：[SKILL.md](file:///d:/code/skill/.trae/skills/academic-pdf-analyzer/SKILL.md)
 - `kimi-pdf-raw-segmenter` → `run_kimi_segment_raw_md.ps1` / `kimi_segment_raw_md.py`：[SKILL.md](file:///d:/code/skill/.trae/skills/kimi-pdf-raw-segmenter/SKILL.md)
+
+### 3. 结构化切分 (Structure Segmentation)
+- **目标**: 还原论文逻辑结构（Introduction, Data, Model 等）。
+- **工具**: `deepseek-segment` (推荐，统一使用 DeepSeek) / `kimi-pdf-raw-segmenter`
+- **创新**:
+  - **直接分片模式**: LLM 一次性返回所有章节的完整内容，避免本地正则匹配失败
+  - **智能骨架提取**: 超长文档自动提取骨架用于边界检测
+- **输出**: `*_segmented.md`
+
+### 4. 深度精读 (Deep Reading & Analysis)
+- **目标**: 像 Daron Acemoglu 级别的审稿人一样，对论文进行批判性分析。
+- **工具**: `deep-reading-expert`
+- **逻辑**: 分步处理（全景扫描 -> 理论 -> 数据 -> 变量 -> 识别 -> 结果 -> 批判）。
+- **优化**:
+  - **语义索引**: 使用 `semantic_router.py` 生成全文语义索引，确保内容分发不依赖物理章节。
+  - **防幻觉机制**: 系统级提示词约束，禁止 LLM 在信息缺失时编造内容。
+  - **无压缩原文**: 采用分块打标 + 原文拼接的方式，最大限度保留论文细节。
+- **输出**: `Final_Deep_Reading_Report.md` 及各分步报告。
 - `deep-reading-expert` → `run_deep_reading_pipeline.ps1` / `deep_read_pipeline.py` / `deep_reading_steps/*`：[SKILL.md](file:///d:/code/skill/.trae/skills/deep-reading-expert/SKILL.md)
 - `batch-pdf-processor` → `run_batch_pipeline.ps1` / `run_batch_pipeline.py`：[SKILL.md](file:///d:/code/skill/.trae/skills/batch-pdf-processor/SKILL.md)
 - `supplemental-reading-skill` → `run_supplemental_reading.ps1` / `run_supplemental_reading.py`：[SKILL.md](file:///d:/code/skill/.trae/skills/supplemental-reading-skill/SKILL.md)

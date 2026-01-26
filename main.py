@@ -4,9 +4,10 @@ import pandas as pd
 from tqdm import tqdm
 from extractor import PDFExtractor
 from llm_analyzer import LLMAnalyzer
+from smart_scholar_lib import SmartScholar
 
 def main():
-    parser = argparse.ArgumentParser(description="Academic PDF Analyzer (LLM-Enhanced)")
+    parser = argparse.ArgumentParser(description="Academic PDF Analyzer (Smart Batch Mode)")
     parser.add_argument("input_path", help="Folder containing PDFs or path to a single PDF (or markdown file)")
     parser.add_argument("--output", default="results.xlsx", help="Output Excel file path")
     parser.add_argument("--markdown_dir", default="reports", help="Directory to save individual markdown reports")
@@ -54,6 +55,7 @@ def main():
 
     extractor = PDFExtractor()
     analyzer = LLMAnalyzer()
+    scholar = SmartScholar() # Helper for classification
     
     if not analyzer.client:
         print("CRITICAL: OpenAI API Key missing. Please check .env file.")
@@ -61,35 +63,38 @@ def main():
         
     results = []
 
-    for file_path in tqdm(files_to_process, desc="Processing Files with LLM"):
+    for file_path in tqdm(files_to_process, desc="Processing Files"):
         try:
             filename = os.path.basename(file_path)
             
             # 1. Extract Text
             if file_path.lower().endswith(".md"):
-                # Direct read for markdown files
                 with open(file_path, 'r', encoding='utf-8') as f:
                     text = f.read()
             else:
-                # Use extractor for PDFs
                 text = extractor.extract_content(file_path)
                 
             if not text:
                 print(f"Skipping {filename} (empty text)")
                 continue
 
-            # 2. Analyze Content (LLM)
-            analysis = analyzer.analyze(text, filename=filename)
+            # 2. Classify (New Step)
+            # Use first 3000 chars for classification
+            paper_type = scholar.classify_paper(text[:3000])
+            # print(f"  [{paper_type}] {filename}")
+
+            # 3. Analyze Content (Adaptive Mode)
+            analysis = analyzer.analyze(text, filename=filename, mode=paper_type)
             
             if "error" in analysis:
                 print(f"Error analyzing {filename}: {analysis['error']}")
                 continue
 
-            # 3. Generate Individual Markdown Report
+            # 4. Generate Individual Markdown Report
             md_path = os.path.join(args.markdown_dir, f"{os.path.splitext(filename)[0]}_report.md")
             analyzer.generate_markdown_report(analysis, md_path)
             
-            # 4. Compile Result for Excel (New Structure)
+            # 5. Compile Result for Excel
             b = analysis.get('basic', {})
             o = analysis.get('overview', {})
             t = analysis.get('theory', {})
@@ -100,6 +105,7 @@ def main():
 
             row = {
                 "Filename": filename,
+                "Type": paper_type, # Add Type column
                 "Title": b.get("title", ""),
                 "Authors": b.get("authors", ""),
                 "Journal": b.get("journal", ""),
@@ -109,19 +115,19 @@ def main():
                 "Problem": o.get("problem", ""),
                 "Contribution": o.get("contribution", ""),
                 
-                "Theory Base": t.get("theory_base", ""),
-                "Hypothesis": t.get("hypothesis", ""),
+                "Theory/Constructs": t.get("theory_base", ""), # Mapped
+                "Hypothesis/Framework": t.get("hypothesis", ""), # Mapped
                 
-                "Data Source": d.get("data_source", ""),
-                "Sample Info": d.get("sample_info", ""),
+                "Data/Case": d.get("data_source", ""), # Mapped
+                "Sample/Context": d.get("sample_info", ""), # Mapped
                 
-                "Dep. Var (Y)": m.get("dep_var", ""),
-                "Indep. Var (X)": m.get("indep_var", ""),
-                "Controls": m.get("controls", ""),
+                "Dep. Var/Outcome": m.get("dep_var", ""), # Mapped
+                "Indep. Var/Condition": m.get("indep_var", ""), # Mapped
+                "Controls/Context": m.get("controls", ""), # Mapped
                 
-                "Model": i.get("model", ""),
-                "Strategy": i.get("strategy", ""),
-                "IV/Mechanism": i.get("iv_mechanism", ""),
+                "Model/Method": i.get("model", ""), # Mapped
+                "Strategy/Path": i.get("strategy", ""), # Mapped
+                "IV/Mechanism": i.get("iv_mechanism", ""), # Mapped
                 
                 "Findings": r.get("findings", ""),
                 "Weakness": r.get("weakness", ""),
@@ -139,7 +145,6 @@ def main():
         
         if not existing_df.empty and not args.force:
             # Append new results to existing ones
-            # Align columns
             final_df = pd.concat([existing_df, new_df], ignore_index=True)
             print(f"Appending {len(new_df)} new records to existing {len(existing_df)} records.")
         else:

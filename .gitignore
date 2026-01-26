@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 *.xlsx
 deep_reading_results/
+social_science_results_v2/
 pdf_raw_md/
 pdf_segmented_md/
 reports/
@@ -14,3 +15,4 @@ references/
 *.log
 .DS_Store
 Thumbs.db
+processed_papers.json
