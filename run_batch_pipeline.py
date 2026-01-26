@@ -87,6 +87,11 @@ def main():
             logger.info(f"Paper Classified as: {paper_type}")
             
             # 3. Dispatch
+            if paper_type == "IGNORE":
+                logger.info(f"[SKIP] Ignored non-research paper: {basename}")
+                state_mgr.mark_completed(pdf_path, None, "IGNORE")
+                continue
+
             if paper_type == "QUANT":
                 logger.info(">>> Routing to Deep Reading Expert (Acemoglu Mode) <<<")
                 

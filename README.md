@@ -58,11 +58,20 @@ graph TD
 - **特点**: 4+1+1 输出结构（4分层MD + 1全景MD + 1汇总Excel），强制中文输出，支持文档间双向跳转。
 
 ### 7. 智能科研助理 (Smart Scholar) - **New!**
-- **目标**: 自动识别论文类型（定量实证 vs 定性案例），智能路由至最佳分析引擎。
-- **入口**: `smart_scholar.py`
+- **目标**: 自动识别论文类型，智能路由至最佳分析引擎。
+- **入口**: `smart_scholar.py` / `smart_scholar_lib.py`
 - **逻辑**: 
   - **定量 (Quant)** -> 路由至 Deep Reading Expert (Acemoglu Mode)。
-  - **定性 (Qual)** -> 路由至 Social Science Scholar (4-Layer Model)。
+  - **定性 (Qual)** -> 路由至 Social Science Scholar (4-Layer Model)。包括文献综述 (Reviews)、理论文章等。
+  - **忽略 (Ignore)** -> 自动跳过非研究性文档（如卷首语、书评、目录等）。
+- **默认策略**: 当分类不确定或失败时，默认回退到 **QUAL** 模式（对综述和理论文章更友好）。
+
+### 8. 状态管理与去重 (State Manager) - **New!**
+- **目标**: 提供基于内容哈希的持久化去重能力，解决文件名变更或移动导致的重复处理问题。
+- **机制**: 
+  - **MD5 内容哈希**: 无论文件名如何变化，只要内容不变，系统就能识别。
+  - **持久化账本**: 状态记录在 `processed_papers.json` 中。
+  - **递归搜索**: `run_batch_pipeline.py` 支持递归扫描子目录。
 
 ### 附加能力：参考文献抽取与引用追踪 (References & Citation Tracing)
 - **目标**: 从论文原文中抽取“参考文献列表”，并在正文中反向定位每条参考文献的引用位置。

@@ -38,9 +38,20 @@
 
 ### 1.7 智能科研助理 (Smart Scholar)
 集成式入口，通过 AI 自动判断论文类型并分发任务。
-- **输入**: PDF 文件或文件夹。
-- **分类**: 识别为 `QUANT` (定量) 或 `QUAL` (定性)。
-- **路由**: 自动调用对应的深度阅读 Skill。
+- **输入**: PDF 文件或文件夹（支持递归扫描）。
+- **分类**: 
+  - `QUANT` (定量): 实证研究、计量回归。
+  - `QUAL` (定性): 案例研究、文献综述 (Reviews)、理论文章。
+  - `IGNORE` (忽略): 非研究文档（卷首语、书评、目录等）。
+- **路由**: 自动调用对应的深度阅读 Skill。当分类不确定时，默认回退到 `QUAL`。
+
+### 1.8 状态管理与去重 (State Manager)
+提供基于内容哈希的持久化去重能力。
+- **核心逻辑**: 计算文件 MD5 并查询 `processed_papers.json` 账本。
+- **优势**: 即使文件名变更或文件移动，只要内容不变，系统就能识别并跳过，避免重复消耗 Token。
+
+### 1.9 智能合成修复 (Smart Synthesis)
+在合成 Final Report 时，自动清洗分步文件中的冗余元数据（YAML Frontmatter）和导航链接，确保最终报告格式整洁。
 
 ---
 
@@ -94,15 +105,16 @@ python main.py "d:\code\skill\pdf_raw_md" --output "analysis_results.xlsx"
 python run_full_pipeline.py "path\to\paper.pdf"
 ```
 
-**场景 B：批量精读 (跳过已读)**
+**场景 B：批量精读 (智能去重与递归)**
 ```powershell
-# 自动扫描文件夹，跳过已存在报告的论文
+# 自动扫描文件夹（含子目录），跳过内容哈希已记录的论文
 .\run_batch_pipeline.ps1 "d:\code\skill\pdf"
 ```
 
 **产出**：
 - 在 `deep_reading_results/` 下生成以论文名命名的文件夹。
 - 包含 `1_Overview.md` 到 `7_Critique.md` 及 `Final_Deep_Reading_Report.md`。
+- 状态更新至 `processed_papers.json`。
 
 ### 步骤四：Obsidian 元数据注入 (Metadata Injection)
 
@@ -176,8 +188,26 @@ python smart_scholar.py "path/to/pdf_folder"
 | `run_citation_tracer.ps1` | 引用追踪（封装） | `segmented_md`, `references_xlsx` |
 | `run_social_science_task.py` | 社科文献深度阅读全流程 | `KEYWORDS` (in script) |
 | `social_science_analyzer.py` | 社科文献分析核心逻辑 | N/A |
+| `state_manager.py` | 状态管理与哈希去重 | N/A |
+| `fix_social_science_metadata.py` | 社科报告元数据修复 | `--target`, `--force` |
 
-## 4. 最佳实践 (Best Practices)
+## 4. 运维与修复 (Maintenance)
+
+### 4.1 元数据批量修复
+当旧的社科分析报告缺失元数据（如 Journal, Year）时，可使用此脚本进行无损修复（无需重跑 AI 分析）。
+
+```bash
+# 自动扫描 social_science_results_v2 并修复元数据
+python fix_social_science_metadata.py --force
+```
+
+### 4.2 状态管理
+查看或重置处理状态账本。
+
+- **账本位置**: `processed_papers.json`
+- **操作**: 若需强制重跑某篇论文，可从 JSON 中删除对应条目，或直接删除该文件（将触发全量重跑，慎用）。
+
+## 5. 最佳实践 (Best Practices)
 
 1.  **先粗后细**：先用 **步骤二 (Batch Analysis)** 快速扫描一批文献，生成 Excel 表格筛选出值得精读的高价值论文。
 2.  **重点突破**：对筛选出的重点论文，使用 **步骤三 (Deep Reading)** 进行深度研读。

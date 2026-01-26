@@ -137,34 +137,43 @@ Output JSON:
 """
         return self._call_llm(prompt, text_segment)
 
-    def generate_markdown(self, data: dict, layer: str, basename: str, output_dir: str):
+    def generate_markdown(self, data: dict, layer: str, basename: str, output_dir: str, metadata: dict = None):
         filename = f"{basename}_{layer}.md"
         path = os.path.join(output_dir, filename)
         
         # Prepare Frontmatter content
         frontmatter = {}
+        
+        # Inject common metadata if provided
+        if metadata:
+            frontmatter["title"] = metadata.get("title", basename)
+            frontmatter["authors"] = metadata.get("authors", "")
+            frontmatter["journal"] = metadata.get("journal", "")
+            frontmatter["year"] = metadata.get("year", "")
+            frontmatter["tags"] = ["SocialScience", metadata.get("genre", "Paper"), "LayerReport", layer]
+            
         if layer == "L1_Context":
-            frontmatter = {
+            frontmatter.update({
                 "genre": data.get("metadata", {}).get("genre"),
                 "key_policies": [p["name"] for p in data.get("policy_context", [])[:5]],
                 "status_summary": "; ".join([f"{d['item']}: {d['value']}" for d in data.get("status_data", [])[:3]])
-            }
+            })
         elif layer == "L2_Theory":
-            frontmatter = {
+            frontmatter.update({
                 "theories": [t["name"] for t in data.get("past_theories", [])[:5]],
                 "key_constructs": [c["name"] for c in data.get("key_constructs", [])[:5]]
-            }
+            })
         elif layer == "L3_Logic":
             mech = data.get("core_mechanism", {})
-            frontmatter = {
+            frontmatter.update({
                 "mechanism_type": mech.get("type"),
                 "core_components": [c["phase_or_path"] for c in mech.get("components", [])[:5]]
-            }
+            })
         elif layer == "L4_Value":
-            frontmatter = {
+            frontmatter.update({
                 "gaps": data.get("gaps", [])[:3],
                 "contributions": data.get("contributions", [])[:3]
-            }
+            })
 
         # Build Markdown
         lines = ["---"]
@@ -247,6 +256,8 @@ Output JSON:
         lines = ["---"]
         lines.append(f"title: {meta.get('title', basename)}")
         lines.append(f"authors: {meta.get('authors', '')}")
+        lines.append(f"journal: {meta.get('journal', '')}")
+        lines.append(f"year: {meta.get('year', '')}")
         lines.append(f"tags: #SocialScience #{meta.get('genre', 'Paper')} #DeepReading")
         lines.append(f"date: {datetime.now().strftime('%Y-%m-%d')}")
         lines.append("---")
@@ -395,10 +406,13 @@ def main():
         paper_out_dir = os.path.join(args.out_dir, basename)
         os.makedirs(paper_out_dir, exist_ok=True)
         
-        analyzer.generate_markdown(l1_res, "L1_Context", basename, paper_out_dir)
-        analyzer.generate_markdown(l2_res, "L2_Theory", basename, paper_out_dir)
-        analyzer.generate_markdown(l3_res, "L3_Logic", basename, paper_out_dir)
-        analyzer.generate_markdown(l4_res, "L4_Value", basename, paper_out_dir)
+        # Extract common metadata for injection
+        common_meta = l1_res.get("metadata", {})
+        
+        analyzer.generate_markdown(l1_res, "L1_Context", basename, paper_out_dir, metadata=common_meta)
+        analyzer.generate_markdown(l2_res, "L2_Theory", basename, paper_out_dir, metadata=common_meta)
+        analyzer.generate_markdown(l3_res, "L3_Logic", basename, paper_out_dir, metadata=common_meta)
+        analyzer.generate_markdown(l4_res, "L4_Value", basename, paper_out_dir, metadata=common_meta)
         analyzer.generate_full_report(paper_data, basename, paper_out_dir)
         
         all_results.append({"basename": basename, "data": paper_data})

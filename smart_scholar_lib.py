@@ -38,7 +38,7 @@ class SmartScholar:
         Classify the paper as 'QUANT' or 'QUAL' based on text content.
         """
         system_prompt = """
-        You are an expert Academic Editor. Your task is to classify a research paper into one of two categories based on its content (Abstract, Intro, Methodology).
+        You are an expert Academic Editor. Your task is to classify a research paper into one of three categories based on its content (Abstract, Intro, Methodology).
         
         Categories:
         1. "QUANT": Quantitative Economics / Econometrics / Empirical Finance.
@@ -49,7 +49,11 @@ class SmartScholar:
            - Keywords: Case Study, Grounded Theory, Qualitative Comparative Analysis (QCA), Semi-structured Interview, Theoretical Framework, Construct, Mechanism (narrative), Literature Review, Research Progress, Survey, Overview, Meta-analysis.
            - Style: Narrative, Theoretical, Conceptual, Process Model, Comprehensive Review.
            
-        Output JSON: {"type": "QUANT" | "QUAL", "reason": "short explanation"}
+        3. "IGNORE": Non-Research Content / Editorials / Metadata.
+           - Keywords: Host's Introduction, Editor's Note, Preface, Call for Papers, Table of Contents, Conference Announcement, Erratum, Book Review, News.
+           - Style: Very short (< 2 pages), introductory, administrative, non-academic structure.
+           
+        Output JSON: {"type": "QUANT" | "QUAL" | "IGNORE", "reason": "short explanation"}
         """
         
         try:

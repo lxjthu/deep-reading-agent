@@ -126,7 +126,8 @@
 
 - 入口（Python CLI）：[run_batch_pipeline.py](file:///d:/code/skill/run_batch_pipeline.py)
   - `main()`：[run_batch_pipeline.py:L17-L62](file:///d:/code/skill/run_batch_pipeline.py#L17-L62)
-  - 跳过逻辑：存在 `deep_reading_results/{basename}/Final_Deep_Reading_Report.md` 则跳过：[run_batch_pipeline.py:L42-L50](file:///d:/code/skill/run_batch_pipeline.py#L42-L50)
+  - **递归搜索**：支持递归扫描输入目录及其子目录下的所有 PDF 文件。
+  - **哈希去重**：集成 `state_manager.py`，基于 MD5 内容哈希进行去重。如果文件内容已处理过（即使改名或移动），系统会自动跳过，避免重复消耗 Token。
 - 运行封装（PowerShell）：[run_batch_pipeline.ps1](file:///d:/code/skill/run_batch_pipeline.ps1)
 
 ### 3.7 “补缺/重建”精读报告
@@ -218,12 +219,30 @@
 
 目标：作为统一入口，智能分类并路由论文到最佳分析管线。
 
-- 入口（Python CLI）：[smart_scholar.py](file:///d:/code/skill/smart_scholar.py)
+- 入口（Python CLI）：[smart_scholar.py](file:///d:/code/skill/smart_scholar.py) / [smart_scholar_lib.py](file:///d:/code/skill/smart_scholar_lib.py)
   - 流程：PDF -> Raw MD -> Segmented MD -> `classify_paper` (LLM) -> `dispatch`.
   - 分类逻辑：基于摘要和方法论关键词判断 `QUANT` vs `QUAL`。
+    - **综述支持**：明确支持将 "Literature Review", "Survey", "Meta-analysis" 等综述类文章归类为 `QUAL`。
+    - **默认策略**：当分类不确定或失败时，默认回退到 `QUAL`（对综述和理论文章更友好），而非之前的 `QUANT`。
   - 路由目标：
     - `QUANT` -> [deep_read_pipeline.py](file:///d:/code/skill/deep_read_pipeline.py)
     - `QUAL` -> [social_science_analyzer.py](file:///d:/code/skill/social_science_analyzer.py)
+
+### 3.13 状态管理与去重 (State Manager)
+
+目标：提供基于内容哈希的持久化去重能力，解决文件名变更或移动导致的重复处理问题。
+
+- 入口（Python Library）：[state_manager.py](file:///d:/code/skill/state_manager.py)
+  - `is_processed(file_path)`: 计算文件 MD5 并查询 `processed_papers.json` 账本，支持检查输出产物完整性。
+  - `mark_completed(...)`: 记录处理完成状态及输出目录。
+  - 持久化文件：`processed_papers.json`（自动生成，不纳入 Git）。
+
+### 3.14 智能合成修复 (Smart Synthesis)
+
+目标：在合成 Final Report 时，自动清洗分步文件中的冗余元数据（YAML Frontmatter）和导航链接，确保最终报告格式整洁。
+
+- 独立工具：[smart_resynthesize.py](file:///d:/code/skill/smart_resynthesize.py)
+- 集成情况：核心逻辑已集成至 `deep_read_pipeline.py` 的最终合成步骤中。
 
 ## 4. 另一条“深读”路线（不依赖 segmented md）
 
