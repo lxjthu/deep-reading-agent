@@ -73,6 +73,20 @@ graph TD
   - **持久化账本**: 状态记录在 `processed_papers.json` 中。
   - **递归搜索**: `run_batch_pipeline.py` 支持递归扫描子目录。
 
+### 9. 智能文献筛选 (Smart Literature Filter) - **New!**
+- **目标**: 在精读之前，从海量文献列表（WoS/CNKI）中利用 AI 智能筛选出高价值论文。
+- **入口**: `smart_literature_filter.py`
+- **支持格式**: 
+  - **Web of Science (WoS)**: `savedrecs.txt`
+  - **CNKI (知网)**: 导出的 Refworks/NoteFirst 格式文本
+- **AI 评估模式**:
+  - **Explorer**: 入门模式，寻找开创性（Seminal）经典文献。
+  - **Reviewer**: 综述模式，寻找具有理论贡献和综述价值的文献。
+  - **Empiricist**: 实证模式，严格筛选因果识别严谨的实证研究（Acemoglu 风格）。
+- **自适应输出**: 
+  - **英文文献**: 自动翻译标题并生成中文详细摘要。
+  - **中文文献**: 自动提炼标题关键词并生成 <20 字的一句话极简摘要。
+
 ### 附加能力：参考文献抽取与引用追踪 (References & Citation Tracing)
 - **目标**: 从论文原文中抽取“参考文献列表”，并在正文中反向定位每条参考文献的引用位置。
 - **入口脚本**:

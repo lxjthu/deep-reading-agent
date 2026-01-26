@@ -4,6 +4,12 @@
 
 ## 1. 核心功能模块
 
+### 1.0 智能文献筛选 (Smart Literature Filter) - **New!**
+从 Web of Science 或 CNKI 导出的成百上千篇文献列表中，利用 AI 进行“专家级”预筛选，快速定位高价值论文。
+- **支持格式**：WoS (`savedrecs.txt`) 和 CNKI (`Refworks` 格式)。
+- **三种模式**：`explorer` (入门), `reviewer` (综述), `empiricist` (实证)。
+- **输出**：带 AI 评分、中文摘要、推荐理由的 Excel 表格。
+
 ### 1.1 PDF 转 Markdown (PDF Extraction)
 将原始 PDF 文档转换为适合 LLM 处理的 Markdown 格式，包含两种模式：
 - **Raw Extraction**: 直接提取文本，保留原始排版结构。
@@ -64,6 +70,25 @@
 # 激活虚拟环境 (Windows)
 .\venv\Scripts\Activate.ps1
 ```
+
+### 步骤零：文献初筛 (Literature Filtering)
+
+**功能**：在下载 PDF 之前，先对文献列表进行 AI 筛选。
+
+**命令**：
+```powershell
+# 1. 筛选 Web of Science 导出文件 (英文)
+# 模式: reviewer (适合写综述), topic: 研究主题
+python smart_literature_filter.py "savedrecs.txt" --ai_mode reviewer --topic "Digital Economy" --output "wos_screened.xlsx"
+
+# 2. 筛选 CNKI 导出文件 (中文)
+# 模式: empiricist (寻找严谨实证), topic: 研究主题
+python smart_literature_filter.py "cnki_export.txt" --ai_mode empiricist --topic "人工智能与农业" --output "cnki_screened.xlsx"
+```
+
+**产出**：
+- Excel 文件：包含 AI 打分 (`score`)、中文标题 (`title_cn`)、中文摘要 (`abstract_cn`) 和推荐理由 (`reason`)。
+- **自适应处理**：英文文献会自动翻译；中文文献会自动提炼为极简摘要（<20字）。
 
 ### 步骤一：PDF 转换 (PDF to Markdown)
 

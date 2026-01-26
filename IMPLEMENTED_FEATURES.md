@@ -244,6 +244,17 @@
 - 独立工具：[smart_resynthesize.py](file:///d:/code/skill/smart_resynthesize.py)
 - 集成情况：核心逻辑已集成至 `deep_read_pipeline.py` 的最终合成步骤中。
 
+### 3.15 智能文献筛选 (Smart Literature Filter)
+
+目标：在精读前对海量文献列表进行 AI 预筛选。支持 WoS 和 CNKI 格式，提供三种 AI 评估模式。
+
+- 入口（Python CLI）：[smart_literature_filter.py](file:///d:/code/skill/smart_literature_filter.py)
+  - `main()`：自动检测文件格式 -> 解析 -> 过滤 -> AI 批量评估 -> 导出 Excel。
+- 核心解析器：[parsers.py](file:///d:/code/skill/parsers.py)
+  - `get_parser()`：工厂方法，自动识别 WoS/CNKI。
+  - `WoSParser` / `CNKIParser`：具体格式解析实现。
+- 提示词模板：`prompts/literature_filter/*.md` (`explorer`, `reviewer`, `empiricist`)。
+
 ## 4. 另一条“深读”路线（不依赖 segmented md）
 
 仓库还实现了另一套“对单篇 PDF 全文进行串行抽取与合成”的深度研读工具（与 7-step pipeline 并行存在）。
