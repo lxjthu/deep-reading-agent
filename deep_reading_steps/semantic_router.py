@@ -1,9 +1,67 @@
 import os
+import re
 import json
 import logging
 from .common import smart_chunk, call_deepseek
 
 logger = logging.getLogger(__name__)
+
+
+def is_paddleocr_format(content: str) -> bool:
+    """
+    Detect if content is from PaddleOCR extraction.
+
+    Checks for YAML frontmatter with extractor field.
+    """
+    if not content.startswith("---\n"):
+        return False
+
+    # Look for extractor field in frontmatter
+    end_idx = content.find("\n---\n", 4)
+    if end_idx == -1:
+        return False
+
+    frontmatter = content[4:end_idx]
+    return "extractor: paddleocr" in frontmatter or "extractor: pdfplumber_fallback" in frontmatter
+
+
+def strip_paddleocr_artifacts(content: str) -> str:
+    """
+    Clean PaddleOCR-specific artifacts from text before semantic indexing.
+
+    Removes:
+    - YAML frontmatter
+    - Image div tags
+    - Tool metadata lines
+    """
+    # Strip YAML frontmatter
+    if content.startswith("---\n"):
+        end_idx = content.find("\n---\n", 4)
+        if end_idx != -1:
+            content = content[end_idx + 5:]
+
+    # Strip image HTML divs
+    content = re.sub(
+        r'<div[^>]*>.*?</div>',
+        '',
+        content,
+        flags=re.DOTALL
+    )
+
+    # Strip markdown image syntax
+    content = re.sub(r'!\[.*?\]\(.*?\)', '', content)
+
+    # Strip tool metadata line
+    content = re.sub(r'\*提取工具:.*?\*\n?', '', content)
+
+    # Strip "## Text Content" header if present
+    content = re.sub(r'^## Text Content\s*\n', '', content, flags=re.MULTILINE)
+
+    # Normalize whitespace
+    content = re.sub(r'\n{3,}', '\n\n', content)
+
+    return content.strip()
+
 
 SYSTEM_PROMPT = """你是一个专业的学术论文结构分析师。
 你的任务是阅读给定的论文文本片段，并判断该片段主要包含以下哪些部分的内容。
@@ -34,7 +92,12 @@ def generate_semantic_index(full_text, output_dir):
     and saves the result to semantic_index.json.
     """
     logger.info("Starting Semantic Indexing...")
-    
+
+    # Detect and clean PaddleOCR format
+    if is_paddleocr_format(full_text):
+        logger.info("Detected PaddleOCR format, cleaning artifacts...")
+        full_text = strip_paddleocr_artifacts(full_text)
+
     # 1. Split text into manageable chunks (e.g., 6k tokens ~ 18k chars)
     chunks = smart_chunk(full_text, max_tokens=6000)
     logger.info(f"Split text into {len(chunks)} chunks.")

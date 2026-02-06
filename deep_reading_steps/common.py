@@ -31,7 +31,8 @@ def get_combined_text_for_step(sections, assigned_titles, output_dir=None, step_
     """
     Retrieves and combines text for a list of assigned section titles.
     Priority 1: Load from Semantic Index (if available and step_id provided).
-    Priority 2: Load from 'sections' dict with Next-Section Fallback.
+    Priority 2: Smart Router format direct lookup (e.g., "1_Overview", "2_Theory").
+    Priority 3: Traditional Section Retrieval (Fallback).
     """
     combined_text = ""
     
@@ -52,7 +53,25 @@ def get_combined_text_for_step(sections, assigned_titles, output_dir=None, step_
             except Exception as e:
                 logger.error(f"Failed to load Semantic Index: {e}")
 
-    # Priority 2: Traditional Section Retrieval (Fallback)
+    # Priority 2: Smart Router format direct lookup
+    # Smart Router sections are like: "1_Overview", "2_Theory", "3_Data", etc.
+    if step_id:
+        step_key_mapping = {
+            1: ["1_Overview"],
+            2: ["2_Theory"],
+            3: ["3_Data"],
+            4: ["4_Variables"],
+            5: ["5_Identification"],
+            6: ["6_Results"],
+            7: ["7_Critique"]
+        }
+        possible_keys = step_key_mapping.get(step_id, [])
+        for key in possible_keys:
+            if key in sections:
+                logger.info(f"Found Smart Router content for Step {step_id} using key '{key}'")
+                return sections[key]
+
+    # Priority 3: Traditional Section Retrieval (Fallback)
     all_titles = list(sections.keys())
     
     for title in assigned_titles:
@@ -140,36 +159,100 @@ def call_deepseek(prompt, system_prompt="You are a helpful assistant."):
         logger.error(f"DeepSeek API call failed: {e}")
         return None
 
-def load_segmented_md(md_path):
+def load_md_sections(md_path):
     """
-    Parses the segmented markdown file into a dictionary of sections.
-    Keys are section titles (or approximation), values are text content.
+    Parses a markdown file into a dictionary of sections.
+    Supports:
+    - Raw extraction output (# and ## headers from PaddleOCR / pdfplumber)
+    - Traditional segmented format (## 章节名)
+    - Smart Router format (## 1. Overview)
+
+    Strips YAML frontmatter before parsing.
+    Falls back to {"Full Text": content} if no sections found.
     """
     if not os.path.exists(md_path):
-        logger.error(f"Segmented MD file not found: {md_path}")
+        logger.error(f"MD file not found: {md_path}")
         return {}
 
     with open(md_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Simple parsing based on "## " headers
+    # Strip YAML frontmatter (---...--- at start of file)
+    content = re.sub(r'^---\n.*?\n---\n', '', content, flags=re.DOTALL)
+
     sections = {}
     current_section = None
     current_text = []
 
+    # Detect Smart Router format
+    is_smart_router = "- Mode: quant" in content or "- Mode: qual" in content
+
     for line in content.split('\n'):
+        # Match ## headers
         if line.startswith("## "):
-            if current_section:
+            if current_section is not None:
                 sections[current_section] = "\n".join(current_text).strip()
-            current_section = line.strip("# ").strip()
+            current_section = line.lstrip("# ").strip()
+            current_text = []
+        # Match # headers (but not ## or ###)
+        elif line.startswith("# ") and not line.startswith("## "):
+            if current_section is not None:
+                sections[current_section] = "\n".join(current_text).strip()
+            current_section = line.lstrip("# ").strip()
             current_text = []
         else:
             current_text.append(line)
-    
-    if current_section:
+
+    if current_section is not None:
         sections[current_section] = "\n".join(current_text).strip()
 
+    # Smart Router format: extract text from code blocks for each step
+    if is_smart_router and "- Mode: quant" in content:
+        sections = _extract_smart_router_quant_sections(sections)
+
+    # Fallback: if no sections found, put entire text into a single section
+    if not sections:
+        stripped = content.strip()
+        if stripped:
+            logger.warning("No section headers found, using full text as single section")
+            sections["Full Text"] = stripped
+
     return sections
+
+
+# Backward-compatible alias
+load_segmented_md = load_md_sections
+
+def _extract_smart_router_quant_sections(sections: dict) -> dict:
+    """
+    从 Smart Router 格式的分段中提取各步骤的实际文本内容。
+    将 ## 1. Overview 等步骤标签映射为可直接使用的章节内容。
+    """
+    extracted = {}
+    step_mapping = {
+        "1. Overview (全景扫描)": "1_Overview",
+        "2. Theory (理论与假说)": "2_Theory", 
+        "3. Data (数据考古)": "3_Data",
+        "4. Variables (变量与测量)": "4_Variables",
+        "5. Identification (识别策略)": "5_Identification",
+        "6. Results (结果解读)": "6_Results",
+        "7. Critique (专家批判)": "7_Critique"
+    }
+    
+    for step_title, step_key in step_mapping.items():
+        if step_title in sections:
+            content = sections[step_title]
+            # Extract text from ```text ... ``` code blocks
+            import re
+            text_blocks = re.findall(r'```text\s*\n(.*?)\n```', content, re.DOTALL)
+            if text_blocks:
+                extracted[step_key] = "\n\n".join(text_blocks)
+            else:
+                # Fallback: use the raw content
+                extracted[step_key] = content
+    
+    logger.info(f"Extracted {len(extracted)} sections from Smart Router format")
+    return extracted
 
 def save_step_result(step_name, result, output_dir=None):
     if output_dir is None:
@@ -251,22 +334,29 @@ def find_section_with_fallback(sections, keywords, fallback_keywords=None):
 def route_sections_to_steps(sections: dict) -> dict:
     """
     混合路由策略：
-    1. 尝试 LLM 动态映射（支持多标签）。
-    2. 对匹配失败的标题使用本地规则兜底。
-    3. 确保每个步骤都有内容（位置兜底）。
+    1. 检测 Smart Router 格式，直接映射步骤。
+    2. 尝试 LLM 动态映射（支持多标签）。
+    3. 对匹配失败的标题使用本地规则兜底。
+    4. 确保每个步骤都有内容（位置兜底）。
     """
     section_titles = list(sections.keys())
     if not section_titles:
         logger.error("No sections found for routing")
         return {str(i): [] for i in range(1, 8)}
+    
+    # 1. 检测 Smart Router 格式（定量论文）
+    smart_router_mapping = _smart_router_quant_mapping(section_titles)
+    if smart_router_mapping:
+        logger.info("Detected Smart Router (QUANT) format, using direct step mapping")
+        return smart_router_mapping
 
-    # 1. 尝试 LLM 路由
+    # 2. 尝试 LLM 路由
     llm_routing = _llm_routing(section_titles)
     
-    # 2. 本地规则兜底 (用于补充 LLM 可能遗漏的或填充空步骤)
+    # 3. 本地规则兜底 (用于补充 LLM 可能遗漏的或填充空步骤)
     rule_routing = _rule_based_routing(section_titles)
     
-    # 3. 合并逻辑
+    # 4. 合并逻辑
     final_routing = {i: [] for i in range(1, 8)}
     
     # 优先使用 LLM 结果
@@ -279,10 +369,50 @@ def route_sections_to_steps(sections: dict) -> dict:
             logger.info(f"Step {step} empty after LLM routing, using rule-based fallback.")
             final_routing[step] = rule_routing.get(step, [])
             
-    # 4. 最终的位置兜底 (如果规则也没匹配上)
+    # 5. 最终的位置兜底 (如果规则也没匹配上)
     _apply_positional_fallback(final_routing, section_titles)
     
     return final_routing
+
+def _smart_router_quant_mapping(section_titles: list) -> dict:
+    """
+    识别 Smart Router 定量论文格式，直接映射到 7 个步骤。
+    Smart Router 格式示例: "1. Overview (全景扫描)", "2. Theory (理论与假说)" 等
+    """
+    mapping = {i: [] for i in range(1, 8)}
+    found_smart_router = False
+    
+    for title in section_titles:
+        # Step 1: Overview
+        if re.match(r'^1\.\s*Overview', title, re.IGNORECASE) or 'Overview' in title:
+            mapping[1].append(title)
+            found_smart_router = True
+        # Step 2: Theory
+        elif re.match(r'^2\.\s*Theory', title, re.IGNORECASE) or ('Theory' in title and '2.' in title):
+            mapping[2].append(title)
+            found_smart_router = True
+        # Step 3: Data
+        elif re.match(r'^3\.\s*Data', title, re.IGNORECASE) or ('Data' in title and '3.' in title):
+            mapping[3].append(title)
+            found_smart_router = True
+        # Step 4: Variables
+        elif re.match(r'^4\.\s*Variables', title, re.IGNORECASE) or ('Variables' in title and '4.' in title):
+            mapping[4].append(title)
+            found_smart_router = True
+        # Step 5: Identification
+        elif re.match(r'^5\.\s*Identification', title, re.IGNORECASE) or ('Identification' in title and '5.' in title):
+            mapping[5].append(title)
+            found_smart_router = True
+        # Step 6: Results
+        elif re.match(r'^6\.\s*Results', title, re.IGNORECASE) or ('Results' in title and '6.' in title):
+            mapping[6].append(title)
+            found_smart_router = True
+        # Step 7: Critique
+        elif re.match(r'^7\.\s*Critique', title, re.IGNORECASE) or ('Critique' in title and '7.' in title):
+            mapping[7].append(title)
+            found_smart_router = True
+    
+    return mapping if found_smart_router else {}
 
 def _llm_routing(section_titles: list) -> dict:
     """

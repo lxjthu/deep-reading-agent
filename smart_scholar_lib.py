@@ -15,16 +15,18 @@ load_dotenv()
 
 # Constants / Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PDF_RAW_DIR = os.path.join(BASE_DIR, "pdf_raw_md")
-PDF_SEG_DIR = os.path.join(BASE_DIR, "pdf_segmented_md")
+PADDLEOCR_DIR = os.path.join(BASE_DIR, "paddleocr_md")
+PDF_RAW_DIR = os.path.join(BASE_DIR, "pdf_raw_md")  # Legacy fallback
 
-# Scripts
+# Scripts - Extraction
+SCRIPT_PDF_TO_MD = os.path.join(BASE_DIR, "paddleocr_pipeline.py")
 SCRIPT_PDF_TO_RAW = os.path.join(BASE_DIR, "anthropic_pdf_extract_raw.py")
-SCRIPT_RAW_TO_SEG = os.path.join(BASE_DIR, "deepseek_segment_raw_md.py")
-SCRIPT_PIPELINE_QUANT = os.path.join(BASE_DIR, "deep_read_pipeline.py") # Step-based
-SCRIPT_PIPELINE_QUAL = os.path.join(BASE_DIR, "social_science_analyzer.py") # 4-Layer
+
+# Scripts - Analysis pipelines
+SCRIPT_PIPELINE_QUANT = os.path.join(BASE_DIR, "deep_read_pipeline.py")  # Step-based
+SCRIPT_PIPELINE_QUAL = os.path.join(BASE_DIR, "social_science_analyzer.py")  # 4-Layer
 SCRIPT_LINK_QUAL = os.path.join(BASE_DIR, "link_social_science_docs.py")
-SCRIPT_FULL_QUANT = os.path.join(BASE_DIR, "run_full_pipeline.py") # Wrapper for Quant
+SCRIPT_FULL_QUANT = os.path.join(BASE_DIR, "run_full_pipeline.py")  # Wrapper for Quant
 
 class SmartScholar:
     def __init__(self):
@@ -83,33 +85,56 @@ class SmartScholar:
             logger.error(f"Command failed: {e}")
             raise
 
-    def ensure_segmented_md(self, pdf_path):
+    def ensure_extracted_md(self, pdf_path, use_paddleocr=True):
         """
-        Ensures that raw and segmented MD files exist for the given PDF.
-        Returns the path to the segmented MD file.
+        Ensures that an extracted MD file exists for the given PDF.
+        Returns the path to the extraction MD file (no segmentation step).
+
+        Args:
+            pdf_path: Path to the PDF file
+            use_paddleocr: If True, use PaddleOCR pipeline (default); else use legacy
+
+        Returns:
+            Path to extracted MD file, or None on failure
         """
         basename = os.path.basename(pdf_path)
         filename_no_ext = os.path.splitext(basename)[0]
-        
-        raw_md_path = os.path.join(PDF_RAW_DIR, f"{filename_no_ext}_raw.md")
-        seg_md_path = os.path.join(PDF_SEG_DIR, f"{filename_no_ext}_segmented.md")
-        
-        # 1. PDF -> Raw MD
-        if not os.path.exists(raw_md_path):
-            logger.info(f"[Step 1] Extracting Raw Text for {basename}...")
-            self.run_command([sys.executable, SCRIPT_PDF_TO_RAW, pdf_path, "--out_dir", PDF_RAW_DIR])
-        
-        if not os.path.exists(raw_md_path):
-            logger.error(f"Failed to generate raw MD for {basename}")
+
+        if use_paddleocr:
+            # PaddleOCR path
+            paddleocr_md_path = os.path.join(PADDLEOCR_DIR, f"{filename_no_ext}_paddleocr.md")
+
+            # PDF -> PaddleOCR MD
+            if not os.path.exists(paddleocr_md_path):
+                logger.info(f"[Extraction] Extracting text (PaddleOCR) for {basename}...")
+                os.makedirs(PADDLEOCR_DIR, exist_ok=True)
+                self.run_command([sys.executable, SCRIPT_PDF_TO_MD, pdf_path, "--out_dir", PADDLEOCR_DIR])
+
+            if os.path.exists(paddleocr_md_path):
+                logger.info(f"[Extraction] Complete: {paddleocr_md_path}")
+                return paddleocr_md_path
+
+            logger.warning(f"PaddleOCR failed for {basename}, trying legacy extraction...")
+            return self.ensure_extracted_md(pdf_path, use_paddleocr=False)
+
+        else:
+            # Legacy path
+            raw_md_path = os.path.join(PDF_RAW_DIR, f"{filename_no_ext}_raw.md")
+
+            # PDF -> Raw MD
+            if not os.path.exists(raw_md_path):
+                logger.info(f"[Extraction] Extracting text (legacy) for {basename}...")
+                os.makedirs(PDF_RAW_DIR, exist_ok=True)
+                self.run_command([sys.executable, SCRIPT_PDF_TO_RAW, pdf_path, "--out_dir", PDF_RAW_DIR])
+
+            if os.path.exists(raw_md_path):
+                logger.info(f"[Extraction] Complete: {raw_md_path}")
+                return raw_md_path
+
+            logger.error(f"Failed to extract MD for {basename}")
             return None
 
-        # 2. Raw MD -> Segmented MD
-        if not os.path.exists(seg_md_path):
-            logger.info(f"[Step 2] Segmenting Text for {basename}...")
-            self.run_command([sys.executable, SCRIPT_RAW_TO_SEG, raw_md_path, "--out_dir", PDF_SEG_DIR])
-            
-        if not os.path.exists(seg_md_path):
-            logger.error(f"Failed to generate segmented MD for {basename}")
-            return None
-            
-        return seg_md_path
+    # Deprecated alias for backward compatibility
+    def ensure_segmented_md(self, pdf_path, use_paddleocr=True):
+        """Deprecated: use ensure_extracted_md() instead."""
+        return self.ensure_extracted_md(pdf_path, use_paddleocr=use_paddleocr)

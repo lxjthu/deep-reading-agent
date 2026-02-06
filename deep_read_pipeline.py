@@ -37,25 +37,27 @@ def clean_content(text):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Deep Reading Pipeline")
-    parser.add_argument("segmented_md_path", help="Path to the segmented markdown file")
+    parser.add_argument("md_path", help="Path to the markdown file (extraction output or segmented)")
     parser.add_argument("--out_dir", default="deep_reading_results", help="Output directory for results")
     args = parser.parse_args()
 
-    if not os.path.exists(args.segmented_md_path):
-        logger.error(f"File not found: {args.segmented_md_path}")
+    if not os.path.exists(args.md_path):
+        logger.error(f"File not found: {args.md_path}")
         return
 
-    logger.info(f"Loading segmented MD: {args.segmented_md_path}")
-    sections = common.load_segmented_md(args.segmented_md_path)
-    
+    logger.info(f"Loading MD: {args.md_path}")
+    sections = common.load_md_sections(args.md_path)
+
     if not sections:
         logger.error("No sections found in MD file.")
         return
 
     # Create Per-Paper Output Directory
-    paper_basename = os.path.splitext(os.path.basename(args.segmented_md_path))[0]
-    if paper_basename.endswith("_segmented"):
-        paper_basename = paper_basename[:-10]
+    paper_basename = os.path.splitext(os.path.basename(args.md_path))[0]
+    for suffix in ("_segmented", "_paddleocr", "_raw"):
+        if paper_basename.endswith(suffix):
+            paper_basename = paper_basename[:-len(suffix)]
+            break
         
     paper_output_dir = os.path.join(args.out_dir, paper_basename)
     os.makedirs(paper_output_dir, exist_ok=True)

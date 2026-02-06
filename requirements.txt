@@ -11,3 +11,5 @@ openai
 python-dotenv
 pyyaml
 json_repair
+gradio
+paddlex[ocr]>=3.4.1

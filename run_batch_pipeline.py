@@ -10,13 +10,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Constants
-SCRIPT_PIPELINE_QUANT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deep_read_pipeline.py")
-SCRIPT_PIPELINE_QUAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "social_science_analyzer.py")
-SCRIPT_LINK_QUAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "link_social_science_docs.py")
-SCRIPT_INJECT_DATAVIEW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inject_dataview_summaries.py")
-SCRIPT_INJECT_OBSIDIAN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inject_obsidian_meta.py")
-PDF_SEG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf_segmented_md")
-PDF_RAW_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf_raw_md")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_PIPELINE_QUANT = os.path.join(BASE_DIR, "deep_read_pipeline.py")
+SCRIPT_PIPELINE_QUAL = os.path.join(BASE_DIR, "social_science_analyzer_v2.py")
+SCRIPT_QUAL_METADATA_EXTRACTOR = os.path.join(BASE_DIR, "-m", "qual_metadata_extractor.extractor")
+SCRIPT_LINK_QUAL = os.path.join(BASE_DIR, "link_social_science_docs.py")
+SCRIPT_INJECT_QUAL_META = os.path.join(BASE_DIR, "inject_qual_metadata.py")
+SCRIPT_INJECT_OBSIDIAN = os.path.join(BASE_DIR, "inject_obsidian_meta.py")
+
+# Directories
+PADDLEOCR_DIR = os.path.join(BASE_DIR, "paddleocr_md")
+PDF_RAW_DIR = os.path.join(BASE_DIR, "pdf_raw_md")  # Legacy fallback
 
 def main():
     parser = argparse.ArgumentParser(description="Smart Batch Run Deep Reading Pipeline")
@@ -73,19 +77,19 @@ def main():
         state_mgr.mark_started(pdf_path)
         
         try:
-            # 1. Extract & Segment (using lib)
-            seg_md_path = scholar.ensure_segmented_md(pdf_path)
-            if not seg_md_path:
-                state_mgr.mark_failed(pdf_path, "Segmentation failed")
+            # 1. Extract (no segmentation step)
+            extracted_md_path = scholar.ensure_extracted_md(pdf_path)
+            if not extracted_md_path:
+                state_mgr.mark_failed(pdf_path, "Extraction failed")
                 continue
 
             # 2. Classify
             logger.info("Classifying Paper Type...")
-            with open(seg_md_path, 'r', encoding='utf-8') as f:
+            with open(extracted_md_path, 'r', encoding='utf-8') as f:
                 content_preview = f.read(5000)
             paper_type = scholar.classify_paper(content_preview)
             logger.info(f"Paper Classified as: {paper_type}")
-            
+
             # 3. Dispatch
             if paper_type == "IGNORE":
                 logger.info(f"[SKIP] Ignored non-research paper: {basename}")
@@ -94,29 +98,44 @@ def main():
 
             if paper_type == "QUANT":
                 logger.info(">>> Routing to Deep Reading Expert (Acemoglu Mode) <<<")
-                
-                # Run Deep Reading Pipeline
-                scholar.run_command([sys.executable, SCRIPT_PIPELINE_QUANT, seg_md_path])
-                
+
+                # Run Deep Reading Pipeline (pass extraction MD directly)
+                scholar.run_command([sys.executable, SCRIPT_PIPELINE_QUANT, extracted_md_path])
+
                 # Post-processing: Metadata Injection
                 paper_output_dir = os.path.join(deep_reading_results_dir, basename)
-                raw_md_path = os.path.join(PDF_RAW_DIR, f"{basename}_raw.md")
-                
-                logger.info(">>> Injecting Dataview Summaries <<<")
-                scholar.run_command([sys.executable, SCRIPT_INJECT_DATAVIEW, paper_output_dir])
-                
-                logger.info(">>> Injecting Obsidian Metadata & Links <<<")
-                scholar.run_command([sys.executable, SCRIPT_INJECT_OBSIDIAN, raw_md_path, paper_output_dir, "--raw_md", raw_md_path])
-                
+
+                logger.info(">>> Injecting Obsidian Metadata & Links (with PDF Vision) <<<")
+                # 直接传递 PDF 路径，避免文件名匹配问题
+                if os.getenv("QWEN_API_KEY"):
+                    scholar.run_command([sys.executable, SCRIPT_INJECT_OBSIDIAN, extracted_md_path, paper_output_dir, "--use_pdf_vision", "--pdf_path", pdf_path])
+                else:
+                    scholar.run_command([sys.executable, SCRIPT_INJECT_OBSIDIAN, extracted_md_path, paper_output_dir])
+
                 state_mgr.mark_completed(pdf_path, paper_output_dir, "QUANT")
-                
+
             elif paper_type == "QUAL":
-                logger.info(">>> Routing to Social Science Scholar (4-Layer Model) <<<")
-                scholar.run_command([sys.executable, SCRIPT_PIPELINE_QUAL, PDF_SEG_DIR, "--filter", basename])
-                # Run linker
-                scholar.run_command([sys.executable, SCRIPT_LINK_QUAL, "social_science_results_v2"])
+                logger.info(">>> Routing to Social Science Scholar V2 (4-Layer Model) <<<")
+
+                # Run QUAL V2 Analysis (pass extraction directory)
+                extraction_dir = os.path.dirname(extracted_md_path)
+                scholar.run_command([sys.executable, SCRIPT_PIPELINE_QUAL, extraction_dir, "--filter", basename])
                 
+                # Step 2: Extract and Inject Metadata
                 paper_output_dir = os.path.join(qual_results_dir, basename)
+                pdf_dir_for_meta = os.path.dirname(pdf_path)
+                
+                logger.info(">>> Extracting and Injecting QUAL Metadata <<<")
+                # 直接传递 PDF 路径，避免文件名匹配问题
+                scholar.run_command([
+                    sys.executable,
+                    "-m",
+                    "qual_metadata_extractor.extractor",
+                    paper_output_dir,
+                    pdf_dir_for_meta,
+                    "--pdf_path", pdf_path,
+                ])
+
                 state_mgr.mark_completed(pdf_path, paper_output_dir, "QUAL")
                 
         except Exception as e:

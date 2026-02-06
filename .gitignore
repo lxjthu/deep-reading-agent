@@ -16,3 +16,5 @@ references/
 .DS_Store
 Thumbs.db
 processed_papers.json
+_gui_uploads/
+paddleocr_md/
