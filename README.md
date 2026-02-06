@@ -4,86 +4,76 @@
 
 ## 核心工作流 (Pipeline)
 
-整个系统由五个核心步骤（Skills）串联而成：
+整个系统由四个核心步骤串联而成（无需手动分段，提取后直接分析）：
 
 ```mermaid
 graph TD
-    A[原始 PDF] -->|Step 1: 格式转换| B(逐页 Raw Markdown)
-    B -->|Step 2: 批量分析| F(Excel 汇总表)
-    B -->|Step 3: 结构化切分| C(分段 Segmented Markdown)
-    C -->|Step 4: 深度精读| D(分步深度报告 Step Reports)
-    D -->|Step 5: 知识图谱化| E(Obsidian Ready 知识库)
-    C -->|可选: 参考文献抽取| R(References Excel)
-    R -->|可选: 引用追踪| T(Citation Trace MD/Excel)
+    A[原始 PDF] -->|Step 1: 智能提取| B(Extraction Markdown)
+    B -->|Step 2: AI 分类| C{QUANT/QUAL/IGNORE}
+    C -->|QUANT| D[7 步深度精读]
+    C -->|QUAL| E[4 层金字塔分析]
+    C -->|IGNORE| F[跳过]
+    D -->|Step 3: 元数据注入| G(Obsidian Ready 知识库)
+    E -->|Step 3: 元数据注入| G
 
     style A fill:#f9f,stroke:#333,stroke-width:2px
-    style F fill:#ff9,stroke:#333,stroke-width:2px
-    style E fill:#9f9,stroke:#333,stroke-width:2px
+    style G fill:#9f9,stroke:#333,stroke-width:2px
 ```
 
-### 1. 格式转换 (PDF to Raw Markdown)
-- **目标**: 将 PDF 转换为大模型可读的纯文本，同时保留页码信息以便定位。
-- **工具**: `anthropic-pdf-extract` (基于 `pdfplumber`/`pypdf`)
-- **输出**: `*_raw.md`
+**图形界面**：推荐使用 GUI，详见 [GUI 使用手册](README_GUI.md)。双击 `start.bat` 即可一键启动。
 
-### 2. 批量分析与制表 (Batch Analysis)
-- **目标**: 快速扫描文件夹，提取核心信息（主题、变量、结论、Stata代码）生成 Excel 对比表。
-- **工具**: `academic-pdf-analyzer` (LLM-Enhanced)
-- **输出**: `analysis_results.xlsx` 及 Markdown 简报。
+### 1. 智能提取 (PDF to Extraction Markdown)
+- **目标**: 将 PDF 转换为结构化 Markdown，保留表格、公式、版面结构。
+- **工具**: `paddleocr_pipeline.py`（推荐，3层回退：远程API → 本地GPU → pdfplumber）
+- **输出**: `paddleocr_md/{filename}_paddleocr.md`
 
-### 3. 结构化切分 (Structure Segmentation)
-- **目标**: 还原论文逻辑结构（Introduction, Data, Model 等）。
-- **工具**: `deepseek-segment` (推荐) / `kimi-pdf-raw-segmenter`
-- **模式选择**:
-  - **边界检测模式**（默认，推荐）: LLM 返回边界 → 本地切片，自动骨架优化，稳定快速
-  - **直接分片模式** (`--direct`): LLM 直接返回完整章节，适合小文件（<50页）
-- **输出**: `*_segmented.md`
+> 💡 无需手动分段，提取后的 Markdown 直接传入分析器。`common.load_md_sections()` 会自动解析 `#` 和 `##` 标题层级。
 
-> 💡 **使用建议**: 默认模式已经过验证，准确率 95%+，适合大多数场景。仅在处理小文件或需要最高精度时使用 `--direct` 模式。
-
-### 4. 深度精读 (Deep Reading & Analysis)
+### 2. 深度精读 (Deep Reading & Analysis)
 - **目标**: 像 Daron Acemoglu 级别的审稿人一样，对论文进行批判性分析。
-- **工具**: `deep-reading-expert`
-- **逻辑**: 分步处理（全景扫描 -> 理论 -> 数据 -> 变量 -> 识别 -> 结果 -> 批判）。
-- **输出**: `Final_Deep_Reading_Report.md` 及各分步报告。
+- **工具**: `deep_read_pipeline.py`
+- **逻辑**: 分步处理（全景扫描 → 理论 → 数据 → 变量 → 识别 → 结果 → 批判）。
+- **输出**: `deep_reading_results/{paper_name}/Final_Deep_Reading_Report.md` 及各分步报告。
 
-### 5. 知识图谱化 (Obsidian Integration)
+### 3. 知识图谱化 (Obsidian Integration)
 - **目标**: 无缝接入 Obsidian，实现元数据检索与双向链接。
-- **工具**: `obsidian-metadata-injector` & `obsidian-dataview-summarizer`
+- **工具**: `inject_obsidian_meta.py` & `inject_dataview_summaries.py`
+- **PDF 视觉提取**: 配置 `QWEN_API_KEY` 后，自动从 PDF 前 3 页上半部分截图中提取标题、作者、期刊、年份（页眉信息）。
 - **输出**: 包含 YAML 头（含内容摘要）和导航链接的 Markdown 文件群。
 
-### 6. 社科文献深度阅读 (Social Science Scholar)
-- **目标**: 针对管理学/社会学文献，采用“四层金字塔”模型（背景-理论-逻辑-价值）进行深度情报提取。
-- **工具**: `social_science_analyzer.py`
-- **特点**: 4+1+1 输出结构（4分层MD + 1全景MD + 1汇总Excel），强制中文输出，支持文档间双向跳转。
+### 4. 社科文献深度阅读 (Social Science Scholar)
+- **目标**: 针对管理学/社会学文献，采用"四层金字塔"模型（背景-理论-逻辑-价值）进行深度情报提取。
+- **工具**: `social_science_analyzer_v2.py`
+- **特点**: 4+1 输出结构（4分层MD + 1全景MD），强制中文输出，支持文档间双向跳转。
 
-### 7. 智能科研助理 (Smart Scholar) - **New!**
+### 5. 智能科研助理 (Smart Scholar)
 - **目标**: 自动识别论文类型，智能路由至最佳分析引擎。
-- **入口**: `smart_scholar.py` / `smart_scholar_lib.py`
-- **逻辑**: 
-  - **定量 (Quant)** -> 路由至 Deep Reading Expert (Acemoglu Mode)。
-  - **定性 (Qual)** -> 路由至 Social Science Scholar (4-Layer Model)。包括文献综述 (Reviews)、理论文章等。
-  - **忽略 (Ignore)** -> 自动跳过非研究性文档（如卷首语、书评、目录等）。
+- **入口**: `run_batch_pipeline.py` / `smart_scholar_lib.py`
+- **逻辑**:
+  - **定量 (Quant)** → 路由至 Deep Reading Expert (Acemoglu Mode)。
+  - **定性 (Qual)** → 路由至 Social Science Scholar (4-Layer Model)。包括文献综述 (Reviews)、理论文章等。
+  - **忽略 (Ignore)** → 自动跳过非研究性文档（如卷首语、书评、目录等）。
 - **默认策略**: 当分类不确定或失败时，默认回退到 **QUAL** 模式（对综述和理论文章更友好）。
 
-### 8. 状态管理与去重 (State Manager) - **New!**
+### 6. 状态管理与去重 (State Manager)
 - **目标**: 提供基于内容哈希的持久化去重能力，解决文件名变更或移动导致的重复处理问题。
-- **机制**: 
+- **机制**:
   - **MD5 内容哈希**: 无论文件名如何变化，只要内容不变，系统就能识别。
   - **持久化账本**: 状态记录在 `processed_papers.json` 中。
   - **递归搜索**: `run_batch_pipeline.py` 支持递归扫描子目录。
 
-### 9. 智能文献筛选 (Smart Literature Filter) - **New!**
+### 7. 智能文献筛选 (Smart Literature Filter)
 - **目标**: 在精读之前，从海量文献列表（WoS/CNKI）中利用 AI 智能筛选出高价值论文。
-- **入口**: `smart_literature_filter.py`
-- **支持格式**: 
+- **入口**: GUI Tab 1「论文筛选」或命令行 `smart_literature_filter.py`
+- **支持格式**:
   - **Web of Science (WoS)**: `savedrecs.txt`
   - **CNKI (知网)**: 导出的 Refworks/NoteFirst 格式文本
 - **AI 评估模式**:
   - **Explorer**: 入门模式，寻找开创性（Seminal）经典文献。
   - **Reviewer**: 综述模式，寻找具有理论贡献和综述价值的文献。
   - **Empiricist**: 实证模式，严格筛选因果识别严谨的实证研究（Acemoglu 风格）。
-- **自适应输出**: 
+- **提示词编辑**: GUI 支持查看和编辑各模式的评估提示词（保存到 `prompts/literature_filter/`）。
+- **自适应输出**:
   - **英文文献**: 自动翻译标题并生成中文详细摘要。
   - **中文文献**: 自动提炼标题关键词并生成 <20 字的一句话极简摘要。
 
@@ -99,43 +89,52 @@ graph TD
 
 ## 快速开始
 
-详细的使用指南和命令说明，请参阅 **[工作流手册 (Workflow Guide)](README_WORKFLOW.md)**。
+**推荐使用图形界面**，详见 [GUI 使用手册](README_GUI.md)。双击 `start.bat` 即可启动。
 
 ### 核心命令速查
 
 ```powershell
-# 1. 批量分析制表
-.\run_analyzer.ps1 -InputPath "path/to/pdfs" -Output "results.xlsx"
+# 1. 启动图形界面（推荐）
+.\start.bat
+# 或手动启动
+.\venv\Scripts\Activate.ps1
+python app.py
 
-# 2. 单篇全流程精读
-python run_full_pipeline.py "paper.pdf"
+# 2. 单篇全流程精读（命令行）
+python run_full_pipeline.py "paper.pdf" --use-paddleocr
 
-# 3. 批量全流程精读 (跳过已读)
-.\run_batch_pipeline.ps1 "path/to/pdfs"
+# 3. 批量全流程精读（智能分类 + 跳过已读）
+python run_batch_pipeline.py "path/to/pdfs"
 
-# 4. 结构化分段（推荐使用默认边界检测模式）
-python deepseek_segment_raw_md.py "pdf_raw_md/paper_raw.md"
-# 或使用直接分片模式（小文件）
-python deepseek_segment_raw_md.py "pdf_raw_md/paper_raw.md" --direct
+# 4. 智能文献筛选（从 WoS/CNKI 导出筛选高价值论文）
+python smart_literature_filter.py "savedrecs.txt" --ai_mode reviewer --topic "研究主题" --output "screened.xlsx"
 
-# 5. (可选) 抽取参考文献（基于 segmented md）
-.\run_reference_extractor.ps1 "pdf_segmented_md\paper_segmented.md"
-
-# 6. (可选) 引用追踪：从 references.xlsx 反向定位正文引用位置
-.\run_citation_tracer.ps1 "pdf_segmented_md\paper_segmented.md" "references\paper_references.xlsx"
+# 5. 单独提取 PDF（不分析）
+python paddleocr_pipeline.py "paper.pdf" --out_dir "paddleocr_md"
 ```
 
 ## 目录结构
 
 ```
 .
-├── .trae/skills/               # Skill 定义文档
-├── pdf_raw_md/                 # Step 1 产物
-├── pdf_segmented_md/           # Step 3 产物
-├── deep_reading_results/       # Step 4 & 5 产物 (最终报告)
+├── app.py                      # Gradio 图形界面入口
+├── start.bat                   # Windows 一键启动脚本
+├── paddleocr_pipeline.py       # PDF → Markdown 提取（3层回退）
+├── deep_read_pipeline.py       # QUANT 7步深度精读
+├── social_science_analyzer_v2.py  # QUAL 4层金字塔分析
+├── smart_scholar_lib.py        # 论文分类 + 提取调度
+├── run_batch_pipeline.py       # 批量处理主控脚本
+├── run_full_pipeline.py        # 单文件全流程脚本
+├── smart_literature_filter.py  # WoS/CNKI 文献筛选
+├── inject_obsidian_meta.py     # Obsidian 元数据注入
 ├── deep_reading_steps/         # 精读子任务 Python 脚本
-├── references/                 # (可选) 参考文献抽取/引用追踪产物
-├── *.py / *.ps1                # 各步骤主控脚本
-├── README_WORKFLOW.md          # 详细使用手册
+├── qual_metadata_extractor/    # QUAL 元数据提取模块
+├── prompts/                    # 提示词配置目录
+│   └── literature_filter/      # 文献筛选各模式提示词
+├── paddleocr_md/               # 提取输出目录 (gitignored)
+├── deep_reading_results/       # QUANT 分析结果 (gitignored)
+├── social_science_results_v2/  # QUAL 分析结果 (gitignored)
+├── processed_papers.json       # 批量处理状态账本 (gitignored)
+├── README_GUI.md               # GUI 使用手册
 └── requirements.txt
 ```

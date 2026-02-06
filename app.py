@@ -200,7 +200,7 @@ def run_extraction(
 
     pdf_path = _stable_copy(pdf_file)
     if not pdf_path:
-        yield "No PDF file provided.", "", "{}", None
+        yield "未提供 PDF 文件", "", "{}", None
         return
 
     out_dir = out_dir.strip() or "paddleocr_md"
@@ -263,7 +263,7 @@ def run_extraction(
     # Final yield with results
     log_text = "\n".join(log_lines)
     if "error" in result:
-        yield log_text, f"Extraction failed: {result['error']}", "{}", None
+        yield log_text, f"提取失败: {result['error']}", "{}", None
         return
 
     md_path = result.get("md_path", "")
@@ -275,7 +275,7 @@ def run_extraction(
         with open(md_path, "r", encoding="utf-8") as f:
             preview = f.read(10000)
         if len(preview) >= 10000:
-            preview += "\n\n... (truncated) ..."
+            preview += "\n\n...（已截断）..."
 
     import json
     meta_str = json.dumps(metadata, indent=2, ensure_ascii=False, default=str)
@@ -296,7 +296,7 @@ def run_full_pipeline(pdf_file, extraction_method):
 
     pdf_path = _stable_copy(pdf_file)
     if not pdf_path:
-        yield "Error", "No PDF file provided.", "", None
+        yield "错误", "未提供 PDF 文件", "", None
         return
 
     basename = os.path.splitext(os.path.basename(pdf_path))[0]
@@ -305,7 +305,7 @@ def run_full_pipeline(pdf_file, extraction_method):
         try:
             with OutputCapture(log_q):
                 # ---- Stage 1: Extraction ----
-                log_q.put(f"[Stage 1/5] Extracting PDF: {basename}")
+                log_q.put(f"[阶段 1/5] 提取 PDF: {basename}")
                 _check_cancel()
 
                 from paddleocr_pipeline import extract_with_fallback, extract_pdf_legacy
@@ -323,10 +323,10 @@ def run_full_pipeline(pdf_file, extraction_method):
                     md_path, metadata = extract_with_fallback(pdf_path, out_dir=paddleocr_md_dir)
 
                 result["source_md"] = md_path
-                log_q.put(f"Extraction complete: {md_path}")
+                log_q.put(f"提取完成: {md_path}")
 
                 # ---- Stage 2: Deep Reading (7 steps) ----
-                log_q.put(f"[Stage 2/5] Running Deep Reading (7-step analysis)...")
+                log_q.put(f"[阶段 2/5] 深度阅读（7步分析）...")
                 _check_cancel()
 
                 from deep_reading_steps import (
@@ -353,34 +353,34 @@ def run_full_pipeline(pdf_file, extraction_method):
                 index_path = os.path.join(paper_output_dir, "semantic_index.json")
                 if not os.path.exists(index_path):
                     full_text = "\n\n".join(sections.values())
-                    log_q.put("Generating semantic index...")
+                    log_q.put("正在生成语义索引...")
                     generate_semantic_index(full_text, paper_output_dir)
 
                 section_routing = common.route_sections_to_steps(sections)
                 common.save_routing_result(section_routing, sections, paper_output_dir)
 
                 step_modules = [
-                    (step_1_overview, 1, "Overview"),
-                    (step_2_theory, 2, "Theory"),
-                    (step_3_data, 3, "Data"),
-                    (step_4_vars, 4, "Variables"),
-                    (step_5_identification, 5, "Identification"),
-                    (step_6_results, 6, "Results"),
-                    (step_7_critique, 7, "Critique"),
+                    (step_1_overview, 1, "研究概览"),
+                    (step_2_theory, 2, "理论框架"),
+                    (step_3_data, 3, "数据与样本"),
+                    (step_4_vars, 4, "变量定义"),
+                    (step_5_identification, 5, "识别策略"),
+                    (step_6_results, 6, "实证结果"),
+                    (step_7_critique, 7, "批判性评价"),
                 ]
 
                 for mod, sid, name in step_modules:
                     _check_cancel()
-                    log_q.put(f"  Step {sid}/7: {name}...")
+                    log_q.put(f"  步骤 {sid}/7: {name}...")
                     assigned = section_routing.get(sid, [])
                     mod.run(sections, assigned, paper_output_dir, step_id=sid)
 
                 # Synthesize final report
-                log_q.put("Synthesizing Final Report...")
+                log_q.put("正在合成最终报告...")
                 import re as _re
                 final_report_path = os.path.join(paper_output_dir, "Final_Deep_Reading_Report.md")
                 with open(final_report_path, "w", encoding="utf-8") as f:
-                    f.write(f"# Deep Reading Report: {paper_basename}\n\n")
+                    f.write(f"# 深度阅读报告: {paper_basename}\n\n")
                     step_names = [
                         "1_Overview", "2_Theory", "3_Data", "4_Variables",
                         "5_Identification", "6_Results", "7_Critique",
@@ -398,10 +398,10 @@ def run_full_pipeline(pdf_file, extraction_method):
                             f.write(f"## {sn.replace('_', ' ')}\n\n{content.strip()}\n\n")
 
                 result["final_report"] = final_report_path
-                log_q.put("Deep Reading complete.")
+                log_q.put("深度阅读完成")
 
                 # ---- Stage 3: Supplemental Check ----
-                log_q.put(f"[Stage 3/5] Supplemental reading check...")
+                log_q.put(f"[阶段 3/5] 补充检查...")
                 _check_cancel()
                 try:
                     env = os.environ.copy()
@@ -412,14 +412,14 @@ def run_full_pipeline(pdf_file, extraction_method):
                         check=True, env=env, cwd=BASE_DIR,
                         capture_output=True, text=True,
                     )
-                    log_q.put("Supplemental check complete.")
+                    log_q.put("补充检查完成")
                 except subprocess.CalledProcessError as e:
-                    log_q.put(f"Supplemental check warning: {e.stderr or e}")
+                    log_q.put(f"补充检查警告: {e.stderr or e}")
                 except FileNotFoundError:
-                    log_q.put("Supplemental reading script not found, skipping.")
+                    log_q.put("未找到补充阅读脚本，跳过")
 
                 # ---- Stage 4: Dataview Summaries ----
-                log_q.put(f"[Stage 4/5] Injecting Dataview summaries...")
+                log_q.put(f"[阶段 4/5] 注入 Dataview 摘要...")
                 _check_cancel()
                 try:
                     subprocess.run(
@@ -428,14 +428,14 @@ def run_full_pipeline(pdf_file, extraction_method):
                         check=True, cwd=BASE_DIR,
                         capture_output=True, text=True,
                     )
-                    log_q.put("Dataview summaries injected.")
+                    log_q.put("Dataview 摘要注入完成")
                 except subprocess.CalledProcessError as e:
-                    log_q.put(f"Dataview summaries warning: {e.stderr or e}")
+                    log_q.put(f"Dataview 摘要警告: {e.stderr or e}")
                 except FileNotFoundError:
-                    log_q.put("inject_dataview_summaries.py not found, skipping.")
+                    log_q.put("未找到 inject_dataview_summaries.py，跳过")
 
                 # ---- Stage 5: Obsidian Metadata ----
-                log_q.put(f"[Stage 5/5] Injecting Obsidian metadata & links...")
+                log_q.put(f"[阶段 5/5] 注入 Obsidian 元数据...")
                 _check_cancel()
                 try:
                     # Build command with PDF vision extraction if Qwen API is configured
@@ -445,26 +445,26 @@ def run_full_pipeline(pdf_file, extraction_method):
                     ]
                     if os.getenv("QWEN_API_KEY"):
                         meta_cmd.extend(["--use_pdf_vision", "--pdf_path", pdf_path])
-                        log_q.put("  PDF vision extraction enabled (Qwen API configured)")
+                        log_q.put("  已启用 PDF 视觉提取（检测到 Qwen API）")
 
                     subprocess.run(
                         meta_cmd,
                         check=True, cwd=BASE_DIR,
                         capture_output=True, text=True,
                     )
-                    log_q.put("Obsidian metadata injected.")
+                    log_q.put("Obsidian 元数据注入完成")
                 except subprocess.CalledProcessError as e:
-                    log_q.put(f"Metadata injection warning: {e.stderr or e}")
+                    log_q.put(f"元数据注入警告: {e.stderr or e}")
                 except FileNotFoundError:
-                    log_q.put("inject_obsidian_meta.py not found, skipping.")
+                    log_q.put("未找到 inject_obsidian_meta.py，跳过")
 
-                log_q.put("All 5 stages complete!")
+                log_q.put("全部 5 个阶段完成！")
 
         except InterruptedError:
-            log_q.put("Pipeline cancelled by user.")
+            log_q.put("用户取消了流水线")
             result["cancelled"] = True
         except Exception as e:
-            log_q.put(f"ERROR: {e}")
+            log_q.put(f"错误: {e}")
             result["error"] = str(e)
         finally:
             log_q.put("__DONE__")
@@ -478,7 +478,7 @@ def run_full_pipeline(pdf_file, extraction_method):
         # Determine current stage from last stage line
         stage = ""
         for line in reversed(log_lines):
-            if line.startswith("[Stage"):
+            if line.startswith("[阶段"):
                 stage = line
                 break
         yield stage, log_text, "", None
@@ -488,14 +488,14 @@ def run_full_pipeline(pdf_file, extraction_method):
 
     # Final yield
     log_text = "\n".join(log_lines)
-    stage = "Complete" if "error" not in result and "cancelled" not in result else "Error/Cancelled"
+    stage = "完成" if "error" not in result and "cancelled" not in result else "错误/已取消"
     preview = ""
     final_report = result.get("final_report", "")
     if final_report and os.path.exists(final_report):
         with open(final_report, "r", encoding="utf-8") as f:
             preview = f.read(15000)
         if len(preview) >= 15000:
-            preview += "\n\n... (truncated) ..."
+            preview += "\n\n...（已截断）..."
 
     output_dir = result.get("output_dir", "")
     yield stage, log_text, preview, output_dir if output_dir and os.path.isdir(output_dir) else None
@@ -509,15 +509,15 @@ def validate_folder(folder_path):
     """Validate a folder path and return status info."""
     folder_path = folder_path.strip()
     if not folder_path:
-        return "Please enter a folder path."
+        return "请输入文件夹路径"
     if not os.path.isdir(folder_path):
-        return f"Directory not found: {folder_path}"
+        return f"目录不存在: {folder_path}"
     pdf_count = 0
     for root, _, files in os.walk(folder_path):
         for f in files:
             if f.lower().endswith(".pdf"):
                 pdf_count += 1
-    return f"Found {pdf_count} PDF file(s) in {folder_path}"
+    return f"找到 {pdf_count} 个 PDF 文件"
 
 
 def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程API)"):
@@ -531,7 +531,7 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
     folder_path = folder_path.strip()
     if not folder_path or not os.path.isdir(folder_path):
         import pandas as pd
-        yield pd.DataFrame(columns=["File", "Type", "Status", "Elapsed"]), "Invalid folder path.", ""
+        yield pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"]), "无效的文件夹路径", ""
         return
 
     def worker():
@@ -546,7 +546,7 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
                 # Configure extraction method for SmartScholar
                 if extraction_method == "PaddleOCR (本地GPU)":
                     os.environ["PADDLEOCR_FORCE_LOCAL"] = "1"
-                    log_q.put("Using local PaddleOCR (GPU) for extraction")
+                    log_q.put("使用本地 PaddleOCR (GPU) 进行提取")
                 else:
                     os.environ.pop("PADDLEOCR_FORCE_LOCAL", None)
 
@@ -559,11 +559,11 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
                 pdf_files.sort()
 
                 if not pdf_files:
-                    log_q.put("No PDF files found.")
+                    log_q.put("未找到 PDF 文件")
                     result["done"] = True
                     return
 
-                log_q.put(f"Found {len(pdf_files)} PDF(s)")
+                log_q.put(f"找到 {len(pdf_files)} 个 PDF 文件")
 
                 deep_reading_results_dir = os.path.join(BASE_DIR, "deep_reading_results")
                 qual_results_dir = os.path.join(BASE_DIR, "social_science_results_v2")
@@ -586,8 +586,8 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
 
                         if state_mgr.is_processed(pdf_path, output_check_func=_output_exists):
                             elapsed = f"{time.time() - t0:.1f}s"
-                            progress_data.append([bname, "-", "Skipped (hash)", elapsed])
-                            log_q.put(f"[SKIP] {bname}")
+                            progress_data.append([bname, "-", "已跳过(哈希)", elapsed])
+                            log_q.put(f"[跳过] {bname}")
                             continue
 
                         # fallback filename check
@@ -595,35 +595,35 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
                         qual_report = os.path.join(qual_results_dir, bname, f"{bname}_Full_Report.md")
                         if os.path.exists(quant_report):
                             state_mgr.mark_completed(pdf_path, os.path.dirname(quant_report), "QUANT")
-                            progress_data.append([bname, "QUANT", "Skipped (exists)", f"{time.time() - t0:.1f}s"])
-                            log_q.put(f"[SKIP] {bname} (existing QUANT)")
+                            progress_data.append([bname, "QUANT", "已跳过(已存在)", f"{time.time() - t0:.1f}s"])
+                            log_q.put(f"[跳过] {bname} (已有 QUANT 结果)")
                             continue
                         if os.path.exists(qual_report):
                             state_mgr.mark_completed(pdf_path, os.path.dirname(qual_report), "QUAL")
-                            progress_data.append([bname, "QUAL", "Skipped (exists)", f"{time.time() - t0:.1f}s"])
-                            log_q.put(f"[SKIP] {bname} (existing QUAL)")
+                            progress_data.append([bname, "QUAL", "已跳过(已存在)", f"{time.time() - t0:.1f}s"])
+                            log_q.put(f"[跳过] {bname} (已有 QUAL 结果)")
                             continue
 
-                    log_q.put(f"\n[{i+1}/{len(pdf_files)}] Processing: {bname}")
+                    log_q.put(f"\n[{i+1}/{len(pdf_files)}] 处理中: {bname}")
                     state_mgr.mark_started(pdf_path)
 
                     try:
                         # 1. Extract
                         extracted_md_path = scholar.ensure_extracted_md(pdf_path)
                         if not extracted_md_path:
-                            state_mgr.mark_failed(pdf_path, "Extraction failed")
-                            progress_data.append([bname, "-", "FAILED (extract)", f"{time.time() - t0:.1f}s"])
+                            state_mgr.mark_failed(pdf_path, "提取失败")
+                            progress_data.append([bname, "-", "失败(提取)", f"{time.time() - t0:.1f}s"])
                             continue
 
                         # 2. Classify
                         with open(extracted_md_path, "r", encoding="utf-8") as f:
                             preview = f.read(5000)
                         paper_type = scholar.classify_paper(preview)
-                        log_q.put(f"  Classified as: {paper_type}")
+                        log_q.put(f"  分类结果: {paper_type}")
 
                         if paper_type == "IGNORE":
                             state_mgr.mark_completed(pdf_path, None, "IGNORE")
-                            progress_data.append([bname, "IGNORE", "Skipped", f"{time.time() - t0:.1f}s"])
+                            progress_data.append([bname, "IGNORE", "已跳过", f"{time.time() - t0:.1f}s"])
                             continue
 
                         # 3. Dispatch
@@ -647,7 +647,7 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
                                         meta_cmd.extend(["--use_pdf_vision", "--pdf_path", pdf_path])
                                     scholar.run_command(meta_cmd, cwd=BASE_DIR)
                                 except Exception as me:
-                                    log_q.put(f"  Metadata warning: {me}")
+                                    log_q.put(f"  元数据警告: {me}")
 
                             state_mgr.mark_completed(pdf_path, paper_output_dir, "QUANT")
 
@@ -669,25 +669,25 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
                                 ]
                                 scholar.run_command(qual_meta_cmd, cwd=BASE_DIR)
                             except Exception as me:
-                                log_q.put(f"  QUAL metadata warning: {me}")
+                                log_q.put(f"  QUAL 元数据警告: {me}")
                             state_mgr.mark_completed(pdf_path, paper_output_dir, "QUAL")
 
                         elapsed = f"{time.time() - t0:.1f}s"
-                        progress_data.append([bname, paper_type, "Done", elapsed])
-                        log_q.put(f"  Completed in {elapsed}")
+                        progress_data.append([bname, paper_type, "完成", elapsed])
+                        log_q.put(f"  完成，耗时 {elapsed}")
 
                     except Exception as e:
                         state_mgr.mark_failed(pdf_path, str(e))
-                        progress_data.append([bname, "-", f"FAILED: {e}", f"{time.time() - t0:.1f}s"])
-                        log_q.put(f"  ERROR: {e}")
+                        progress_data.append([bname, "-", f"失败: {e}", f"{time.time() - t0:.1f}s"])
+                        log_q.put(f"  错误: {e}")
 
-                log_q.put("\nBatch processing complete.")
+                log_q.put("\n批量处理完成")
                 result["done"] = True
 
         except InterruptedError:
-            log_q.put("Batch cancelled by user.")
+            log_q.put("用户取消了批量处理")
         except Exception as e:
-            log_q.put(f"BATCH ERROR: {e}")
+            log_q.put(f"批量处理错误: {e}")
         finally:
             log_q.put("__DONE__")
 
@@ -697,8 +697,8 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
     while True:
         done = _drain_queue(log_q, log_lines)
         log_text = "\n".join(log_lines)
-        df = pd.DataFrame(progress_data, columns=["File", "Type", "Status", "Elapsed"]) if progress_data else pd.DataFrame(columns=["File", "Type", "Status", "Elapsed"])
-        total = f"Processed: {len(progress_data)} files"
+        df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"])
+        total = f"已处理: {len(progress_data)} 个文件"
         yield df, log_text, total
         if done:
             break
@@ -706,11 +706,11 @@ def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程A
 
     # Final
     log_text = "\n".join(log_lines)
-    df = pd.DataFrame(progress_data, columns=["File", "Type", "Status", "Elapsed"]) if progress_data else pd.DataFrame(columns=["File", "Type", "Status", "Elapsed"])
-    done_count = sum(1 for r in progress_data if r[2] == "Done")
-    skip_count = sum(1 for r in progress_data if "Skip" in r[2])
-    fail_count = sum(1 for r in progress_data if "FAIL" in r[2])
-    total = f"Total: {len(progress_data)} | Done: {done_count} | Skipped: {skip_count} | Failed: {fail_count}"
+    df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"])
+    done_count = sum(1 for r in progress_data if r[2] == "完成")
+    skip_count = sum(1 for r in progress_data if "跳过" in r[2])
+    fail_count = sum(1 for r in progress_data if "失败" in r[2])
+    total = f"总计: {len(progress_data)} | 完成: {done_count} | 跳过: {skip_count} | 失败: {fail_count}"
     yield df, log_text, total
 
 
@@ -727,7 +727,7 @@ def run_literature_filter(input_file, ai_mode, topic, min_year, keywords, limit_
     file_path = _stable_copy(input_file)
     if not file_path:
         import pandas as pd
-        yield "No file provided.", pd.DataFrame(), None
+        yield "未提供文件", pd.DataFrame(), None
         return
 
     def worker():
@@ -737,19 +737,19 @@ def run_literature_filter(input_file, ai_mode, topic, min_year, keywords, limit_
                 from smart_literature_filter import filter_literature, AIEvaluator, PromptManager
 
                 # 1. Parse
-                log_q.put(f"Parsing file: {os.path.basename(file_path)}")
+                log_q.put(f"正在解析文件: {os.path.basename(file_path)}")
                 parser_instance = get_parser(file_path)
                 if not parser_instance:
-                    log_q.put("ERROR: Unsupported file format. Expected WoS (savedrecs.txt) or CNKI export.")
+                    log_q.put("错误：不支持的文件格式，请上传 WoS (savedrecs.txt) 或 CNKI 导出文件")
                     result["error"] = "Unsupported format"
                     return
 
                 parser_instance.parse()
                 df = parser_instance.to_dataframe()
-                log_q.put(f"Parsed {len(df)} records (source: {df['SourceType'].iloc[0] if len(df) > 0 else 'unknown'})")
+                log_q.put(f"解析完成：{len(df)} 条记录（来源: {df['SourceType'].iloc[0] if len(df) > 0 else '未知'}）")
 
                 if df.empty:
-                    log_q.put("No records found in file.")
+                    log_q.put("文件中未找到记录")
                     result["df"] = df
                     return
 
@@ -760,28 +760,42 @@ def run_literature_filter(input_file, ai_mode, topic, min_year, keywords, limit_
                 if yr or kw_list:
                     before = len(df)
                     df = filter_literature(df, min_year=yr, keywords=kw_list)
-                    log_q.put(f"Filter: {before} -> {len(df)} records")
+                    log_q.put(f"过滤结果: {before} -> {len(df)} 条记录")
 
                 if df.empty:
-                    log_q.put("No papers matched filter criteria.")
+                    log_q.put("没有符合过滤条件的论文")
                     result["df"] = df
                     return
 
                 # 3. AI evaluation
-                if ai_mode and ai_mode != "None":
+                # 映射中文选项到英文模式名
+                ai_mode_map = {
+                    "无": None,
+                    "explorer (广泛探索)": "explorer",
+                    "reviewer (严格评审)": "reviewer",
+                    "empiricist (实证导向)": "empiricist",
+                    # 兼容旧版英文选项
+                    "None": None,
+                    "explorer": "explorer",
+                    "reviewer": "reviewer",
+                    "empiricist": "empiricist",
+                }
+                actual_ai_mode = ai_mode_map.get(ai_mode)
+
+                if actual_ai_mode:
                     if not topic or not topic.strip():
-                        log_q.put("ERROR: Research topic is required for AI evaluation.")
+                        log_q.put("错误：AI 评估模式需要填写研究主题")
                         result["df"] = df
                         return
 
-                    log_q.put(f"Starting AI evaluation (mode: {ai_mode}, topic: {topic})")
+                    log_q.put(f"开始 AI 评估（模式: {actual_ai_mode}, 主题: {topic}）")
                     evaluator = AIEvaluator()
-                    prompt_template = PromptManager.load_prompt(ai_mode)
+                    prompt_template = PromptManager.load_prompt(actual_ai_mode)
 
                     lim = int(limit_num) if limit_num else 0
                     if lim > 0:
                         df_to_eval = df.head(lim).copy()
-                        log_q.put(f"Limiting AI evaluation to {lim} papers")
+                        log_q.put(f"限制 AI 评估数量: {lim} 篇")
                     else:
                         df_to_eval = df.copy()
 
@@ -807,7 +821,7 @@ def run_literature_filter(input_file, ai_mode, topic, min_year, keywords, limit_
                                 ai_results.append({"original_index": idx, "error": str(e)})
                             evaluated += 1
                             if evaluated % 5 == 0 or evaluated == total:
-                                log_q.put(f"  AI evaluated: {evaluated}/{total}")
+                                log_q.put(f"  AI 评估进度: {evaluated}/{total}")
 
                     import pandas as _pd
                     ai_df = _pd.DataFrame(ai_results)
@@ -818,7 +832,7 @@ def run_literature_filter(input_file, ai_mode, topic, min_year, keywords, limit_
                             df["score"] = _pd.to_numeric(df["score"], errors="coerce")
                             df = df.sort_values(by="score", ascending=False)
 
-                    log_q.put(f"AI evaluation complete. {len(ai_results)} papers scored.")
+                    log_q.put(f"AI 评估完成，已评分 {len(ai_results)} 篇论文")
 
                 # 4. Save Excel
                 if "Year_Num" in df.columns:
@@ -826,7 +840,7 @@ def run_literature_filter(input_file, ai_mode, topic, min_year, keywords, limit_
 
                 out_path = os.path.join(UPLOAD_DIR, "literature_filter_result.xlsx")
                 df.to_excel(out_path, index=False)
-                log_q.put(f"Results saved: {out_path} ({len(df)} papers)")
+                log_q.put(f"结果已保存: {out_path}（共 {len(df)} 篇）")
 
                 result["df"] = df
                 result["excel"] = out_path
@@ -1068,65 +1082,115 @@ def run_md_reading(mode, md_file, folder_path, skip_processed):
 # ---------------------------------------------------------------------------
 
 def build_ui():
-    with gr.Blocks(title="Deep Reading Agent") as app:
-        gr.Markdown("# Deep Reading Agent")
-        gr.Markdown(f"**Environment:** {_env_status()}")
+    with gr.Blocks(title="深度阅读助手") as app:
+        gr.Markdown("# 深度阅读助手 Deep Reading Agent")
+        gr.Markdown(f"**环境状态:** {_env_status()}")
 
-        # ===== Tab 1: PDF Extraction =====
-        with gr.Tab("PDF Extraction"):
+        # ===== Tab 1: 论文筛选 =====
+        with gr.Tab("论文筛选"):
             with gr.Row():
                 with gr.Column(scale=1):
-                    ext_pdf = gr.File(label="Upload PDF", file_types=[".pdf"])
-                    ext_out_dir = gr.Textbox(label="Output Directory", value="paddleocr_md")
-                    ext_local_gpu = gr.Checkbox(
-                        label="使用本地 PaddleOCR (GPU)",
-                        value=_LOCAL_POCR,
-                        interactive=_LOCAL_POCR,
-                        info="Requires paddleocr + paddlex" if not _LOCAL_POCR else "PPStructureV3 detected",
+                    lf_file = gr.File(label="上传 WoS/CNKI 导出文件", file_types=[".txt"])
+                    lf_mode = gr.Radio(
+                        label="AI 评估模式",
+                        choices=["无", "explorer (广泛探索)", "reviewer (严格评审)", "empiricist (实证导向)"],
+                        value="无",
                     )
-                    ext_table = gr.Checkbox(label="Table Recognition", value=True)
-                    ext_formula = gr.Checkbox(label="Formula Recognition", value=True)
-                    ext_chart = gr.Checkbox(label="Chart Parsing", value=False)
-                    ext_orient = gr.Checkbox(label="Orientation Correction", value=False)
-                    ext_images = gr.Checkbox(label="Download Images", value=False)
-                    ext_pages = gr.Slider(label="Pages per Batch", minimum=5, maximum=50, step=5, value=10)
-                    ext_no_fb = gr.Checkbox(label="Disable Fallback", value=False)
-                    ext_legacy = gr.Checkbox(label="Force pdfplumber", value=False)
-                    ext_btn = gr.Button("Start Extraction", variant="primary")
+                    lf_topic = gr.Textbox(
+                        label="研究主题（AI 模式必填）",
+                        placeholder="例如：ESG与企业价值",
+                    )
+                    lf_year = gr.Textbox(label="最早年份（可选）", placeholder="例如：2015")
+                    lf_keywords = gr.Textbox(
+                        label="关键词过滤（逗号分隔，可选）",
+                        placeholder="例如：DID, 回归, 面板数据",
+                    )
+                    lf_limit = gr.Slider(
+                        label="AI 评估数量限制（0 = 全部）",
+                        minimum=0, maximum=500, step=10, value=0,
+                    )
+                    lf_btn = gr.Button("开始筛选", variant="primary")
+
+                    # 提示词编辑折叠面板
+                    with gr.Accordion("编辑 AI 评估提示词", open=False):
+                        lf_prompt_mode = gr.Dropdown(
+                            label="选择模式",
+                            choices=["explorer", "reviewer", "empiricist"],
+                            value="explorer",
+                        )
+                        lf_prompt_load = gr.Button("加载提示词", size="sm")
+                        lf_prompt_text = gr.Textbox(
+                            label="提示词内容",
+                            lines=15,
+                            placeholder="点击「加载提示词」查看当前模式的提示词...",
+                        )
+                        lf_prompt_save = gr.Button("保存提示词", variant="secondary")
+                        lf_prompt_status = gr.Textbox(label="状态", interactive=False, lines=1)
 
                 with gr.Column(scale=2):
-                    ext_log = gr.Textbox(label="Extraction Log", lines=12, interactive=False)
-                    ext_preview = gr.Markdown(label="Markdown Preview")
-                    ext_meta = gr.Code(label="Metadata (JSON)", language="json")
-                    ext_dl = gr.File(label="Download Result")
+                    lf_log = gr.Textbox(label="运行日志", lines=10, interactive=False)
+                    lf_df = gr.Dataframe(label="筛选结果", interactive=False)
+                    lf_dl = gr.File(label="下载 Excel")
 
-            ext_btn.click(
-                fn=run_extraction,
-                inputs=[ext_pdf, ext_out_dir, ext_local_gpu, ext_table, ext_formula, ext_chart,
-                        ext_orient, ext_images, ext_pages, ext_no_fb, ext_legacy],
-                outputs=[ext_log, ext_preview, ext_meta, ext_dl],
+            # 提示词加载和保存函数
+            def load_prompt(mode_name):
+                prompt_dir = os.path.join(BASE_DIR, "prompts", "literature_filter")
+                file_path = os.path.join(prompt_dir, f"{mode_name}.md")
+                if os.path.exists(file_path):
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        return f.read(), f"已加载 {mode_name} 模式的提示词"
+                return "", f"未找到提示词文件: {file_path}"
+
+            def save_prompt(mode_name, content):
+                if not content.strip():
+                    return "错误：提示词内容不能为空"
+                prompt_dir = os.path.join(BASE_DIR, "prompts", "literature_filter")
+                os.makedirs(prompt_dir, exist_ok=True)
+                file_path = os.path.join(prompt_dir, f"{mode_name}.md")
+                try:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    return f"已保存 {mode_name} 模式的提示词"
+                except Exception as e:
+                    return f"保存失败: {e}"
+
+            lf_prompt_load.click(
+                fn=load_prompt,
+                inputs=[lf_prompt_mode],
+                outputs=[lf_prompt_text, lf_prompt_status],
+            )
+            lf_prompt_save.click(
+                fn=save_prompt,
+                inputs=[lf_prompt_mode, lf_prompt_text],
+                outputs=[lf_prompt_status],
             )
 
-        # ===== Tab 2: Full Pipeline =====
-        with gr.Tab("Full Pipeline Deep Reading"):
+            lf_btn.click(
+                fn=run_literature_filter,
+                inputs=[lf_file, lf_mode, lf_topic, lf_year, lf_keywords, lf_limit],
+                outputs=[lf_log, lf_df, lf_dl],
+            )
+
+        # ===== Tab 2: 单文件精读 =====
+        with gr.Tab("单文件精读"):
             with gr.Row():
                 with gr.Column(scale=1):
-                    fp_pdf = gr.File(label="Upload PDF", file_types=[".pdf"])
+                    fp_pdf = gr.File(label="上传 PDF 文件", file_types=[".pdf"])
                     _fp_choices = ["PaddleOCR (本地GPU)", "PaddleOCR (远程API)", "Legacy (pdfplumber)"]
                     _fp_default = "PaddleOCR (本地GPU)" if _LOCAL_POCR else "PaddleOCR (远程API)"
                     fp_method = gr.Radio(
-                        label="Extraction Method",
+                        label="提取方式",
                         choices=_fp_choices,
                         value=_fp_default,
                     )
-                    fp_btn = gr.Button("Start Deep Reading", variant="primary")
-                    fp_cancel = gr.Button("Stop", variant="stop")
+                    fp_btn = gr.Button("开始精读", variant="primary")
+                    fp_cancel = gr.Button("停止", variant="stop")
 
                 with gr.Column(scale=2):
-                    fp_stage = gr.Textbox(label="Current Stage", interactive=False)
-                    fp_log = gr.Textbox(label="Pipeline Log", lines=15, interactive=False)
-                    fp_preview = gr.Markdown(label="Final Report Preview")
-                    fp_dl = gr.Textbox(label="Results Directory", interactive=False)
+                    fp_stage = gr.Textbox(label="当前阶段", interactive=False)
+                    fp_log = gr.Textbox(label="运行日志", lines=15, interactive=False)
+                    fp_preview = gr.Markdown(label="最终报告预览")
+                    fp_dl = gr.Textbox(label="结果目录", interactive=False)
 
             fp_btn.click(
                 fn=run_full_pipeline,
@@ -1135,32 +1199,32 @@ def build_ui():
             )
             fp_cancel.click(fn=_request_cancel, outputs=[fp_stage])
 
-        # ===== Tab 3: Batch Processing =====
-        with gr.Tab("Batch Processing"):
+        # ===== Tab 3: 批量精读 =====
+        with gr.Tab("批量精读"):
             with gr.Row():
                 with gr.Column(scale=1):
-                    bp_folder = gr.Textbox(label="PDF Folder Path", placeholder=r"E:\pdf\002")
-                    bp_validate = gr.Button("Validate Path")
-                    bp_status = gr.Textbox(label="Folder Status", interactive=False)
-                    bp_skip = gr.Checkbox(label="Skip Already Processed", value=True)
+                    bp_folder = gr.Textbox(label="PDF 文件夹路径", placeholder=r"E:\pdf\002")
+                    bp_validate = gr.Button("验证路径")
+                    bp_status = gr.Textbox(label="文件夹状态", interactive=False)
+                    bp_skip = gr.Checkbox(label="跳过已处理", value=True)
                     _bp_choices = ["PaddleOCR (本地GPU)", "PaddleOCR (远程API)", "Legacy (pdfplumber)"]
                     _bp_default = "PaddleOCR (本地GPU)" if _LOCAL_POCR else "PaddleOCR (远程API)"
                     bp_method = gr.Radio(
-                        label="Extraction Method",
+                        label="提取方式",
                         choices=_bp_choices,
                         value=_bp_default,
                     )
-                    bp_btn = gr.Button("Start Batch Processing", variant="primary")
-                    bp_cancel = gr.Button("Stop", variant="stop")
+                    bp_btn = gr.Button("开始批量精读", variant="primary")
+                    bp_cancel = gr.Button("停止", variant="stop")
 
                 with gr.Column(scale=2):
                     bp_df = gr.Dataframe(
-                        label="Progress",
-                        headers=["File", "Type", "Status", "Elapsed"],
+                        label="处理进度",
+                        headers=["文件名", "类型", "状态", "耗时"],
                         interactive=False,
                     )
-                    bp_log = gr.Textbox(label="Current Log", lines=10, interactive=False)
-                    bp_total = gr.Textbox(label="Overall Progress", interactive=False)
+                    bp_log = gr.Textbox(label="当前日志", lines=10, interactive=False)
+                    bp_total = gr.Textbox(label="总体进度", interactive=False)
 
             bp_validate.click(fn=validate_folder, inputs=[bp_folder], outputs=[bp_status])
             bp_btn.click(
@@ -1170,43 +1234,42 @@ def build_ui():
             )
             bp_cancel.click(fn=_request_cancel, outputs=[bp_total])
 
-        # ===== Tab 4: Literature Filter =====
-        with gr.Tab("Literature Filter"):
+        # ===== Tab 4: PDF 提取 =====
+        with gr.Tab("PDF 提取"):
             with gr.Row():
                 with gr.Column(scale=1):
-                    lf_file = gr.File(label="Upload WoS/CNKI Export File", file_types=[".txt"])
-                    lf_mode = gr.Radio(
-                        label="AI Evaluation Mode",
-                        choices=["None", "explorer", "reviewer", "empiricist"],
-                        value="None",
+                    ext_pdf = gr.File(label="上传 PDF 文件", file_types=[".pdf"])
+                    ext_out_dir = gr.Textbox(label="输出目录", value="paddleocr_md")
+                    ext_local_gpu = gr.Checkbox(
+                        label="使用本地 PaddleOCR (GPU)",
+                        value=_LOCAL_POCR,
+                        interactive=_LOCAL_POCR,
+                        info="需要 paddleocr + paddlex" if not _LOCAL_POCR else "已检测到 PPStructureV3",
                     )
-                    lf_topic = gr.Textbox(
-                        label="Research Topic (required for AI mode)",
-                        placeholder="e.g. ESG and firm value",
-                    )
-                    lf_year = gr.Textbox(label="Min Year (optional)", placeholder="e.g. 2015")
-                    lf_keywords = gr.Textbox(
-                        label="Keywords Filter (comma-separated, optional)",
-                        placeholder="e.g. DID, regression, panel data",
-                    )
-                    lf_limit = gr.Slider(
-                        label="AI Evaluation Limit (0 = all)",
-                        minimum=0, maximum=500, step=10, value=0,
-                    )
-                    lf_btn = gr.Button("Start Filtering", variant="primary")
+                    ext_table = gr.Checkbox(label="表格识别", value=True)
+                    ext_formula = gr.Checkbox(label="公式识别", value=True)
+                    ext_chart = gr.Checkbox(label="图表解析", value=False)
+                    ext_orient = gr.Checkbox(label="方向矫正", value=False)
+                    ext_images = gr.Checkbox(label="下载图片", value=False)
+                    ext_pages = gr.Slider(label="每批页数", minimum=5, maximum=50, step=5, value=10)
+                    ext_no_fb = gr.Checkbox(label="禁用回退", value=False)
+                    ext_legacy = gr.Checkbox(label="强制使用 pdfplumber", value=False)
+                    ext_btn = gr.Button("开始提取", variant="primary")
 
                 with gr.Column(scale=2):
-                    lf_log = gr.Textbox(label="Log", lines=10, interactive=False)
-                    lf_df = gr.Dataframe(label="Results", interactive=False)
-                    lf_dl = gr.File(label="Download Excel")
+                    ext_log = gr.Textbox(label="提取日志", lines=12, interactive=False)
+                    ext_preview = gr.Markdown(label="Markdown 预览")
+                    ext_meta = gr.Code(label="元数据 (JSON)", language="json")
+                    ext_dl = gr.File(label="下载结果")
 
-            lf_btn.click(
-                fn=run_literature_filter,
-                inputs=[lf_file, lf_mode, lf_topic, lf_year, lf_keywords, lf_limit],
-                outputs=[lf_log, lf_df, lf_dl],
+            ext_btn.click(
+                fn=run_extraction,
+                inputs=[ext_pdf, ext_out_dir, ext_local_gpu, ext_table, ext_formula, ext_chart,
+                        ext_orient, ext_images, ext_pages, ext_no_fb, ext_legacy],
+                outputs=[ext_log, ext_preview, ext_meta, ext_dl],
             )
 
-        # ===== Tab 5: MD Deep Reading =====
+        # ===== Tab 5: MD 文件精读 =====
         with gr.Tab("MD 文件精读"):
             with gr.Row():
                 with gr.Column(scale=1):
@@ -1232,7 +1295,7 @@ def build_ui():
 
                 with gr.Column(scale=2):
                     md_df = gr.Dataframe(
-                        label="进度",
+                        label="处理进度",
                         headers=["文件名", "类型", "状态", "耗时"],
                         interactive=False,
                     )

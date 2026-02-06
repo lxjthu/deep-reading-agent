@@ -19,11 +19,11 @@
   - [方式一：一键启动（推荐）](#方式一一键启动推荐)
   - [方式二：手动启动](#方式二手动启动)
 - [界面功能说明](#界面功能说明)
-  - [Tab 1: PDF 提取](#tab-1-pdf-提取)
-  - [Tab 2: 全流程精读](#tab-2-全流程精读)
-  - [Tab 3: 批量处理](#tab-3-批量处理)
-  - [Tab 4: 智能文献筛选](#tab-4-智能文献筛选)
-  - [Tab 5: MD 文件精读](#tab-5-md-文件精读)
+  - [Tab 1: 论文筛选](#tab-1-论文筛选)
+  - [Tab 2: 单文件精读](#tab-2-单文件精读)
+  - [Tab 3: 批量精读](#tab-3-批量精读)
+  - [Tab 4: PDF提取](#tab-4-pdf提取)
+  - [Tab 5: MD文件精读](#tab-5-md文件精读)
 - [输出目录结构](#输出目录结构)
 - [命令行用法](#命令行用法)
 - [常见问题排查](#常见问题排查)
@@ -175,7 +175,7 @@ PADDLEOCR_REMOTE_TOKEN=your-paddleocr-token
 | 变量名 | 说明 | 使用场景 |
 |--------|------|----------|
 | `DEEPSEEK_BASE_URL` | 自定义 DeepSeek API 地址 | 仅在使用代理或私有部署时需要修改，默认 `https://api.deepseek.com` |
-| `QWEN_API_KEY` | 通义千问视觉 (Qwen VL Plus) 的 API 密钥 | 元数据注入阶段，从 PDF 首页截图中用视觉模型提取论文标题、作者、期刊、年份。不配置则跳过此步骤，使用文本解析方式提取元数据 |
+| `QWEN_API_KEY` | 通义千问视觉 (Qwen VL Plus) 的 API 密钥 | 元数据注入阶段，从 PDF 前 3 页的上半部分截图中用视觉模型提取论文标题、作者、期刊、年份（期刊和年份通常在页眉位置）。不配置则跳过此步骤，使用文本解析方式提取元数据 |
 | `OPENAI_API_KEY` | Kimi (Moonshot) 的 API 密钥 | 仅旧版 Legacy 分析器使用（`kimi_segment_raw_md.py`、`llm_analyzer.py`），GUI 主流程不需要 |
 | `OPENAI_BASE_URL` | Kimi API 地址 | 同上，默认 `https://api.moonshot.cn/v1` |
 | `OPENAI_MODEL` | Kimi 模型名称 | 同上，默认 `moonshot-v1-auto` |
@@ -236,40 +236,67 @@ Environment: DeepSeek API: Configured | PaddleOCR API: Not configured (will use 
 
 ## 界面功能说明
 
-### Tab 1: PDF 提取
+### Tab 1: 论文筛选
 
-**功能**：将单个 PDF 文件提取为结构化 Markdown 文件。
+**功能**：解析 Web of Science (WoS) 或 CNKI 导出的文献列表文件，可选启用 AI 评估对每篇文献与研究主题的相关性打分，输出排序后的 Excel 表格。
+
+**典型工作流**：
+
+```
+WoS/CNKI 检索数百篇 → Tab 1 筛选出高相关文献 → 下载 PDF → Tab 2 或 Tab 3 精读
+```
 
 **左栏（参数）**：
 
 | 控件 | 说明 | 默认值 |
 |------|------|--------|
-| Upload PDF | 上传一个 PDF 文件 | - |
-| Output Directory | 输出目录（相对于项目根目录） | `paddleocr_md` |
-| Table Recognition | 启用表格识别，自动转 Markdown 表格 | 开启 |
-| Formula Recognition | 启用公式识别，自动转 LaTeX | 开启 |
-| Chart Parsing | 启用图表解析（速度较慢） | 关闭 |
-| Orientation Correction | 启用文档方向矫正（针对扫描件） | 关闭 |
-| Download Images | 下载论文中的图片 | 关闭 |
-| Pages per Batch | 每次 API 调用处理的最大页数 | 10 |
-| Disable Fallback | 禁用 pdfplumber 自动回退（PaddleOCR 失败时直接报错） | 关闭 |
-| Force pdfplumber | 跳过 PaddleOCR，强制使用 pdfplumber 提取 | 关闭 |
-| **Start Extraction** | 开始提取 | - |
+| 上传 WoS/CNKI 导出文件 | 上传 WoS 的 `savedrecs.txt` 或 CNKI 导出的文本文件 | - |
+| AI 评估模式 | AI 评估模式：无（不启用）、explorer（广泛探索）、reviewer（严格评审）、empiricist（实证导向） | 无 |
+| 研究主题 | 研究主题，启用 AI 模式时必填 | - |
+| 最早年份 | 仅保留该年份及之后的文献（留空则不过滤） | - |
+| 关键词过滤 | 按标题/摘要关键词过滤，逗号分隔，多个词之间为 OR 关系 | - |
+| AI 评估数量限制 | 限制 AI 评估的文献数量，0 表示全部评估 | 0 |
+| **开始筛选** | 开始筛选 | - |
+
+**提示词编辑功能**：
+
+在左栏底部有 **「编辑 AI 评估提示词」** 折叠面板，点击展开后可以：
+
+1. **选择模式**：从下拉菜单选择 `explorer`、`reviewer` 或 `empiricist`
+2. **加载提示词**：点击「加载提示词」按钮，查看该模式当前使用的提示词
+3. **编辑提示词**：直接在文本框中修改提示词内容
+4. **保存提示词**：点击「保存提示词」按钮，保存修改（保存到 `prompts/literature_filter/` 目录）
+
+这允许你根据自己的研究需求定制 AI 评估的标准和侧重点。
 
 **右栏（结果）**：
 
 | 控件 | 说明 |
 |------|------|
-| Extraction Log | 实时滚动的提取日志 |
-| Markdown Preview | 提取结果的 Markdown 预览（前 10000 字符） |
-| Metadata (JSON) | 提取到的元数据（标题、摘要、关键词等） |
-| Download Result | 生成的 `.md` 文件，可直接下载 |
+| 日志 | 实时日志（解析进度、过滤结果、AI 评估进度） |
+| 结果 | 筛选结果表格（标题、作者、期刊、年份、AI 评分等） |
+| 下载 Excel | 完整结果的 `.xlsx` 文件下载 |
+
+**AI 评估模式对比**：
+
+| 模式 | 适用场景 | 评估侧重 |
+|------|----------|----------|
+| `explorer` | 初步探索，不确定方向 | 广泛筛选，关注主题相关性 |
+| `reviewer` | 系统性综述，需要全面覆盖 | 严格评审，关注方法论质量 |
+| `empiricist` | 实证研究，寻找可复制的方法 | 关注数据、模型、识别策略 |
+
+**支持的输入格式**：
+
+| 来源 | 导出方式 | 识别特征 |
+|------|----------|----------|
+| Web of Science | 导出 → 纯文本 | 文件以 `FN Clarivate` 开头 |
+| CNKI (知网) | 导出 → 自定义文本 | 文件包含 `SrcDatabase-` 或 `Title-题名` |
 
 **所需环境变量**：
-- PaddleOCR 模式：`PADDLEOCR_REMOTE_URL` + `PADDLEOCR_REMOTE_TOKEN`
-- pdfplumber 模式：无需任何环境变量
+- 仅解析和关键词过滤：无需任何环境变量
+- AI 评估模式：需要 `DEEPSEEK_API_KEY`
 
-### Tab 2: 全流程精读
+### Tab 2: 单文件精读
 
 **功能**：对单篇论文执行从提取到元数据注入的完整 5 阶段流水线。
 
@@ -301,21 +328,21 @@ Environment: DeepSeek API: Configured | PaddleOCR API: Not configured (will use 
 
 | 控件 | 说明 |
 |------|------|
-| Upload PDF | 上传 PDF 文件 |
-| Extraction Method | 选择 PaddleOCR 或 Legacy (pdfplumber) |
-| **Start Deep Reading** | 开始全流程 |
-| **Stop** | 在当前阶段结束后取消 |
+| 上传 PDF 文件 | 上传 PDF 文件 |
+| 提取方法 | 选择 PaddleOCR 或 Legacy (pdfplumber) |
+| **开始精读** | 开始全流程 |
+| **停止** | 在当前阶段结束后取消 |
 
 **右栏**：
 
 | 控件 | 说明 |
 |------|------|
-| Current Stage | 当前正在执行的阶段 |
-| Pipeline Log | 完整运行日志（实时更新） |
-| Final Report Preview | 最终报告的 Markdown 预览 |
-| Results Directory | 结果目录路径 |
+| 当前阶段 | 当前正在执行的阶段 |
+| 流水线日志 | 完整运行日志（实时更新） |
+| 最终报告预览 | 最终报告的 Markdown 预览 |
+| 结果目录 | 结果目录路径 |
 
-### Tab 3: 批量处理
+### Tab 3: 批量精读
 
 **功能**：对一个文件夹中的所有 PDF 进行自动分类（QUANT/QUAL/IGNORE）和路由分析。
 
@@ -335,73 +362,57 @@ Environment: DeepSeek API: Configured | PaddleOCR API: Not configured (will use 
 
 | 控件 | 说明 |
 |------|------|
-| PDF Folder Path | 包含 PDF 的文件夹路径（支持递归扫描子目录） |
-| **Validate Path** | 验证路径并统计 PDF 数量 |
-| Folder Status | 显示验证结果 |
-| Skip Already Processed | 跳过已处理的文件（基于 MD5 哈希去重） |
-| **Start Batch Processing** | 开始批量处理 |
-| **Stop** | 取消 |
+| PDF 文件夹路径 | 包含 PDF 的文件夹路径（支持递归扫描子目录） |
+| **验证路径** | 验证路径并统计 PDF 数量 |
+| 文件夹状态 | 显示验证结果 |
+| 跳过已处理 | 跳过已处理的文件（基于 MD5 哈希去重） |
+| **开始批量处理** | 开始批量处理 |
+| **停止** | 取消 |
 
 **右栏**：
 
 | 控件 | 说明 |
 |------|------|
-| Progress | 进度表格（文件名 / 类型 / 状态 / 耗时） |
-| Current Log | 当前正在处理的文件的日志 |
-| Overall Progress | 总体统计（完成/跳过/失败数量） |
+| 进度 | 进度表格（文件名 / 类型 / 状态 / 耗时） |
+| 当前日志 | 当前正在处理的文件的日志 |
+| 总体进度 | 总体统计（完成/跳过/失败数量） |
 
 **所需环境变量**：`DEEPSEEK_API_KEY`（必需）、`PADDLEOCR_REMOTE_URL`（推荐）
 
-### Tab 4: 智能文献筛选
+### Tab 4: PDF提取
 
-**功能**：解析 Web of Science (WoS) 或 CNKI 导出的文献列表文件，可选启用 AI 评估对每篇文献与研究主题的相关性打分，输出排序后的 Excel 表格。
-
-**典型工作流**：
-
-```
-WoS/CNKI 检索数百篇 → Tab 4 筛选出高相关文献 → 下载 PDF → Tab 2 或 Tab 3 精读
-```
+**功能**：将单个 PDF 文件提取为结构化 Markdown 文件。
 
 **左栏（参数）**：
 
 | 控件 | 说明 | 默认值 |
 |------|------|--------|
-| Upload WoS/CNKI Export File | 上传 WoS 的 `savedrecs.txt` 或 CNKI 导出的文本文件 | - |
-| AI Evaluation Mode | AI 评估模式：None（不启用）、explorer（广泛探索）、reviewer（严格评审）、empiricist（实证导向） | None |
-| Research Topic | 研究主题，启用 AI 模式时必填 | - |
-| Min Year | 仅保留该年份及之后的文献（留空则不过滤） | - |
-| Keywords Filter | 按标题/摘要关键词过滤，逗号分隔，多个词之间为 OR 关系 | - |
-| AI Evaluation Limit | 限制 AI 评估的文献数量，0 表示全部评估 | 0 |
-| **Start Filtering** | 开始筛选 | - |
+| 上传 PDF 文件 | 上传一个 PDF 文件 | - |
+| 输出目录 | 输出目录（相对于项目根目录） | `paddleocr_md` |
+| 表格识别 | 启用表格识别，自动转 Markdown 表格 | 开启 |
+| 公式识别 | 启用公式识别，自动转 LaTeX | 开启 |
+| 图表解析 | 启用图表解析（速度较慢） | 关闭 |
+| 方向矫正 | 启用文档方向矫正（针对扫描件） | 关闭 |
+| 下载图片 | 下载论文中的图片 | 关闭 |
+| 每批页数 | 每次 API 调用处理的最大页数 | 10 |
+| 禁用回退 | 禁用 pdfplumber 自动回退（PaddleOCR 失败时直接报错） | 关闭 |
+| 强制 pdfplumber | 跳过 PaddleOCR，强制使用 pdfplumber 提取 | 关闭 |
+| **开始提取** | 开始提取 | - |
 
 **右栏（结果）**：
 
 | 控件 | 说明 |
 |------|------|
-| Log | 实时日志（解析进度、过滤结果、AI 评估进度） |
-| Results | 筛选结果表格（标题、作者、期刊、年份、AI 评分等） |
-| Download Excel | 完整结果的 `.xlsx` 文件下载 |
-
-**AI 评估模式对比**：
-
-| 模式 | 适用场景 | 评估侧重 |
-|------|----------|----------|
-| `explorer` | 初步探索，不确定方向 | 广泛筛选，关注主题相关性 |
-| `reviewer` | 系统性综述，需要全面覆盖 | 严格评审，关注方法论质量 |
-| `empiricist` | 实证研究，寻找可复制的方法 | 关注数据、模型、识别策略 |
-
-**支持的输入格式**：
-
-| 来源 | 导出方式 | 识别特征 |
-|------|----------|----------|
-| Web of Science | 导出 → 纯文本 | 文件以 `FN Clarivate` 开头 |
-| CNKI (知网) | 导出 → 自定义文本 | 文件包含 `SrcDatabase-` 或 `Title-题名` |
+| 提取日志 | 实时滚动的提取日志 |
+| Markdown 预览 | 提取结果的 Markdown 预览（前 10000 字符） |
+| 元数据 (JSON) | 提取到的元数据（标题、摘要、关键词等） |
+| 下载结果 | 生成的 `.md` 文件，可直接下载 |
 
 **所需环境变量**：
-- 仅解析和关键词过滤：无需任何环境变量
-- AI 评估模式：需要 `DEEPSEEK_API_KEY`
+- PaddleOCR 模式：`PADDLEOCR_REMOTE_URL` + `PADDLEOCR_REMOTE_TOKEN`
+- pdfplumber 模式：无需任何环境变量
 
-### Tab 5: MD 文件精读
+### Tab 5: MD文件精读
 
 **功能**：跳过 PDF→MD 提取步骤，直接对已有的 Markdown 文件进行精读分析。适用于已经通过 Tab 1 提取好 MD、或从其他渠道获得 MD 文件的场景。
 
