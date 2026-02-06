@@ -67,14 +67,14 @@ def extract_pdf_with_paddleocr(
 
     md_path = result["markdown_path"]
 
-    # Extract metadata using text_only method for richer parsing
-    text_result = extractor.extract_text_only(pdf_path)
+    # Parse metadata from the already-saved markdown file (no extra API call)
+    local_meta = extract_metadata_from_paddleocr_md(md_path)
 
     metadata = {
-        "title": text_result.get("title", ""),
-        "abstract": text_result.get("abstract", ""),
-        "keywords": text_result.get("keywords", []),
-        "sections": text_result.get("sections", []),
+        "title": local_meta.get("title", ""),
+        "abstract": local_meta.get("abstract", ""),
+        "keywords": local_meta.get("keywords", []),
+        "sections": local_meta.get("sections", []),
         "extractor": "paddleocr",
         "stats": result.get("stats", {})
     }

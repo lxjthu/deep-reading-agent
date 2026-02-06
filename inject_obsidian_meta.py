@@ -38,6 +38,43 @@ def is_paddleocr_md(path: str) -> bool:
         return False
 
 
+def _merge_spaced_chinese_names(text: str) -> str:
+    """
+    Merge single Chinese characters separated by spaces into plausible names.
+
+    Chinese academic papers often format author names with spaces between
+    characters, e.g. "刘　行　张昊天　田　轩" should become "刘行 张昊天 田轩".
+
+    Heuristic: scan left to right, greedily merge adjacent single CJK chars
+    into groups of 2-3 (typical Chinese name length).
+    """
+    tokens = re.split(r'[\s\u3000]+', text.strip())
+    if not tokens:
+        return text
+
+    result = []
+    buf = ""
+    for tok in tokens:
+        if len(tok) == 1 and re.match(r'^[\u4e00-\u9fff]$', tok):
+            buf += tok
+            # Flush at 3 chars (surname + 2-char given name)
+            if len(buf) >= 3:
+                result.append(buf)
+                buf = ""
+        else:
+            if buf:
+                result.append(buf)
+                buf = ""
+            result.append(tok)
+    if buf:
+        # Remaining 1-2 chars: merge with last name if possible, or keep as-is
+        if len(buf) == 1 and result and 1 <= len(result[-1]) <= 2 and re.match(r'^[\u4e00-\u9fff]+$', result[-1]):
+            result[-1] += buf
+        else:
+            result.append(buf)
+    return ' '.join(result)
+
+
 def parse_paddleocr_frontmatter(path: str) -> dict:
     """
     Parse metadata from PaddleOCR markdown file.
@@ -71,23 +108,33 @@ def parse_paddleocr_frontmatter(path: str) -> dict:
 
     # Extract additional metadata from body if not in frontmatter
 
-    # Title: first substantial line (skip headers and metadata)
+    # Title: prefer first # heading (actual paper title), fallback to first substantial line
     if not metadata.get("title") or metadata.get("title", "").endswith(".pdf"):
+        found_title = False
         for line in body.split('\n')[:30]:
-            line = line.strip()
-            # Skip markdown headers, tool info, and short lines
-            if (line and
-                not line.startswith('#') and
-                not line.startswith('*') and
-                not line.startswith('-') and
-                len(line) > 15):
-                metadata["title"] = line
+            stripped = line.strip()
+            # First priority: first `# ` heading (not `## `) that's not the filename
+            if (stripped.startswith('# ') and not stripped.startswith('## ')
+                    and not stripped.endswith('.pdf') and len(stripped) > 4):
+                metadata["title"] = stripped[2:].strip()
+                found_title = True
                 break
+        if not found_title:
+            for line in body.split('\n')[:30]:
+                stripped = line.strip()
+                # Second priority: first substantial non-header line
+                if (stripped and
+                    not stripped.startswith('#') and
+                    not stripped.startswith('*') and
+                    not stripped.startswith('-') and
+                    len(stripped) > 15):
+                    metadata["title"] = stripped
+                    break
 
     # Abstract (Chinese and English patterns)
     if not metadata.get("abstract"):
         # Chinese
-        match = re.search(r'摘要[：:]\s*(.+?)(?=\n\n|关键词|中图分类号|Keywords)', body, re.DOTALL)
+        match = re.search(r'(?:摘要|内容提要)[：:]\s*(.+?)(?=\n\n|关键词|中图分类号|Keywords)', body, re.DOTALL)
         if match:
             metadata["abstract"] = match.group(1).strip()[:500]
         else:
@@ -101,16 +148,108 @@ def parse_paddleocr_frontmatter(path: str) -> dict:
         match = re.search(r'关键词[：:]\s*(.+?)(?=\n|中图分类号)', body)
         if match:
             keywords = match.group(1)
-            metadata["keywords"] = [k.strip() for k in re.split(r'[；;,，]', keywords) if k.strip()]
+            # Split by semicolons, commas, or spaces (some Chinese papers use space-separated keywords)
+            parts = re.split(r'[；;,，]', keywords)
+            if len(parts) == 1 and ' ' in keywords.strip():
+                # Fallback: split by spaces
+                space_parts = keywords.strip().split()
+                # Validate: each keyword should be at least 2 chars
+                if all(len(p) >= 2 for p in space_parts):
+                    parts = space_parts
+            metadata["keywords"] = [k.strip() for k in parts if k.strip()]
 
     # Authors (try to extract from common patterns)
     if not metadata.get("authors"):
-        # Look for author line patterns (often near title)
-        # Common patterns: name separated by comma, or Chinese names with spaces
-        author_match = re.search(r'(?:作者|Author)[：:s]*\s*(.+?)(?=\n|摘要|Abstract)', body, re.IGNORECASE)
+        # Pattern 1: Explicit label like "作者：" or "Author:" (require colon after label)
+        author_match = re.search(r'(?:^|[^\[])(?:作者|Author)[：:]\s*(.+?)(?=\n|摘要|Abstract)', body, re.IGNORECASE)
         if author_match:
             authors_text = author_match.group(1).strip()
             metadata["authors"] = [a.strip() for a in re.split(r'[,，、]', authors_text) if a.strip()]
+
+        # Pattern 2: Chinese papers - authors on line between title and abstract
+        # Typically: title line → author line → abstract
+        if not metadata.get("authors"):
+            lines = body.split('\n')
+            # Find the paper title (# heading or first substantial line) and the abstract line
+            title_idx = -1
+            abstract_idx = -1
+            for i, line in enumerate(lines[:40]):
+                stripped = line.strip()
+                if title_idx == -1 and stripped.startswith('# ') and not stripped.startswith('## '):
+                    title_idx = i
+                if abstract_idx == -1 and re.match(r'^(?:摘要|内容提要|Abstract)[：:.]', stripped):
+                    abstract_idx = i
+                    break
+
+            # If no # heading found, use first substantial text line as title anchor
+            if title_idx == -1 and abstract_idx > 0:
+                for i, line in enumerate(lines[:abstract_idx]):
+                    stripped = line.strip()
+                    if (stripped and not stripped.startswith('#') and not stripped.startswith('*')
+                            and not stripped.startswith('-') and len(stripped) > 15
+                            and not re.match(r'^\d{4}\s*年', stripped)):
+                        title_idx = i
+                        break
+
+            # Look for author-like lines between title and abstract
+            if title_idx >= 0 and abstract_idx > title_idx:
+                for i in range(title_idx + 1, abstract_idx):
+                    line = lines[i].strip()
+                    # Skip empty lines, subtitles (starting with ——), headers, page markers
+                    if (not line or line.startswith('#') or line.startswith('*')
+                            or line.startswith('——') or line.startswith('—')
+                            or re.match(r'^[-\d\s]+$', line)):
+                        continue
+                    # Author line: short (< 80 chars), no period/colon, no digits
+                    if len(line) < 80 and not re.search(r'[。：:；\d]', line):
+                        # Pre-process: merge single Chinese chars separated by spaces into names
+                        # E.g. "刘　行　张昊天　田　轩" → "刘行 张昊天 田轩"
+                        merged_line = _merge_spaced_chinese_names(line)
+                        # Split by spaces
+                        names = re.split(r'[\s\u3000]+', merged_line)
+                        # Filter: each segment should be 2-4 Chinese chars (typical name length)
+                        valid_names = [n for n in names if n and 2 <= len(n) <= 4 and re.match(r'^[\u4e00-\u9fff]+$', n)]
+                        if len(valid_names) >= 2:
+                            metadata["authors"] = valid_names
+                            break
+
+        # Pattern 3: Extract from filename like "标题_作者.pdf"
+        if not metadata.get("authors"):
+            source_pdf = metadata.get("source_pdf", "")
+            if source_pdf:
+                stem = os.path.splitext(source_pdf)[0]
+                # Match "_作者名" at end of filename (2-4 Chinese chars)
+                fn_match = re.search(r'_([\u4e00-\u9fff]{2,4})$', stem)
+                if fn_match:
+                    metadata["authors"] = [fn_match.group(1)]
+
+    # Journal (try to extract from page header patterns in first few lines)
+    if not metadata.get("journal"):
+        # Chinese journal patterns in header area:
+        # "《经济研究》" or "经济研究 2024年第1期"
+        # Often in the first 5 lines of body content
+        first_lines = '\n'.join(body.split('\n')[:15])
+        # Pattern: 《journal_name》
+        j_match = re.search(r'[《](.+?)[》]', first_lines)
+        if j_match:
+            metadata["journal"] = j_match.group(1)
+        else:
+            # Pattern: "Journal Name, Vol.XX" or "JOURNAL 2024"
+            j_match = re.search(r'^([A-Z][A-Za-z\s&]+(?:Journal|Review|Economics|Quarterly|Science))', first_lines, re.MULTILINE)
+            if j_match:
+                metadata["journal"] = j_match.group(1).strip()
+
+    # Year (try to extract from patterns in first few lines)
+    if not metadata.get("year"):
+        first_lines = '\n'.join(body.split('\n')[:15])
+        # Pattern: "2024年" or "2024, Vol" or "(2024)"
+        y_match = re.search(r'(20[12]\d)\s*[年,，]', first_lines)
+        if y_match:
+            metadata["year"] = y_match.group(1)
+        else:
+            y_match = re.search(r'\(?(20[12]\d)\)?', first_lines)
+            if y_match:
+                metadata["year"] = y_match.group(1)
 
     return metadata
 
@@ -182,23 +321,19 @@ def extract_metadata_from_pdf_images(pdf_path: str) -> dict:
             "year": str
         }
     """
+    _unknown = {
+        "title": "Unknown",
+        "authors": ["Unknown"],
+        "journal": "Unknown",
+        "year": "Unknown"
+    }
     if not pymupdf:
         print("Warning: pymupdf not available, skipping PDF image extraction")
-        return {
-            "title": "Unknown",
-            "authors": ["Unknown"],
-            "journal": "Unknown",
-            "year": "Unknown"
-        }
-    
+        return _unknown
+
     if not os.path.exists(pdf_path):
         print(f"PDF not found: {pdf_path}")
-        return {
-            "title": "Unknown",
-            "authors": ["Unknown"],
-            "journal": "Unknown",
-            "year": "Unknown"
-        }
+        return _unknown
     
     doc = pymupdf.open(pdf_path)
     images = []
@@ -219,12 +354,7 @@ def extract_metadata_from_pdf_images(pdf_path: str) -> dict:
     qwen_api_key = os.getenv("QWEN_API_KEY")
     if not qwen_api_key:
         print("Warning: QWEN_API_KEY not found in .env")
-        return {
-            "title": "Unknown",
-            "authors": ["Unknown"],
-            "journal": "Unknown",
-            "year": "Unknown"
-        }
+        return _unknown
     print(f"QWEN_API_KEY found: {qwen_api_key[:10]}...")
     
     client = OpenAI(
@@ -295,12 +425,7 @@ def extract_metadata_from_pdf_images(pdf_path: str) -> dict:
         
     except Exception as e:
         print(f"Qwen VL extraction failed: {e}")
-        return {
-            "title": "Unknown",
-            "authors": ["Unknown"],
-            "journal": "Unknown",
-            "year": "Unknown"
-        }
+        return _unknown
 
 def get_deepseek_client():
     """获取 DeepSeek 客户端"""
@@ -333,7 +458,7 @@ def inject_frontmatter(content, metadata):
     # The 'metadata' argument contains only basic info (Title, Author...).
     
     merged_meta = existing_meta.copy()
-    merged_meta.update(metadata) # Overwrite basic info with fresh extraction (or keep existing if we trust it more? Let's overwrite to ensure consistency)
+    merged_meta.update(metadata)
     
     # Special handling for tags: merge them
     tags = set()
@@ -509,11 +634,21 @@ def main():
 
         # 注入元数据
         if is_final:
-            # Final 报告：只注入 PDF 视觉元数据（title/authors/journal/year）
+            # Final 报告：注入 title/authors/journal/year
+            # 优先使用 PDF 视觉元数据，回退到 MD 文本提取的元数据
             final_metadata = {}
             for key in ["title", "authors", "journal", "year"]:
-                if pdf_metadata.get(key):
-                    final_metadata[key] = pdf_metadata[key]
+                # Prefer non-"Unknown" values from either source
+                pdf_val = pdf_metadata.get(key)
+                md_val = merged_metadata.get(key)
+                # Pick the first real (non-Unknown) value; keep Unknown as placeholder
+                if pdf_val and pdf_val != "Unknown" and pdf_val != ["Unknown"]:
+                    final_metadata[key] = pdf_val
+                elif md_val and md_val != "Unknown" and md_val != ["Unknown"]:
+                    final_metadata[key] = md_val
+                else:
+                    # Preserve "Unknown" placeholder for future manual filling
+                    final_metadata[key] = pdf_val or md_val or "Unknown"
 
             # 添加 tags
             if "tags" not in final_metadata:

@@ -18,3 +18,12 @@ Thumbs.db
 processed_papers.json
 _gui_uploads/
 paddleocr_md/
+deep_reading_results_test/
+test_output/
+test_output_qual/
+test_segmented/
+paddleocr_test_1/
+social_science_analyzer_v1_backup.py
+nul
+*.zip
+.claude/
