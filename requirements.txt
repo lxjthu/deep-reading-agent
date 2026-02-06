@@ -12,4 +12,5 @@ python-dotenv
 pyyaml
 json_repair
 gradio
+pymupdf
 paddlex[ocr]>=3.4.1
