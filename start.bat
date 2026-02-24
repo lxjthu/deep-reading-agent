@@ -96,19 +96,54 @@ if not exist "%STAMP_FILE%" (
 )
 
 if !NEED_INSTALL!==1 (
-    echo       Installing packages from requirements.txt ...
-    "%VENV_PIP%" install -r "%REQ_FILE%" --quiet
-    if %ERRORLEVEL% neq 0 (
-        echo [WARNING] Some packages may have failed to install.
-        echo           The GUI may still work if core packages are present.
-    ) else (
-        echo       All packages installed successfully.
-    )
-    :: Update stamp
-    copy /y "%REQ_FILE%" "%STAMP_FILE%" >nul 2>&1
+    call :do_install
 ) else (
     echo       Dependencies are up to date.
 )
+goto :after_install
+
+:: ── pip install with CN mirror fallback ────────
+:do_install
+echo       Installing packages from requirements.txt ...
+
+:: [1/3] Official PyPI (timeout 30s to detect CN network issues quickly)
+echo         [1/3] Trying official PyPI ...
+"%VENV_PIP%" install -r "%REQ_FILE%" --quiet --timeout 30
+if %ERRORLEVEL%==0 (
+    echo       All packages installed successfully.
+    copy /y "%REQ_FILE%" "%STAMP_FILE%" >nul 2>&1
+    goto :eof
+)
+
+:: [2/3] Tsinghua mirror (清华大学)
+echo         [2/3] PyPI slow/unreachable. Switching to Tsinghua mirror (清华) ...
+"%VENV_PIP%" install -r "%REQ_FILE%" ^
+    -i https://pypi.tuna.tsinghua.edu.cn/simple ^
+    --trusted-host pypi.tuna.tsinghua.edu.cn ^
+    --quiet --timeout 60
+if %ERRORLEVEL%==0 (
+    echo       All packages installed successfully (Tsinghua mirror).
+    copy /y "%REQ_FILE%" "%STAMP_FILE%" >nul 2>&1
+    goto :eof
+)
+
+:: [3/3] Aliyun mirror (阿里云)
+echo         [3/3] Tsinghua failed. Switching to Aliyun mirror (阿里云) ...
+"%VENV_PIP%" install -r "%REQ_FILE%" ^
+    -i https://mirrors.aliyun.com/pypi/simple/ ^
+    --trusted-host mirrors.aliyun.com ^
+    --quiet --timeout 60
+if %ERRORLEVEL%==0 (
+    echo       All packages installed successfully (Aliyun mirror).
+    copy /y "%REQ_FILE%" "%STAMP_FILE%" >nul 2>&1
+    goto :eof
+)
+
+echo [WARNING] All mirrors failed. Some packages may not be installed.
+echo           The GUI may still work if core packages are present.
+goto :eof
+
+:after_install
 
 :: ── Step 4: Check .env configuration ──────────
 echo.
