@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 - 2026-02-24
+
+### Features
+
+- Add supplementary restatement pass (Step 6/6) to fix missed English blocks in Chinese restatement output: detects paragraphs with >65% ASCII letters, groups adjacent English paragraphs into patches, skips references/bibliography section, re-restates via DeepSeek and stitches back in-place (`translation_pipeline.py`)
+
+---
+
 ## 1.1.1 - 2026-02-24
 
 ### Fixes
