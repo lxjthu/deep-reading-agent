@@ -528,10 +528,18 @@ def translate_md_file(
         short_label = label[:60] if label.startswith("#") else f"[{label[:50]}]"
         log(f"  开始 [{idx + 1}/{len(chunks)}] {short_label}  ({len(chunk_text):,} 字符)")
         if label == "__yaml__":
-            result = restate_chunk(chunk_text, glossary, client, model=model)
-            result = _inject_cn_fields(result, stem)
+            # Don't send YAML frontmatter through the restate LLM:
+            # all YAML fields are technical metadata (filenames, dates, extractor)
+            # and don't need Chinese translation.  Sending them to the LLM causes
+            # it to hallucinate full Chinese academic text from the metadata, and
+            # _inject_cn_fields() then fails to find the closing --- at the end.
+            result = _inject_cn_fields(chunk_text, stem)
         else:
             result = restate_chunk(chunk_text, glossary, client, model=model)
+            # The LLM sometimes wraps its output in a ---...--- YAML block because
+            # the prompt mentions "YAML frontmatter".  Strip it to avoid spurious
+            # YAML separators scattered throughout the document.
+            result = _strip_leading_yaml(result)
         restated_parts[idx] = result
         completed[0] += 1
         log(f"  完成 [{completed[0]}/{len(chunks)}] {short_label}  → {len(result):,} 字符")
@@ -562,6 +570,9 @@ _PREAMBLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches a YAML frontmatter block at the start of a string (---\n...\n---\n)
+_LEADING_YAML_RE = re.compile(r'^---\s*\n.*?\n---\s*\n*', re.DOTALL)
+
 
 def _strip_preamble(text: str) -> str:
     """Remove LLM conversational preamble lines from the start of output."""
@@ -572,6 +583,11 @@ def _strip_preamble(text: str) -> str:
             break
         text = cleaned
     return text.lstrip("\n")
+
+
+def _strip_leading_yaml(text: str) -> str:
+    """Strip any leading YAML frontmatter block the LLM may have injected."""
+    return _LEADING_YAML_RE.sub("", text).lstrip("\n")
 
 
 def _inject_cn_fields(yaml_chunk: str, stem: str) -> str:
