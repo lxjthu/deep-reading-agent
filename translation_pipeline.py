@@ -107,6 +107,13 @@ RESTATE_USER_TMPL = """\
 
 _YAML_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
 
+# Header that marks the start of the references/bibliography section.
+# Text after this point is NOT sent for supplementary restatement.
+_REFERENCES_HEADER_RE = re.compile(
+    r'^#+\s*(references|参考文献|bibliography|works\s+cited)\s*$',
+    re.IGNORECASE | re.MULTILINE,
+)
+
 _ABSTRACT_HEADER_RE = re.compile(
     r'^#{1,3}\s*(abstract|摘\s*要|summary)\s*$',
     re.IGNORECASE | re.MULTILINE,
@@ -487,7 +494,7 @@ def translate_md_file(
     client = _get_client()
 
     # --- Step 1: Extract front sections ---
-    log("[重述] Step 1/5  提取标题、摘要、引言...")
+    log("[重述] Step 1/6  提取标题、摘要、引言...")
     sections = extract_front_sections(md_text)
     log(f"  标题：{sections['title'] or '(未找到)'}")
     log(f"  摘要：{len(sections['abstract']):,} 字符  "
@@ -495,7 +502,7 @@ def translate_md_file(
     check()
 
     # --- Step 2: Generate glossary ---
-    log("[重述] Step 2/5  生成术语词典...")
+    log("[重述] Step 2/6  生成术语词典...")
     glossary = generate_glossary(sections, client, model=model, log_cb=log)
     with open(glossary_path, "w", encoding="utf-8") as f:
         f.write(f"# 术语词典：{sections['title']}\n\n{glossary}\n")
@@ -503,19 +510,19 @@ def translate_md_file(
     check()
 
     # --- Step 3: Detect section header level ---
-    log("[重述] Step 3/5  检测章节标题层级...")
+    log("[重述] Step 3/6  检测章节标题层级...")
     split_level = detect_section_level(md_text, client, model=model, log_cb=log)
     check()
 
     # --- Step 4: Chunk ---
-    log(f"[重述] Step 4/5  按 {split_level} 标题切块（每块 ≤ {max_chars:,} 字符）...")
+    log(f"[重述] Step 4/6  按 {split_level} 标题切块（每块 ≤ {max_chars:,} 字符）...")
     chunks = chunk_md_by_headers(md_text, max_chars=max_chars, split_level=split_level)
     log(f"  共 {len(chunks)} 块")
     check()
 
     # --- Step 5: Restate each chunk (parallel) ---
     workers = max(1, min(int(max_workers), len(chunks)))
-    log(f"[重述] Step 5/5  逐块重述（共 {len(chunks)} 块，并发 {workers}）...")
+    log(f"[重述] Step 5/6  逐块重述（共 {len(chunks)} 块，并发 {workers}）...")
 
     # Pre-allocate result slots to preserve order
     restated_parts: List[str] = [""] * len(chunks)
@@ -553,8 +560,26 @@ def translate_md_file(
         for future in as_completed(futures):
             future.result()  # re-raise any exception from the thread
 
-    # --- Assemble & save ---
+    # --- Assemble ---
     final_text = "\n\n".join(restated_parts)
+
+    # --- Step 6: Supplementary restatement — fix missed English blocks ---
+    log(f"[重述] Step 6/6  检查并补译残留英文块...")
+    check()
+    final_text, n_fixed = fix_untranslated_blocks(
+        final_text,
+        glossary,
+        client,
+        model=model,
+        log_cb=log,
+        cancel_check=cancel_check,
+    )
+    if n_fixed:
+        log(f"  补译完成，共修复 {n_fixed} 个英文块")
+    else:
+        log("  未发现需补译的英文块")
+
+    # --- Save ---
     with open(cn_path, "w", encoding="utf-8") as f:
         f.write(final_text)
 
@@ -588,6 +613,128 @@ def _strip_preamble(text: str) -> str:
 def _strip_leading_yaml(text: str) -> str:
     """Strip any leading YAML frontmatter block the LLM may have injected."""
     return _LEADING_YAML_RE.sub("", text).lstrip("\n")
+
+
+# ---------------------------------------------------------------------------
+# Step 6: Supplementary restatement — fix missed English blocks
+# ---------------------------------------------------------------------------
+
+def _en_ratio(text: str) -> float:
+    """Fraction of alphabetic characters that are ASCII (i.e. English letters)."""
+    alpha = [c for c in text if c.isalpha()]
+    if not alpha:
+        return 0.0
+    return sum(1 for c in alpha if c.isascii()) / len(alpha)
+
+
+def _is_structural_para(para: str) -> bool:
+    """True if a paragraph is structural and should not be checked for translation."""
+    s = para.strip()
+    if not s or len(s) < 40:
+        return True
+    # YAML fence, HTML tags, Markdown tables, headers, math, code blocks, images
+    if s.startswith(("---", "<", "|", "#", "$$", "`", "![")):
+        return True
+    # Markdown table row
+    if re.match(r"^\|.*\|", s):
+        return True
+    return False
+
+
+def fix_untranslated_blocks(
+    text: str,
+    glossary: str,
+    client: OpenAI,
+    model: str = "deepseek-chat",
+    en_threshold: float = 0.65,
+    min_chars: int = 100,
+    max_patch_chars: int = 4000,
+    log_cb: Optional[Callable[[str], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> Tuple[str, int]:
+    """
+    Scan assembled Chinese text for large English passages that were missed
+    during initial restatement, re-restate them via DeepSeek, and stitch back.
+
+    Text after the references/bibliography section header is left untouched.
+    Returns (fixed_text, number_of_patches_fixed).
+    """
+    def log(msg: str):
+        logger.info(msg)
+        if log_cb:
+            log_cb(msg)
+
+    # Determine where to stop (references section)
+    ref_m = _REFERENCES_HEADER_RE.search(text)
+    cut_at = ref_m.start() if ref_m else len(text)
+    body, tail = text[:cut_at], text[cut_at:]
+
+    # Split body into alternating [content, separator, content, ...] segments.
+    # Even indices = content, odd indices = "\n\n..." separators.
+    segs = re.split(r"(\n\n+)", body)
+
+    # Classify each content segment: True = needs restatement
+    def _needs_restate(seg: str) -> bool:
+        return (
+            not _is_structural_para(seg)
+            and _en_ratio(seg) >= en_threshold
+            and len(seg.strip()) >= min_chars
+        )
+
+    flags: List[Optional[bool]] = []
+    for idx, seg in enumerate(segs):
+        if idx % 2 == 1:        # separator
+            flags.append(None)
+        else:
+            flags.append(_needs_restate(seg))
+
+    # Find contiguous English "patches": runs of en=True content segments
+    # bridged by their intervening separators.
+    patches: List[Tuple[int, int]] = []  # (start_seg_idx, end_seg_idx)
+    i = 0
+    while i < len(segs):
+        if i % 2 == 0 and flags[i]:
+            j = i
+            # Extend patch while the next content segment is also English
+            while j + 2 < len(segs) and flags[j + 1] is None and flags[j + 2]:
+                j += 2
+            patches.append((i, j))
+            i = j + 2
+        else:
+            i += 1
+
+    if not patches:
+        log("[补译] 未发现大段英文块，无需补译")
+        return text, 0
+
+    log(f"[补译] 发现 {len(patches)} 个英文块，逐一补译...")
+    segs_out = list(segs)
+
+    for pi, (start_i, end_i) in enumerate(patches):
+        if cancel_check and cancel_check():
+            log("[补译] 用户取消")
+            break
+
+        raw = "".join(segs[start_i: end_i + 1])
+        log(f"[补译] 块 {pi + 1}/{len(patches)}  {len(raw):,} 字符")
+
+        # Split oversized blocks at paragraph boundaries before sending
+        sub_raws = [t for _, t in _split_by_paragraphs("", raw, max_patch_chars)]
+        restated_subs: List[str] = []
+        for sr in sub_raws:
+            r = restate_chunk(sr, glossary, client, model=model, log_cb=log_cb)
+            r = _strip_leading_yaml(r)
+            restated_subs.append(r)
+
+        segs_out[start_i] = "\n\n".join(restated_subs)
+        for k in range(start_i + 1, end_i + 1):
+            segs_out[k] = ""
+
+        log(f"[补译] 块 {pi + 1} 完成  → {len(segs_out[start_i]):,} 字符")
+
+    fixed = "".join(segs_out) + tail
+    log(f"[补译] 全部补译完成，共修复 {len(patches)} 个块")
+    return fixed, len(patches)
 
 
 def _inject_cn_fields(yaml_chunk: str, stem: str) -> str:
