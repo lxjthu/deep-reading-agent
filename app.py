@@ -1078,6 +1078,142 @@ def run_md_reading(mode, md_file, folder_path, skip_processed):
 
 
 # ---------------------------------------------------------------------------
+# Tab 6: 中文重述 backend
+# ---------------------------------------------------------------------------
+
+def run_translation(mode, single_file, folder_path, model, max_chars, extraction_method, max_workers):
+    """
+    Generator → yields (log, progress_df, total_status, preview, download_file).
+    Handles single-file (PDF or MD) and batch-folder modes.
+    """
+    import pandas as pd
+    from translation_pipeline import (
+        translate_md_file, translate_pdf_file, collect_files,
+    )
+
+    _cancel_event.clear()
+    log_q = queue.Queue()
+    log_lines = []
+    progress_data = []   # [[filename, type, status, elapsed], ...]
+    result = {}
+    max_chars = int(max_chars)
+
+    empty_df = pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"])
+
+    # --- Validate inputs ---
+    if mode == "单文件":
+        if not single_file:
+            yield "未提供文件", empty_df, "", "", None
+            return
+        file_path = _stable_copy(single_file)
+        files = [file_path]
+    else:
+        folder_path = (folder_path or "").strip()
+        if not folder_path or not os.path.isdir(folder_path):
+            yield f"文件夹不存在或为空：{folder_path}", empty_df, "", "", None
+            return
+        files = collect_files(folder_path)
+        if not files:
+            yield f"文件夹中未找到 PDF 或 MD 文件：{folder_path}", empty_df, "", "", None
+            return
+
+    def worker():
+        try:
+            with OutputCapture(log_q):
+                for idx, fpath in enumerate(files, 1):
+                    if _cancel_event.is_set():
+                        log_q.put("已被用户取消。")
+                        break
+
+                    fname = os.path.basename(fpath)
+                    ext = os.path.splitext(fpath)[1].lower()
+                    ftype = "PDF" if ext == ".pdf" else "MD"
+                    log_q.put(f"\n[{idx}/{len(files)}] {fname}  ({ftype})")
+                    t0 = time.time()
+
+                    try:
+                        cancel_check = lambda: _cancel_event.is_set()
+                        log_cb = log_q.put
+
+                        if ext == ".pdf":
+                            cn_path, glossary_path = translate_pdf_file(
+                                fpath,
+                                log_cb=log_cb,
+                                cancel_check=cancel_check,
+                                model=model,
+                                max_chars=max_chars,
+                                extraction_method=extraction_method,
+                                max_workers=int(max_workers),
+                            )
+                        else:
+                            cn_path, glossary_path = translate_md_file(
+                                fpath,
+                                log_cb=log_cb,
+                                cancel_check=cancel_check,
+                                model=model,
+                                max_chars=max_chars,
+                                max_workers=int(max_workers),
+                            )
+
+                        elapsed = f"{time.time() - t0:.1f}s"
+                        progress_data.append([fname, ftype, "完成", elapsed])
+                        result["last_cn"] = cn_path
+                        result["last_glossary"] = glossary_path
+                        log_q.put(f"  ✓ 完成，耗时 {elapsed}")
+
+                    except InterruptedError:
+                        elapsed = f"{time.time() - t0:.1f}s"
+                        progress_data.append([fname, ftype, "已取消", elapsed])
+                        log_q.put("  已取消")
+                        break
+                    except Exception as e:
+                        elapsed = f"{time.time() - t0:.1f}s"
+                        progress_data.append([fname, ftype, f"失败: {e}", elapsed])
+                        log_q.put(f"  ERROR: {e}")
+
+                log_q.put("\n中文重述处理完成。")
+
+        except Exception as e:
+            log_q.put(f"ERROR: {e}")
+            result["error"] = str(e)
+        finally:
+            log_q.put("__DONE__")
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    # Stream updates
+    while True:
+        done = _drain_queue(log_q, log_lines)
+        log_text = "\n".join(log_lines)
+        df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else empty_df
+        total = f"已处理: {len(progress_data)} / {len(files)} 个文件"
+        yield log_text, df, total, "", None
+        if done:
+            break
+        time.sleep(0.5)
+
+    # Final yield
+    log_text = "\n".join(log_lines)
+    df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else empty_df
+    done_count = sum(1 for r in progress_data if r[2] == "完成")
+    fail_count = sum(1 for r in progress_data if "失败" in r[2])
+    total = f"总计: {len(files)} | 完成: {done_count} | 失败: {fail_count}"
+
+    preview = ""
+    download_path = None
+    if mode == "单文件":
+        cn_path = result.get("last_cn", "")
+        if cn_path and os.path.exists(cn_path):
+            with open(cn_path, "r", encoding="utf-8") as f:
+                preview = f.read(15000)
+            if len(preview) >= 15000:
+                preview += "\n\n...（已截断）..."
+            download_path = cn_path
+
+    yield log_text, df, total, preview, download_path
+
+
+# ---------------------------------------------------------------------------
 # Gradio UI
 # ---------------------------------------------------------------------------
 
@@ -1327,6 +1463,92 @@ def build_ui():
                 outputs=[md_df, md_log, md_total, md_preview, md_dl],
             )
             md_cancel.click(fn=_request_cancel, outputs=[md_total])
+
+        # ===== Tab 6: 中文重述 =====
+        with gr.Tab("中文重述"):
+            with gr.Row():
+                with gr.Column(scale=1):
+                    tr_mode = gr.Radio(
+                        label="模式",
+                        choices=["单文件", "批量文件夹"],
+                        value="单文件",
+                    )
+
+                    tr_file_row = gr.Row(visible=True)
+                    with tr_file_row:
+                        tr_file = gr.File(
+                            label="上传文件（PDF 或 MD）",
+                            file_types=[".pdf", ".md"],
+                        )
+
+                    tr_folder_row = gr.Row(visible=False)
+                    with tr_folder_row:
+                        tr_folder = gr.Textbox(
+                            label="文件夹路径（PDF/MD 混合均可）",
+                            placeholder=r"E:\papers\pdf",
+                        )
+
+                    _tr_ext_choices = ["PaddleOCR (本地GPU)", "PaddleOCR (远程API)", "Legacy (pdfplumber)"]
+                    _tr_ext_default = "PaddleOCR (本地GPU)" if _LOCAL_POCR else "PaddleOCR (远程API)"
+                    tr_extract = gr.Radio(
+                        label="PDF 提取方式（仅对 PDF 文件生效）",
+                        choices=_tr_ext_choices,
+                        value=_tr_ext_default,
+                    )
+                    tr_model = gr.Radio(
+                        label="重述模型",
+                        choices=["deepseek-chat", "deepseek-reasoner"],
+                        value="deepseek-chat",
+                        info="chat 速度快、成本低；reasoner 质量更高",
+                    )
+                    tr_chunk = gr.Slider(
+                        label="每块最大字符数",
+                        minimum=2000,
+                        maximum=8000,
+                        step=500,
+                        value=5000,
+                        info="越小分块越细，API 调用次数越多",
+                    )
+                    tr_workers = gr.Slider(
+                        label="并发重述数",
+                        minimum=1,
+                        maximum=10,
+                        step=1,
+                        value=5,
+                        info="同时发出的 API 请求数，deepseek-chat 建议 5，reasoner 建议 3",
+                    )
+                    tr_btn = gr.Button("开始重述", variant="primary")
+                    tr_cancel = gr.Button("停止", variant="stop")
+
+                with gr.Column(scale=2):
+                    tr_log = gr.Textbox(label="运行日志", lines=14, interactive=False)
+                    tr_df = gr.Dataframe(
+                        label="处理进度",
+                        headers=["文件名", "类型", "状态", "耗时"],
+                        interactive=False,
+                    )
+                    tr_total = gr.Textbox(label="总体进度", interactive=False)
+                    tr_preview = gr.Markdown(label="中文重述预览（单文件）")
+                    tr_dl = gr.File(label="下载中文版 MD（单文件）")
+
+            def _toggle_tr_mode(mode):
+                return (
+                    gr.update(visible=(mode == "单文件")),
+                    gr.update(visible=(mode == "批量文件夹")),
+                )
+
+            tr_mode.change(
+                fn=_toggle_tr_mode,
+                inputs=[tr_mode],
+                outputs=[tr_file_row, tr_folder_row],
+            )
+
+            tr_btn.click(
+                fn=run_translation,
+                inputs=[tr_mode, tr_file, tr_folder, tr_model, tr_chunk, tr_extract, tr_workers],
+                outputs=[tr_log, tr_df, tr_total, tr_preview, tr_dl],
+            )
+            tr_cancel.click(fn=_request_cancel, outputs=[tr_total])
 
     return app
 

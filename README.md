@@ -127,6 +127,7 @@ python paddleocr_pipeline.py "paper.pdf" --out_dir "paddleocr_md"
 ├── run_full_pipeline.py        # 单文件全流程脚本
 ├── smart_literature_filter.py  # WoS/CNKI 文献筛选
 ├── inject_obsidian_meta.py     # Obsidian 元数据注入
+├── translation_pipeline.py     # 经济学论文中文重述流水线（Tab 6）
 ├── deep_reading_steps/         # 精读子任务 Python 脚本
 ├── qual_metadata_extractor/    # QUAL 元数据提取模块
 ├── prompts/                    # 提示词配置目录
@@ -134,6 +135,7 @@ python paddleocr_pipeline.py "paper.pdf" --out_dir "paddleocr_md"
 ├── paddleocr_md/               # 提取输出目录 (gitignored)
 ├── deep_reading_results/       # QUANT 分析结果 (gitignored)
 ├── social_science_results_v2/  # QUAL 分析结果 (gitignored)
+├── translation_results/        # 中文重述结果 (gitignored)
 ├── processed_papers.json       # 批量处理状态账本 (gitignored)
 ├── README_GUI.md               # GUI 使用手册
 └── requirements.txt
