@@ -1,16 +1,25 @@
-PyPDF2
+# ── PDF 提取 ──────────────────────────────────────
 pypdf
-pdfminer.six
 pdfplumber
-spacy
-nltk
+pymupdf
+
+# ── 远程 PaddleOCR API（HTTP 客户端）────────────────
+requests
+
+# ── LLM & 环境变量 ────────────────────────────────
+openai
+python-dotenv
+
+# ── 数据处理 ──────────────────────────────────────
 pandas
 openpyxl
 tqdm
-openai
-python-dotenv
 pyyaml
 json_repair
+
+# ── GUI ──────────────────────────────────────────
 gradio
-pymupdf
-paddlex[ocr]>=3.4.1
+
+# ── 可选：本地 GPU 提取（需要 CUDA，约 2 GB 下载量）──
+# 取消注释后可在 Tab 6「PDF 提取」中启用「本地 GPU」模式
+# pip install "paddlex[ocr]>=3.4.1"
