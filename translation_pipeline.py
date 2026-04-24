@@ -181,7 +181,7 @@ def extract_front_sections(md_text: str) -> Dict[str, str]:
 def generate_glossary(
     sections: Dict[str, str],
     client: OpenAI,
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     log_cb: Optional[Callable[[str], None]] = None,
 ) -> str:
     """
@@ -247,7 +247,7 @@ Literature Review、Data、Methodology、Results、Conclusion 等）所使用的
 def detect_section_level(
     md_text: str,
     client: OpenAI,
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     preview_chars: int = 4000,
     log_cb: Optional[Callable[[str], None]] = None,
 ) -> str:
@@ -412,7 +412,7 @@ def restate_chunk(
     chunk_text: str,
     glossary: str,
     client: OpenAI,
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     log_cb: Optional[Callable[[str], None]] = None,
 ) -> str:
     """
@@ -450,7 +450,7 @@ def translate_md_file(
     out_dir: Optional[str] = None,
     log_cb: Optional[Callable[[str], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     max_chars: int = 5000,
     max_workers: int = 5,
 ) -> Tuple[str, str]:
@@ -645,7 +645,7 @@ def fix_untranslated_blocks(
     text: str,
     glossary: str,
     client: OpenAI,
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     en_threshold: float = 0.65,
     min_chars: int = 100,
     max_patch_chars: int = 4000,
@@ -759,7 +759,7 @@ def translate_pdf_file(
     out_dir: Optional[str] = None,
     log_cb: Optional[Callable[[str], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     max_chars: int = 5000,
     extraction_method: str = "PaddleOCR (远程API)",
     max_workers: int = 5,

@@ -117,7 +117,7 @@ def _env(name: str, default: str | None = None) -> str | None:
 def call_deepseek_boundaries(text: str, is_skeleton: bool = False) -> dict:
     api_key = _env("DEEPSEEK_API_KEY")
     base_url = "https://api.deepseek.com"
-    model_name = "deepseek-chat" # V3 is excellent for JSON
+    model_name = "deepseek-v4-flash" # V3 is excellent for JSON
 
     if not api_key:
         raise RuntimeError("Missing DEEPSEEK_API_KEY in environment")
@@ -187,7 +187,7 @@ def call_deepseek_direct_segment(full_text: str) -> dict:
         raise RuntimeError("Missing DEEPSEEK_API_KEY in environment")
 
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-    model_name = "deepseek-chat"
+    model_name = "deepseek-v4-flash"
 
     prompt = f"""你是一位严谨的学术编辑助手。请将以下论文全文切分为标准章节结构。
 

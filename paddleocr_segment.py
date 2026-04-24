@@ -143,7 +143,7 @@ def call_deepseek_segment(full_text: str) -> Dict:
         raise RuntimeError("Missing DEEPSEEK_API_KEY in environment")
 
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-    model_name = "deepseek-chat"
+    model_name = "deepseek-v4-flash"
 
     # Truncate text if too long (150k char limit)
     if len(full_text) > 150000:

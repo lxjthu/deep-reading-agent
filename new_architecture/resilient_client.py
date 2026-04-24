@@ -45,7 +45,7 @@ class ResilientDeepSeekClient:
             max_retries: 最大重试次数
         """
         data = {
-            "model": "deepseek-chat",
+            "model": "deepseek-v4-flash",
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,

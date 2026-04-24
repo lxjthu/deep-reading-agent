@@ -33,7 +33,7 @@ def extract_metadata(paper_text: str, api_key: str) -> dict:
 {paper_text[:3000]}
 """
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-v4-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=500

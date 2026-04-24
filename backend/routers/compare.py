@@ -108,7 +108,7 @@ async def analyze_comparison(req: CompareRequest):
             prompt = "\n".join(prompt_parts)
         
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-v4-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=4000
@@ -183,7 +183,7 @@ async def analyze_long_comparison(req: LongCompareRequest):
             prompt = "\n".join(prompt_parts)
         
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-v4-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=4000

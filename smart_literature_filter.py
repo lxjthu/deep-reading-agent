@@ -45,7 +45,7 @@ class PromptManager:
         return p
 
 class AIEvaluator:
-    def __init__(self, model="deepseek-chat", api_key=None):
+    def __init__(self, model="deepseek-v4-flash", api_key=None):
         self.base_url = "https://api.deepseek.com"
         self.model = model
         

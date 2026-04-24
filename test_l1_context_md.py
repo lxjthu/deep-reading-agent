@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-DEEPSEEK_MODEL = "deepseek-reasoner"
+DEEPSEEK_MODEL = "deepseek-v4-flash"
 
 def get_deepseek_client():
     if not DEEPSEEK_API_KEY:

@@ -14,8 +14,8 @@ class StataRefiner:
         # Users need to set DEEPSEEK_API_KEY in .env
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
         self.base_url = "https://api.deepseek.com"
-        # Use deepseek-reasoner for Thinking Mode (R1)
-        self.model = "deepseek-reasoner"
+        # Use deepseek-v4-flash for Stata refinement
+        self.model = "deepseek-v4-flash"
         
         if not self.api_key:
             self.logger.warning("DEEPSEEK_API_KEY not found. Please add it to .env")

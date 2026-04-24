@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # LLM Configuration
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat" # Use chat for faster extraction, or reasoner if complex
+DEEPSEEK_MODEL = "deepseek-v4-flash" # Use chat for faster extraction, or reasoner if complex
 
 def get_client():
     if not DEEPSEEK_API_KEY:

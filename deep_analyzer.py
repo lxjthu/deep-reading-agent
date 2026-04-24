@@ -19,7 +19,7 @@ class DeepAnalyzer:
         # DeepSeek for reasoning (optional, falls back to Kimi if not set)
         self.deepseek_key = os.getenv("DEEPSEEK_API_KEY")
         self.deepseek_base = "https://api.deepseek.com"
-        self.deepseek_model = "deepseek-reasoner"
+        self.deepseek_model = "deepseek-v4-flash"
 
         if self.kimi_key:
             self.kimi_client = OpenAI(api_key=self.kimi_key, base_url=self.kimi_base)

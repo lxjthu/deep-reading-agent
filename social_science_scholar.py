@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 class SocialScienceScholar:
-    def __init__(self, model_name="deepseek-chat", base_url="https://api.deepseek.com"):
+    def __init__(self, model_name="deepseek-v4-flash", base_url="https://api.deepseek.com"):
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
         if not self.api_key:
             raise ValueError("DEEPSEEK_API_KEY not found in environment")

@@ -158,7 +158,7 @@ def extract_references_with_llm(raw_text, batch_size=15):
         
         try:
             response = client.chat.completions.create(
-                model="deepseek-chat",
+                model="deepseek-v4-flash",
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0.1  # 低温度以提高解析一致性

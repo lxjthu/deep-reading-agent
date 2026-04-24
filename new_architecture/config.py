@@ -9,7 +9,7 @@ class Config:
     """DeepSeek API配置"""
     api_key: str
     base_url: str = "https://api.deepseek.com"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     max_tokens: int = 8000
     temperature: float = 0.7
     timeout: int = 120  # 请求超时秒数
