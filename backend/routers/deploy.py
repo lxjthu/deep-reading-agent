@@ -9,7 +9,9 @@ from fastapi import APIRouter, HTTPException, Header, Request
 
 router = APIRouter()
 
-DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "39e8df50fa0d1b1995641064c64899f4")
+DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET")
+if not DEPLOY_SECRET:
+    raise RuntimeError("DEPLOY_SECRET environment variable is required. Set it in .env file.")
 DEPLOY_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deploy.sh")
 
 
