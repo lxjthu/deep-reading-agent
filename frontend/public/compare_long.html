@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>长文本精读对比分析</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    h1 { color: #1a1a2e; margin-bottom: 8px; }
+    .subtitle { color: #666; margin-bottom: 24px; }
+    
+    /* Navigation */
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .nav-tab {
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+      color: #6b7280;
+      background: white;
+      border: 1px solid #e5e7eb;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .nav-tab:hover { background: #f9fafb; }
+    .nav-tab.active {
+      background: #059669;
+      color: white;
+      border-color: #059669;
+    }
+    
+    /* Controls */
+    .controls {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .controls-row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .controls-row:last-child { margin-bottom: 0; }
+    label { font-weight: 600; color: #374151; font-size: 14px; }
+    select {
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      background: white;
+      cursor: pointer;
+    }
+    select:focus { outline: none; border-color: #059669; }
+    
+    /* Paper selection */
+    .paper-list {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .paper-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .paper-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: #f3f4f6;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .paper-checkbox:hover { background: #e5e7eb; }
+    .paper-checkbox input { cursor: pointer; }
+    .paper-checkbox.checked { background: #d1fae5; color: #065f46; }
+    .btn-delete {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px;
+      border-radius: 4px;
+      opacity: 0.5;
+      transition: opacity 0.2s;
+    }
+    .btn-delete:hover { opacity: 1; background: #fee2e2; }
+    
+    /* AI Synthesis button */
+    .btn-synthesis {
+      background: linear-gradient(135deg, #059669, #047857);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-left: auto;
+    }
+    .btn-synthesis:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(5,150,105,0.3); }
+    .btn-synthesis:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    
+    /* Table */
+    .table-container {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      overflow-x: auto;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #e5e7eb;
+      vertical-align: top;
+    }
+    th {
+      background: #f9fafb;
+      font-weight: 600;
+      color: #374151;
+      font-size: 13px;
+      position: sticky;
+      top: 0;
+    }
+    .paper-title { font-weight: 600; color: #1a1a2e; font-size: 13px; }
+    .paper-header { color: #6b7280; font-size: 11px; margin-top: 2px; }
+    .cell-content {
+      max-height: 300px;
+      overflow: hidden;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #374151;
+      transition: max-height 0.3s;
+      position: relative;
+    }
+    .cell-content::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 40px;
+      background: linear-gradient(transparent, white);
+      pointer-events: none;
+    }
+    .cell-content.expanded {
+      max-height: none;
+      overflow: visible;
+    }
+    .cell-content.expanded::after { display: none; }
+    .cell-empty { color: #9ca3af; font-style: italic; font-size: 13px; }
+    .table-scroll { max-height: calc(100vh - 300px); overflow-y: auto; }
+    
+    /* Loading */
+    .loading { display: flex; align-items: center; gap: 8px; color: #6b7280; }
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid #e5e7eb;
+      border-top-color: #059669;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    /* Empty state */
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: #6b7280;
+    }
+    .empty-icon { font-size: 48px; margin-bottom: 12px; }
+    
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: white;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 900px;
+      max-height: 80vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-header h2 { font-size: 18px; color: #1a1a2e; }
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #6b7280;
+    }
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-body pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: inherit;
+      line-height: 1.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 长文本精读对比分析</h1>
+    <p class="subtitle">选择分析维度和文献，横向对比每篇论文的回答</p>
+    
+    <!-- Navigation -->
+    <div class="nav-tabs">
+      <a href="/compare_7step.html" class="nav-tab">七步法</a>
+      <a href="/compare_4step.html" class="nav-tab">四步法</a>
+      <a href="/compare_long.html" class="nav-tab active">长文本精读</a>
+    </div>
+    
+    <div class="controls">
+      <div class="controls-row">
+        <label>选择维度：</label>
+        <select id="dimSelect">
+          <option value="">加载中...</option>
+        </select>
+        <button class="btn-synthesis" id="btnSynthesis" disabled>🤖 生成 AI 综述</button>
+      </div>
+      <div class="controls-row">
+        <label>选择文献：</label>
+        <div class="paper-list" id="paperList">
+          <span class="loading"><span class="spinner"></span>加载中...</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="table-container" id="tableContainer">
+      <div class="empty">
+        <div class="empty-icon">📋</div>
+        <p>请选择维度和文献开始对比</p>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Modal for AI Synthesis -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>🤖 AI 文献综述</h2>
+        <button class="modal-close" id="modalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="loading" id="synthesisLoading">
+          <span class="spinner"></span>
+          正在生成文献综述，请稍候...
+        </div>
+        <pre id="synthesisContent" style="display:none;"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Global state
+    let allReports = [];
+    let selectedDim = '';
+    let selectedPapers = [];
+    let allDimensions = new Set();
+    
+    // Parse YAML frontmatter
+    function parseFrontmatter(content) {
+      if (!content.startsWith('---')) return {};
+      const end = content.indexOf('---', 3);
+      if (end === -1) return {};
+      const yamlContent = content.substring(3, end).trim();
+      try {
+        return jsyaml.load(yamlContent) || {};
+      } catch (e) {
+        console.error('YAML parse error:', e);
+        return {};
+      }
+    }
+    
+    /**
+     * Extract all dimension names from a long context report
+     * Uses DIMENSION_BOUNDARY markers for reliable splitting
+     * Falls back to legacy ### heading extraction for old reports
+     */
+    function extractDimensions(content) {
+      // New reports with DIMENSION_BOUNDARY markers
+      if (content.includes('<!--DIMENSION_BOUNDARY-->')) {
+        const dims = [];
+        const sections = content.split('<!--DIMENSION_BOUNDARY-->');
+        for (const section of sections) {
+          const trimmed = section.trim();
+          if (!trimmed) continue;
+          const match = trimmed.match(/^###\s+(.+)$/m);
+          if (match) {
+            const dim = match[1].trim();
+            if (dim && dim !== '分析维度') dims.push(dim);
+          }
+        }
+        return dims;
+      }
+      
+      // Legacy fallback: extract ### headings between ## 分析维度 and next ##
+      const dims = [];
+      const lines = content.split('\n');
+      let inAnalysisSection = false;
+      for (const line of lines) {
+        if (line.match(/^##\s+分析维度/)) {
+          inAnalysisSection = true;
+          continue;
+        }
+        if (inAnalysisSection && line.match(/^##\s+/) && !line.match(/^###\s+/)) {
+          break;
+        }
+        if (inAnalysisSection) {
+          const match = line.match(/^###\s+(.+)$/);
+          if (match) {
+            const dim = match[1].trim();
+            if (dim) dims.push(dim);
+          }
+        }
+      }
+      return dims;
+    }
+    
+    /**
+     * Get content for a specific dimension
+     * Uses DIMENSION_BOUNDARY markers for reliable extraction
+     * Falls back to legacy heading-based extraction for old reports
+     */
+    function getDimensionContent(content, dimName) {
+      // New reports with DIMENSION_BOUNDARY markers
+      if (content.includes('<!--DIMENSION_BOUNDARY-->')) {
+        const sections = content.split('<!--DIMENSION_BOUNDARY-->');
+        for (const section of sections) {
+          const trimmed = section.trim();
+          if (!trimmed) continue;
+          const match = trimmed.match(/^###\s+(.+)$/m);
+          if (match && match[1].trim() === dimName) {
+            const lines = trimmed.split('\n');
+            const contentLines = [];
+            let foundHeading = false;
+            for (const line of lines) {
+              if (!foundHeading && line.match(/^###\s+/)) {
+                foundHeading = true;
+                continue;
+              }
+              if (foundHeading) {
+                contentLines.push(line);
+              }
+            }
+            return contentLines.join('\n').trim();
+          }
+        }
+        return '';
+      }
+      
+      // Legacy fallback
+      const lines = content.split('\n');
+      let inAnalysisSection = false;
+      let inTargetDim = false;
+      const result = [];
+      
+      for (const line of lines) {
+        if (line.match(/^##\s+分析维度/)) {
+          inAnalysisSection = true;
+          continue;
+        }
+        if (inAnalysisSection && line.match(/^##\s+/) && !line.match(/^###\s+/)) {
+          break;
+        }
+        if (inAnalysisSection && line.match(/^###\s+(.+)$/)) {
+          const dim = line.match(/^###\s+(.+)$/)[1].trim();
+          if (dim === dimName) {
+            inTargetDim = true;
+            continue;
+          } else if (inTargetDim) {
+            break;
+          }
+        }
+        if (inTargetDim) {
+          result.push(line);
+        }
+      }
+      
+      return result.join('\n').trim();
+    }
+    
+    // Fetch all long context reports
+    async function loadReports() {
+      try {
+        const response = await fetch('/api/history/');
+        const data = await response.json();
+        const reports = data.reading.filter(r => r.filename.includes('_long_context'));
+        
+        allReports = [];
+        allDimensions = new Set();
+        
+        for (const report of reports) {
+          try {
+            const contentResponse = await fetch(`/api/download/${encodeURIComponent(report.filename)}`);
+            const content = await contentResponse.text();
+            const frontmatter = parseFrontmatter(content);
+            const dims = extractDimensions(content);
+            dims.forEach(d => allDimensions.add(d));
+            
+            allReports.push({
+              filename: report.filename,
+              frontmatter: frontmatter,
+              content: content,
+              title: frontmatter.title || report.filename.replace('_long_context.md', ''),
+              dimensions: dims
+            });
+          } catch (e) {
+            console.error('Error loading report:', report.filename, e);
+          }
+        }
+        
+        renderPaperList();
+        renderDimSelect();
+      } catch (e) {
+        console.error('Error loading reports:', e);
+        document.getElementById('paperList').innerHTML = '<span style="color:red">加载失败，请刷新重试</span>';
+      }
+    }
+    
+    function renderPaperList() {
+      const container = document.getElementById('paperList');
+      if (allReports.length === 0) {
+        container.innerHTML = '<span>没有找到长文本精读报告</span>';
+        return;
+      }
+      
+      container.innerHTML = allReports.map(report => {
+        const fm = report.frontmatter;
+        const label = fm.title ? `${fm.title.slice(0, 30)}${fm.title.length > 30 ? '...' : ''}` : report.filename;
+        const meta = fm.year ? `(${fm.year})` : '';
+        const dimCount = report.dimensions.length;
+        return `
+          <div class="paper-item" style="display:flex;align-items:center;gap:4px;">
+            <label class="paper-checkbox" data-filename="${report.filename}">
+              <input type="checkbox" value="${report.filename}" onchange="togglePaper('${report.filename}')">
+              <span>${label} ${meta} <small style="color:#9ca3af">[${dimCount}维度]</small></span>
+            </label>
+            <button class="btn-delete" onclick="deleteReport('${report.filename}')" title="删除">🗑</button>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    function renderDimSelect() {
+      const select = document.getElementById('dimSelect');
+      const dims = Array.from(allDimensions).sort();
+      if (dims.length === 0) {
+        select.innerHTML = '<option value="">暂无可用维度</option>';
+        return;
+      }
+      select.innerHTML = '<option value="">请选择维度</option>' + 
+        dims.map(d => `<option value="${d}">${d}</option>`).join('');
+      select.onchange = (e) => selectDim(e.target.value);
+    }
+    
+    async function deleteReport(filename) {
+      if (!confirm(`确定删除 ${filename}？\n此操作不可恢复。`)) return;
+      try {
+        const response = await fetch(`/api/history/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        if (response.ok) {
+          const idx = selectedPapers.indexOf(filename);
+          if (idx > -1) selectedPapers.splice(idx, 1);
+          allReports = allReports.filter(r => r.filename !== filename);
+          renderPaperList();
+          if (selectedDim && selectedPapers.length > 0) renderComparisonTable();
+          else document.getElementById('tableContainer').innerHTML = `<div class="empty"><div class="empty-icon">📋</div><p>请选择维度和文献开始对比</p></div>`;
+        } else alert('删除失败');
+      } catch (e) { alert('删除失败: ' + e.message); }
+    }
+    
+    function togglePaper(filename) {
+      const idx = selectedPapers.indexOf(filename);
+      if (idx > -1) selectedPapers.splice(idx, 1);
+      else selectedPapers.push(filename);
+      updateUI();
+    }
+    
+    function selectDim(dimName) {
+      selectedDim = dimName;
+      updateUI();
+    }
+    
+    function updateUI() {
+      const btn = document.getElementById('btnSynthesis');
+      const canSynthesize = selectedDim && selectedPapers.length > 0;
+      btn.disabled = !canSynthesize;
+      if (selectedDim && selectedPapers.length > 0) renderComparisonTable();
+    }
+    
+    function renderComparisonTable() {
+      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
+      if (papers.length === 0 || !selectedDim) return;
+      
+      // Check if all selected papers have this dimension
+      const papersWithDim = papers.filter(p => p.dimensions.includes(selectedDim));
+      const papersWithoutDim = papers.filter(p => !p.dimensions.includes(selectedDim));
+      
+      let html = '<div class="table-scroll"><table>';
+      html += '<thead><tr><th style="width:200px">维度内容</th>';
+      for (const paper of papers) {
+        const fm = paper.frontmatter;
+        const hasDim = paper.dimensions.includes(selectedDim);
+        html += `<th style="${hasDim ? '' : 'opacity:0.5'}">
+          <div class="paper-title">${fm.title || paper.filename}</div>
+          <div class="paper-header">${fm.authors ? fm.authors.join(', ') : ''} ${fm.year ? `(${fm.year})` : ''}</div>
+          ${!hasDim ? '<div style="color:#ef4444;font-size:11px;margin-top:4px">⚠ 无此维度</div>' : ''}
+        </th>`;
+      }
+      html += '</tr></thead><tbody><tr>';
+      html += `<td style="font-weight:600;color:#374151;background:#f9fafb">${selectedDim}</td>`;
+      
+      for (const paper of papers) {
+        const content = getDimensionContent(paper.content, selectedDim);
+        if (content && content.trim()) {
+          html += `<td><div class="cell-content" onclick="this.classList.toggle('expanded')">${content}</div></td>`;
+        } else {
+          html += `<td><span class="cell-empty">（未包含此维度）</span></td>`;
+        }
+      }
+      
+      html += '</tr></tbody></table></div>';
+      
+      if (papersWithoutDim.length > 0) {
+        html += `<div style="margin-top:12px;padding:12px;background:#fef3c7;border-radius:6px;color:#92400e;font-size:13px">
+          ⚠ 以下文献未包含"${selectedDim}"维度：${papersWithoutDim.map(p => p.frontmatter.title || p.filename).join('、')}
+        </div>`;
+      }
+      
+      document.getElementById('tableContainer').innerHTML = html;
+    }
+    
+    document.getElementById('btnSynthesis').onclick = async () => {
+      if (!selectedDim || selectedPapers.length === 0) return;
+      
+      const modal = document.getElementById('modalOverlay');
+      const loading = document.getElementById('synthesisLoading');
+      const content = document.getElementById('synthesisContent');
+      modal.classList.add('active');
+      loading.style.display = 'block';
+      content.style.display = 'none';
+      
+      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
+      const paperData = papers.map(paper => {
+        const dimContent = getDimensionContent(paper.content, selectedDim);
+        return {
+          filename: paper.filename,
+          title: paper.frontmatter.title || paper.filename,
+          authors: paper.frontmatter.authors || [],
+          year: paper.frontmatter.year,
+          dimension: selectedDim,
+          content: dimContent
+        };
+      }).filter(p => p.content && p.content.trim());
+      
+      if (paperData.length === 0) {
+        loading.style.display = 'none';
+        content.style.display = 'block';
+        content.textContent = '所选文献均未包含该维度的内容，无法生成综述。';
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/compare/analyze_long', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dimension: selectedDim,
+            papers: selectedPapers,
+            paperData: paperData,
+            api_key: localStorage.getItem('deepseek_api_key') || ''
+          })
+        });
+        const result = await response.json();
+        loading.style.display = 'none';
+        content.style.display = 'block';
+        content.textContent = result.synthesis || '生成失败';
+      } catch (e) {
+        loading.style.display = 'none';
+        content.style.display = 'block';
+        content.textContent = '生成失败: ' + e.message;
+      }
+    };
+    
+    document.getElementById('modalClose').onclick = () => document.getElementById('modalOverlay').classList.remove('active');
+    document.getElementById('modalOverlay').onclick = (e) => { if (e.target === document.getElementById('modalOverlay')) document.getElementById('modalOverlay').classList.remove('active'); };
+    
+    loadReports();
+  </script>
+</body>
+</html>

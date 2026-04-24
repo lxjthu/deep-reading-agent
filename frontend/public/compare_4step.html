@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>七步法对比分析</title>
+  <title>四步法对比分析</title>
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -16,6 +16,29 @@
     .container { max-width: 1400px; margin: 0 auto; }
     h1 { color: #1a1a2e; margin-bottom: 8px; }
     .subtitle { color: #666; margin-bottom: 24px; }
+    
+    /* Navigation */
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .nav-tab {
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+      color: #6b7280;
+      background: white;
+      border: 1px solid #e5e7eb;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .nav-tab:hover { background: #f9fafb; }
+    .nav-tab.active {
+      background: #059669;
+      color: white;
+      border-color: #059669;
+    }
     
     /* Controls */
     .controls {
@@ -83,29 +106,6 @@
     .btn-delete:hover { opacity: 1; background: #fee2e2; }
     
     /* AI Synthesis button */
-    /* Navigation tabs */
-    .nav-tabs {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 20px;
-    }
-    .nav-tab {
-      padding: 8px 16px;
-      border-radius: 6px;
-      text-decoration: none;
-      color: #6b7280;
-      background: white;
-      border: 1px solid #e5e7eb;
-      font-size: 14px;
-      transition: all 0.2s;
-    }
-    .nav-tab:hover { background: #f9fafb; }
-    .nav-tab.active {
-      background: #059669;
-      color: white;
-      border-color: #059669;
-    }
-
     .btn-synthesis {
       background: linear-gradient(135deg, #059669, #047857);
       color: white;
@@ -125,54 +125,36 @@
     .table-container {
       background: white;
       border-radius: 12px;
-      overflow: hidden;
+      padding: 20px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .table-scroll {
       overflow-x: auto;
-      max-height: calc(100vh - 300px);
-      overflow-y: auto;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 600px;
-    }
-    thead th {
-      background: #1a1a2e;
-      color: white;
-      padding: 12px 16px;
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      padding: 12px;
       text-align: left;
-      font-size: 13px;
-      font-weight: 600;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    thead th:first-child { min-width: 200px; }
-    tbody td {
-      padding: 12px 16px;
       border-bottom: 1px solid #e5e7eb;
-      font-size: 13px;
       vertical-align: top;
     }
-    tbody tr:hover { background: #f9fafb; }
-    tbody td:first-child {
+    th {
+      background: #f9fafb;
       font-weight: 600;
       color: #374151;
-      background: #f9fafb;
+      font-size: 13px;
       position: sticky;
-      left: 0;
-      z-index: 5;
+      top: 0;
     }
+    .paper-title { font-weight: 600; color: #1a1a2e; font-size: 13px; }
+    .paper-header { color: #6b7280; font-size: 11px; margin-top: 2px; }
     .cell-content {
       max-height: 120px;
       overflow: hidden;
       cursor: pointer;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #374151;
+      transition: max-height 0.3s;
       position: relative;
-    }
-    .cell-content.expanded {
-      max-height: none;
     }
     .cell-content::after {
       content: '';
@@ -184,41 +166,22 @@
       background: linear-gradient(transparent, white);
       pointer-events: none;
     }
+    .cell-content.expanded {
+      max-height: none;
+      overflow: visible;
+    }
     .cell-content.expanded::after { display: none; }
-    .cell-content:hover { color: #059669; }
-    .cell-empty {
-      color: #9ca3af;
-      font-style: italic;
-    }
-    
-    /* Paper header in table */
-    .paper-header {
-      font-size: 12px;
-      color: #6b7280;
-    }
-    .paper-title {
-      font-weight: 600;
-      color: #1a1a2e;
-      font-size: 13px;
-      line-height: 1.4;
-    }
+    .cell-empty { color: #9ca3af; font-style: italic; font-size: 13px; }
+    .table-scroll { max-height: calc(100vh - 300px); overflow-y: auto; }
     
     /* Loading */
-    .loading {
-      text-align: center;
-      padding: 40px;
-      color: #6b7280;
-    }
+    .loading { display: flex; align-items: center; gap: 8px; color: #6b7280; }
     .spinner {
-      display: inline-block;
-      width: 24px;
-      height: 24px;
+      width: 16px; height: 16px;
       border: 2px solid #e5e7eb;
       border-top-color: #059669;
       border-radius: 50%;
       animation: spin 1s linear infinite;
-      margin-right: 8px;
-      vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     
@@ -281,13 +244,13 @@
 </head>
 <body>
   <div class="container">
-    <h1>📊 七步法对比分析</h1>
+    <h1>📊 四步法对比分析</h1>
     <p class="subtitle">选择步骤和文献，横向对比每篇论文的回答（动态提取子问题）</p>
     
     <!-- Navigation -->
     <div class="nav-tabs">
-      <a href="/compare_7step.html" class="nav-tab active">七步法</a>
-      <a href="/compare_4step.html" class="nav-tab">四步法</a>
+      <a href="/compare_7step.html" class="nav-tab">七步法</a>
+      <a href="/compare_4step.html" class="nav-tab active">四步法</a>
       <a href="/compare_long.html" class="nav-tab">长文本精读</a>
     </div>
     
@@ -334,20 +297,17 @@
 
   <script>
     // Global state
-    let allReports = [];        // All 7step reports with parsed content
-    let selectedStep = '';      // Currently selected step
-    let selectedPapers = [];    // Selected paper filenames
-    let selectedSubQuestions = new Set(); // Selected sub-questions for AI synthesis
+    let allReports = [];
+    let selectedStep = '';
+    let selectedPapers = [];
+    let selectedSubQuestions = new Set();
     
-    // Seven steps definition (only step names, sub-questions are dynamically extracted)
+    // Four steps definition
     const STEPS = [
-      { id: '第一步', label: '第一步：核心贡献识别' },
-      { id: '第二步', label: '第二步：理论框架评估' },
-      { id: '第三步', label: '第三步：方法论批判' },
-      { id: '第四步', label: '第四步：实证结果解读' },
-      { id: '第五步', label: '第五步：局限性分析' },
-      { id: '第六步', label: '第六步：实践意义' },
-      { id: '第七步', label: '第七步：未来方向' }
+      { id: '第一步', label: '第一步：背景与问题' },
+      { id: '第二步', label: '第二步：理论视角' },
+      { id: '第三步', label: '第三步：逻辑与证据' },
+      { id: '第四步', label: '第四步：价值与启示' }
     ];
     
     // Parse YAML frontmatter
@@ -364,21 +324,15 @@
       }
     }
     
-    /**
-     * Parse all sub-questions and their content for a given step
-     * Returns: { "完整子问题标题": "内容文本", ... }
-     */
     function parseStepContent(content, stepId) {
       const lines = content.split('\n');
       let inStep = false;
       let currentSubQuestion = null;
       const subQuestions = {};
       
-      // Build regex to match step header like "## 第一步：核心贡献识别" or "## 第一步"
       const stepRegex = new RegExp(`^##\\s+${stepId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[：:].*`);
       
       for (const line of lines) {
-        // Check for step header
         if (line.match(/^##\s+第[一二三四五六七八九十]+步/)) {
           if (line.match(stepRegex)) {
             inStep = true;
@@ -390,17 +344,22 @@
         
         if (!inStep) continue;
         
-        // Match sub-question: ### **数字. 标题**
+        // Try 7-step format first: ### **1. Title**
         const subQMatch = line.match(/^###\s+\*\*(\d+)\.\s+(.+?)\*\*/);
+        // Fallback to 4-step format: ## 1. Title
+        const altMatch = !subQMatch && line.match(/^##\s+(\d+)\.\s+(.+)$/);
+        
         if (subQMatch) {
           currentSubQuestion = `${subQMatch[1]}. ${subQMatch[2].trim()}`;
+          subQuestions[currentSubQuestion] = [];
+        } else if (altMatch) {
+          currentSubQuestion = `${altMatch[1]}. ${altMatch[2].trim()}`;
           subQuestions[currentSubQuestion] = [];
         } else if (currentSubQuestion) {
           subQuestions[currentSubQuestion].push(line);
         }
       }
       
-      // Join lines for each sub-question
       const result = {};
       for (const [key, lines] of Object.entries(subQuestions)) {
         result[key] = lines.join('\n').trim();
@@ -408,14 +367,13 @@
       return result;
     }
     
-    // Fetch all 7step reports
+    // Fetch all 4step reports
     async function loadReports() {
       try {
         const response = await fetch('/api/history/');
         const data = await response.json();
-        const reports = data.reading.filter(r => r.filename.includes('_7step'));
+        const reports = data.reading.filter(r => r.filename.includes('_4step'));
         
-        // Download and parse each report
         allReports = [];
         for (const report of reports) {
           try {
@@ -426,7 +384,7 @@
               filename: report.filename,
               frontmatter: frontmatter,
               content: content,
-              title: frontmatter.title || report.filename.replace('_7step.md', '')
+              title: frontmatter.title || report.filename.replace('_4step.md', '')
             });
           } catch (e) {
             console.error('Error loading report:', report.filename, e);
@@ -441,11 +399,10 @@
       }
     }
     
-    // Render paper selection
     function renderPaperList() {
       const container = document.getElementById('paperList');
       if (allReports.length === 0) {
-        container.innerHTML = '<span>没有找到七步法报告</span>';
+        container.innerHTML = '<span>没有找到四步法报告</span>';
         return;
       }
       
@@ -465,44 +422,21 @@
       }).join('');
     }
     
-    // Delete report
     async function deleteReport(filename) {
       if (!confirm(`确定删除 ${filename}？\n此操作不可恢复。`)) return;
-      
       try {
-        const response = await fetch(`/api/history/${encodeURIComponent(filename)}`, {
-          method: 'DELETE'
-        });
-        
+        const response = await fetch(`/api/history/${encodeURIComponent(filename)}`, { method: 'DELETE' });
         if (response.ok) {
-          // Remove from selected papers if it was selected
           const idx = selectedPapers.indexOf(filename);
-          if (idx > -1) {
-            selectedPapers.splice(idx, 1);
-          }
-          // Remove from allReports
+          if (idx > -1) selectedPapers.splice(idx, 1);
           allReports = allReports.filter(r => r.filename !== filename);
-          // Re-render
           renderPaperList();
-          if (selectedStep && selectedPapers.length > 0) {
-            renderComparisonTable();
-          } else {
-            document.getElementById('tableContainer').innerHTML = `
-              <div class="empty">
-                <div class="empty-icon">📋</div>
-                <p>请选择步骤和文献开始对比</p>
-              </div>
-            `;
-          }
-        } else {
-          alert('删除失败');
-        }
-      } catch (e) {
-        alert('删除失败: ' + e.message);
-      }
+          if (selectedStep && selectedPapers.length > 0) renderComparisonTable();
+          else document.getElementById('tableContainer').innerHTML = `<div class="empty"><div class="empty-icon">📋</div><p>请选择步骤和文献开始对比</p></div>`;
+        } else alert('删除失败');
+      } catch (e) { alert('删除失败: ' + e.message); }
     }
     
-    // Render step select
     function renderStepSelect() {
       const select = document.getElementById('stepSelect');
       select.innerHTML = '<option value="">请选择步骤</option>' + 
@@ -510,64 +444,41 @@
       select.onchange = (e) => selectStep(e.target.value);
     }
     
-    // Toggle paper selection
     function togglePaper(filename) {
       const idx = selectedPapers.indexOf(filename);
-      if (idx > -1) {
-        selectedPapers.splice(idx, 1);
-      } else {
-        selectedPapers.push(filename);
-      }
-      selectedSubQuestions.clear(); // Clear sub-question selection when papers change
+      if (idx > -1) selectedPapers.splice(idx, 1);
+      else selectedPapers.push(filename);
+      selectedSubQuestions.clear();
       updateUI();
     }
     
-    // Select step
     function selectStep(stepId) {
       selectedStep = stepId;
-      selectedSubQuestions.clear(); // Clear sub-question selection when step changes
+      selectedSubQuestions.clear();
       updateUI();
     }
     
-    // Update UI
     function updateUI() {
       const btn = document.getElementById('btnSynthesis');
       const canSynthesize = selectedStep && selectedPapers.length > 0 && selectedSubQuestions.size > 0;
       btn.disabled = !canSynthesize;
-      
-      if (selectedStep && selectedPapers.length > 0) {
-        renderComparisonTable();
-      }
+      if (selectedStep && selectedPapers.length > 0) renderComparisonTable();
     }
     
-    /**
-     * Collect all sub-questions from all selected papers for the current step
-     * Then build a comparison table where:
-     * - Rows = union of all sub-questions (sorted by number), each with checkbox
-     * - Columns = selected papers
-     */
     function renderComparisonTable() {
       const papers = allReports.filter(r => selectedPapers.includes(r.filename));
       if (papers.length === 0 || !selectedStep) return;
       
-      // Parse each paper's content for this step
       const parsedPapers = papers.map(paper => {
         const subQuestions = parseStepContent(paper.content, selectedStep);
-        return {
-          ...paper,
-          subQuestions: subQuestions
-        };
+        return { ...paper, subQuestions };
       });
       
-      // Collect all unique sub-question titles across all papers
       const allSubQuestions = new Set();
       for (const paper of parsedPapers) {
-        for (const key of Object.keys(paper.subQuestions)) {
-          allSubQuestions.add(key);
-        }
+        for (const key of Object.keys(paper.subQuestions)) allSubQuestions.add(key);
       }
       
-      // Sort sub-questions by their number prefix
       const sortedSubQuestions = Array.from(allSubQuestions).sort((a, b) => {
         const numA = parseInt(a.match(/^\d+/)?.[0] || '0');
         const numB = parseInt(b.match(/^\d+/)?.[0] || '0');
@@ -575,87 +486,45 @@
       });
       
       if (sortedSubQuestions.length === 0) {
-        document.getElementById('tableContainer').innerHTML = `
-          <div class="empty">
-            <div class="empty-icon">📭</div>
-            <p>所选文献的该步骤下没有找到子问题内容</p>
-          </div>
-        `;
+        document.getElementById('tableContainer').innerHTML = `<div class="empty"><div class="empty-icon">📭</div><p>所选文献的该步骤下没有找到子问题内容</p></div>`;
         return;
       }
       
-      // Build table
       let html = '<div class="table-scroll"><table>';
-      
-      // Header with "Select All" checkbox
       html += '<thead><tr><th><label style="cursor:pointer;"><input type="checkbox" id="selectAllSubQ" onchange="toggleAllSubQuestions(this.checked)"> 全选</label></th>';
       for (const paper of parsedPapers) {
         const fm = paper.frontmatter;
-        html += `<th>
-          <div class="paper-title">${fm.title || paper.filename}</div>
-          <div class="paper-header">${fm.authors ? fm.authors.join(', ') : ''} ${fm.year ? `(${fm.year})` : ''}</div>
-        </th>`;
+        html += `<th><div class="paper-title">${fm.title || paper.filename}</div><div class="paper-header">${fm.authors ? fm.authors.join(', ') : ''} ${fm.year ? `(${fm.year})` : ''}</div></th>`;
       }
-      html += '</tr></thead>';
+      html += '</tr></thead><tbody>';
       
-      // Body with per-row checkboxes
-      html += '<tbody>';
       for (const subQ of sortedSubQuestions) {
         const isChecked = selectedSubQuestions.has(subQ) ? 'checked' : '';
         html += `<tr><td><label style="cursor:pointer;display:flex;align-items:center;gap:6px;"><input type="checkbox" value="${subQ.replace(/"/g, '&quot;')}" onchange="toggleSubQuestion(this.value, this.checked)" ${isChecked}> ${subQ}</label></td>`;
         for (const paper of parsedPapers) {
           const content = paper.subQuestions[subQ];
-          if (content && content.trim()) {
-            html += `<td><div class="cell-content" onclick="this.classList.toggle('expanded')">${content}</div></td>`;
-          } else {
-            html += `<td><span class="cell-empty">（未回答）</span></td>`;
-          }
+          if (content && content.trim()) html += `<td><div class="cell-content" onclick="this.classList.toggle('expanded')">${content}</div></td>`;
+          else html += `<td><span class="cell-empty">（未回答）</span></td>`;
         }
         html += '</tr>';
       }
       html += '</tbody></table></div>';
-      
       document.getElementById('tableContainer').innerHTML = html;
     }
     
-    // Toggle all sub-questions
     function toggleAllSubQuestions(checked) {
       const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      const parsedPapers = papers.map(paper => {
-        return { ...paper, subQuestions: parseStepContent(paper.content, selectedStep) };
-      });
-      
-      // Collect all sub-questions
+      const parsedPapers = papers.map(paper => ({ ...paper, subQuestions: parseStepContent(paper.content, selectedStep) }));
       const allSubQs = new Set();
-      for (const paper of parsedPapers) {
-        for (const key of Object.keys(paper.subQuestions)) {
-          allSubQs.add(key);
-        }
-      }
-      
-      if (checked) {
-        for (const sq of allSubQs) {
-          selectedSubQuestions.add(sq);
-        }
-      } else {
-        selectedSubQuestions.clear();
-      }
-      
-      // Update checkboxes without re-rendering table
-      document.querySelectorAll('tbody input[type="checkbox"]').forEach(cb => {
-        cb.checked = checked;
-      });
+      for (const paper of parsedPapers) for (const key of Object.keys(paper.subQuestions)) allSubQs.add(key);
+      if (checked) for (const sq of allSubQs) selectedSubQuestions.add(sq);
+      else selectedSubQuestions.clear();
+      document.querySelectorAll('tbody input[type="checkbox"]').forEach(cb => cb.checked = checked);
     }
     
-    // Toggle single sub-question
     function toggleSubQuestion(subQ, checked) {
-      if (checked) {
-        selectedSubQuestions.add(subQ);
-      } else {
-        selectedSubQuestions.delete(subQ);
-      }
-      
-      // Update "select all" checkbox state
+      if (checked) selectedSubQuestions.add(subQ);
+      else selectedSubQuestions.delete(subQ);
       const allCheckboxes = document.querySelectorAll('tbody input[type="checkbox"]');
       const checkedBoxes = document.querySelectorAll('tbody input[type="checkbox"]:checked');
       const selectAllCheckbox = document.getElementById('selectAllSubQ');
@@ -665,55 +534,30 @@
       }
     }
     
-    // AI Synthesis - only for selected sub-questions
     document.getElementById('btnSynthesis').onclick = async () => {
-      if (selectedSubQuestions.size === 0) {
-        alert('请至少选择一个子问题');
-        return;
-      }
-      
+      if (selectedSubQuestions.size === 0) { alert('请至少选择一个子问题'); return; }
       const modal = document.getElementById('modalOverlay');
       const loading = document.getElementById('synthesisLoading');
       const content = document.getElementById('synthesisContent');
-      
       modal.classList.add('active');
       loading.style.display = 'block';
       content.style.display = 'none';
       
-      // Build data with only selected sub-questions
       const papers = allReports.filter(r => selectedPapers.includes(r.filename));
       const paperData = papers.map(paper => {
         const allSubQs = parseStepContent(paper.content, selectedStep);
         const selectedContent = {};
-        for (const sq of selectedSubQuestions) {
-          if (allSubQs[sq]) {
-            selectedContent[sq] = allSubQs[sq];
-          }
-        }
-        return {
-          filename: paper.filename,
-          title: paper.frontmatter.title || paper.filename,
-          authors: paper.frontmatter.authors || [],
-          year: paper.frontmatter.year,
-          subQuestions: selectedContent
-        };
+        for (const sq of selectedSubQuestions) if (allSubQs[sq]) selectedContent[sq] = allSubQs[sq];
+        return { filename: paper.filename, title: paper.frontmatter.title || paper.filename, authors: paper.frontmatter.authors || [], year: paper.frontmatter.year, subQuestions: selectedContent };
       });
       
       try {
         const response = await fetch('/api/compare/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            step: selectedStep,
-            papers: selectedPapers,
-            subQuestions: Array.from(selectedSubQuestions),
-            paperData: paperData,
-            api_key: localStorage.getItem('deepseek_api_key') || ''
-          })
+          body: JSON.stringify({ step: selectedStep, papers: selectedPapers, subQuestions: Array.from(selectedSubQuestions), paperData, api_key: localStorage.getItem('deepseek_api_key') || '' })
         });
-        
         const result = await response.json();
-        
         loading.style.display = 'none';
         content.style.display = 'block';
         content.textContent = result.synthesis || '生成失败';
@@ -724,17 +568,9 @@
       }
     };
     
-    // Close modal
-    document.getElementById('modalClose').onclick = () => {
-      document.getElementById('modalOverlay').classList.remove('active');
-    };
-    document.getElementById('modalOverlay').onclick = (e) => {
-      if (e.target === document.getElementById('modalOverlay')) {
-        document.getElementById('modalOverlay').classList.remove('active');
-      }
-    };
+    document.getElementById('modalClose').onclick = () => document.getElementById('modalOverlay').classList.remove('active');
+    document.getElementById('modalOverlay').onclick = (e) => { if (e.target === document.getElementById('modalOverlay')) document.getElementById('modalOverlay').classList.remove('active'); };
     
-    // Initialize
     loadReports();
   </script>
 </body>

@@ -85,6 +85,14 @@ ANALYSIS_DIMENSIONS = {
         ],
         "system_prompt_addition": "请提供具体、可行的研究建议。",
     },
+    "custom": {
+        "name": "自定义问题",
+        "description": "用户自定义的分析问题",
+        "default_questions": [
+            "请回答用户的自定义问题。",
+        ],
+        "system_prompt_addition": "请根据用户的问题进行分析，直接输出分析内容。",
+    },
 }
 
 

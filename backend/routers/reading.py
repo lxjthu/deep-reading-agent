@@ -7,6 +7,7 @@ import uuid
 import threading
 import time
 import re
+import json
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -15,6 +16,8 @@ load_dotenv(env_path)
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from backend.routers.metadata_extractor import extract_metadata, build_frontmatter
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -189,6 +192,18 @@ def run_long_context_task(task_id: str, file_path: str, analysis_dims: list, cus
                 tasks[task_id]["logs"].append(f"⚠ {dim_key} 出错: {str(e)[:80]}")
                 results[dim_key] = f"[分析出错: {str(e)[:200]}]"
         
+        # Handle custom question after all dimensions
+        if custom_question and custom_question.strip():
+            tasks[task_id]["stage"] = f"分析维度: 自定义问题..."
+            tasks[task_id]["logs"].append(f"[自定义问题] {custom_question[:50]}...")
+            try:
+                answer = engine.analyze_dimension("custom", custom_question)
+                results["自定义问题"] = answer
+                tasks[task_id]["logs"].append(f"✓ 自定义问题 完成")
+            except Exception as e:
+                tasks[task_id]["logs"].append(f"⚠ 自定义问题 出错: {str(e)[:80]}")
+                results["自定义问题"] = f"[分析出错: {str(e)[:200]}]"
+        
         # 4. Generate report
         tasks[task_id]["progress"] = 95
         tasks[task_id]["stage"] = "生成报告..."
@@ -197,12 +212,27 @@ def run_long_context_task(task_id: str, file_path: str, analysis_dims: list, cus
         safe_name = sanitize_filename(original_name)
         report_path = os.path.join(RESULTS_DIR, f"{safe_name}_long_context.md")
         
+        # Extract metadata
+        tasks[task_id]["stage"] = "提取论文元数据..."
+        tasks[task_id]["logs"].append("提取论文元数据...")
+        metadata = extract_metadata(paper_text, final_api_key)
+        tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        
+        # Build frontmatter
+        frontmatter = build_frontmatter(metadata, "长文本精读")
+        
         with open(report_path, "w", encoding="utf-8") as f:
+            f.write(frontmatter)
             f.write(f"# 长文本精读报告\n\n")
             f.write(f"## 分析维度\n\n")
+            f.write(f"<!--DIMENSIONS_START-->\n\n")
             for dim_key, answer in results.items():
                 f.write(f"### {dim_key}\n\n")
-                f.write(f"{answer}\n\n---\n\n")
+                f.write(f"{answer}\n\n")
+                f.write(f"<!--DIMENSION_BOUNDARY-->\n\n")
+            f.write(f"<!--DIMENSIONS_END-->\n\n")
+            f.write(f"---\n\n")
+            f.write(f"*分析完成于 {tasks[task_id]['created_at'].strftime('%Y-%m-%d %H:%M')}*\n")
         
         # Summary
         preview_parts = []
@@ -293,7 +323,17 @@ def run_quant_task(task_id: str, file_path: str, api_key: Optional[str] = None):
         safe_name = sanitize_filename(original_name)
         report_path = os.path.join(RESULTS_DIR, f"{safe_name}_7step.md")
         
+        # Extract metadata
+        tasks[task_id]["stage"] = "提取论文元数据..."
+        tasks[task_id]["logs"].append("提取论文元数据...")
+        metadata = extract_metadata(paper_text, api_key.strip())
+        tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        
+        # Build frontmatter
+        frontmatter = build_frontmatter(metadata, "七步精读")
+        
         with open(report_path, "w", encoding="utf-8") as f:
+            f.write(frontmatter)
             f.write("# 七步精读报告\n\n")
             for step_name, answer in results.items():
                 f.write(f"## {step_name}\n\n{answer}\n\n---\n\n")

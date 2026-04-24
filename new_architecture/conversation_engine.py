@@ -66,6 +66,18 @@ class ConversationEngine:
         self.results: List[TurnResult] = []
         self.max_history_turns = max_history_turns  # 滑动窗口大小
         
+    def _load_prompt_from_file(self, dimension: str) -> Optional[str]:
+        """尝试从 prompts/long/ 目录加载维度提示词"""
+        import os
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        prompt_path = os.path.join(base_dir, "prompts", "long", f"{dimension}.md")
+        if os.path.exists(prompt_path):
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if content:
+                return content
+        return None
+    
     def _build_messages(self, question: str, dimension: Optional[str] = None) -> List[Dict[str, str]]:
         """
         构建API消息列表（优化缓存命中率）
@@ -107,7 +119,12 @@ class ConversationEngine:
         # 新问题（可选附加维度说明）
         if dimension and dimension in ANALYSIS_DIMENSIONS:
             dim_info = ANALYSIS_DIMENSIONS[dimension]
-            enhanced_question = f"【分析维度：{dim_info['name']}】\n{dim_info['system_prompt_addition']}\n\n{question}"
+            # 优先从文件加载提示词
+            file_prompt = self._load_prompt_from_file(dimension)
+            if file_prompt:
+                enhanced_question = f"【分析维度：{dim_info['name']}】\n{file_prompt}\n\n{question}"
+            else:
+                enhanced_question = f"【分析维度：{dim_info['name']}】\n{dim_info['system_prompt_addition']}\n\n{question}"
         else:
             enhanced_question = question
             

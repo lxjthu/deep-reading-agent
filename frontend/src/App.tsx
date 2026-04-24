@@ -7,6 +7,7 @@ const TABS = [
   { id: 'long', label: '长文本精读', icon: '➤' },
   { id: 'quant', label: '七步精读', icon: '△' },
   { id: 'qual', label: '四步精读', icon: '◉' },
+  { id: 'compare', label: '对比分析', icon: '⇄' },
   { id: 'prompts', label: '提示词管理', icon: '⚙' },
 ]
 
@@ -47,7 +48,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-gray-900">
+    <div className={`min-h-screen bg-white text-gray-900 ${activeTab === 'compare' ? 'flex flex-col h-screen overflow-hidden' : ''}`}>
       {/* Header */}
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
@@ -138,16 +139,17 @@ function App() {
       </nav>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-7xl px-4 py-6">
+      <main className={activeTab === 'compare' ? 'flex-1 min-h-0 overflow-hidden' : 'mx-auto max-w-7xl px-4 py-6'}>
         {activeTab === 'filter' && <FilterTab apiKey={apiKey} />}
         {activeTab === 'long' && <LongTab apiKey={apiKey} />}
         {activeTab === 'quant' && <QuantTab apiKey={apiKey} />}
         {activeTab === 'qual' && <QualTab apiKey={apiKey} />}
+        {activeTab === 'compare' && <CompareTab />}
         {activeTab === 'prompts' && <PromptsTab apiKey={apiKey} />}
       </main>
 
-      {/* History Panel */}
-      <HistoryPanel />
+      {/* History Panel - hidden on compare tab */}
+      {activeTab !== 'compare' && <HistoryPanel />}
     </div>
   )
 }
@@ -519,7 +521,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
 
   const handleStart = async () => {
     if (!file) { alert('请先上传 PDF'); return }
-    if (dims.length === 0) { alert('请至少选择一个分析维度'); return }
+    if (dims.length === 0 && !customQ.trim()) { alert('请至少选择一个分析维度或输入自定义问题'); return }
 
     setIsRunning(true); setProgress(0); setStage('上传文件中...'); setLogs([]); setPreview(''); setDownloadUrl('')
 
@@ -946,8 +948,8 @@ function QualTab({ apiKey }: { apiKey: string }) {
 
 // Tab 4: 提示词管理
 function PromptsTab({ apiKey }: { apiKey: string }) {
-  const [promptType, setPromptType] = useState('quant')
-  const [currentStep, setCurrentStep] = useState('step_1')
+  const [promptType, setPromptType] = useState('long')
+  const [currentStep, setCurrentStep] = useState('overview')
   const [content, setContent] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState('')
@@ -967,6 +969,17 @@ function PromptsTab({ apiKey }: { apiKey: string }) {
       { id: 'L2', label: 'L2: 理论框架' },
       { id: 'L3', label: 'L3: 论证逻辑' },
       { id: 'L4', label: 'L4: 价值与启示' },
+    ]},
+    { id: 'long', label: '长文本精读', steps: [
+      { id: 'overview', label: '核心贡献识别' },
+      { id: 'theory', label: '理论框架评估' },
+      { id: 'methodology', label: '方法论批判' },
+      { id: 'results', label: '实证结果解读' },
+      { id: 'limitations', label: '局限性分析' },
+      { id: 'implications', label: '实践意义' },
+      { id: 'comparison', label: '跨文献对比' },
+      { id: 'future', label: '未来方向' },
+      { id: 'custom', label: '自定义问题' },
     ]},
     { id: 'filter', label: '文献筛选', steps: [
       { id: 'explorer', label: '探索者模式' },
@@ -1148,6 +1161,68 @@ function HistoryPanel() {
             )}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// Tab: 对比分析
+function CompareTab() {
+  const [mode, setMode] = useState<'long' | '7step' | '4step'>('long')
+
+  const srcMap = {
+    long: '/compare_long.html',
+    '7step': '/compare_7step.html',
+    '4step': '/compare_4step.html',
+  }
+
+  const modes = [
+    { id: 'long' as const, label: '长文本精读', desc: '自由维度对比' },
+    { id: '7step' as const, label: '七步法', desc: '定量实证对比' },
+    { id: '4step' as const, label: '四步法', desc: '定性理论对比' },
+  ]
+
+  return (
+    <div className="flex h-full">
+      {/* Sidebar */}
+      <div className="w-48 bg-gray-900 text-white flex flex-col border-r border-gray-800">
+        <div className="p-4 border-b border-gray-800">
+          <h3 className="text-sm font-semibold text-gray-300">对比分析</h3>
+          <p className="text-xs text-gray-500 mt-1">选择对比模式</p>
+        </div>
+        <div className="flex-1 p-2 space-y-1">
+          {modes.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setMode(m.id)}
+              className={`w-full text-left px-3 py-3 rounded-lg text-sm transition-all ${
+                mode === m.id
+                  ? 'bg-emerald-600 text-white shadow-lg'
+                  : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+              }`}
+            >
+              <div className="font-medium">{m.label}</div>
+              <div className={`text-xs mt-0.5 ${mode === m.id ? 'text-emerald-200' : 'text-gray-600'}`}>
+                {m.desc}
+              </div>
+            </button>
+          ))}
+        </div>
+        <div className="p-3 border-t border-gray-800">
+          <p className="text-xs text-gray-600">
+            勾选文献后横向对比
+          </p>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 bg-gray-100">
+        <iframe
+          key={mode}
+          src={srcMap[mode]}
+          className="w-full h-full border-0"
+          title="文献对比分析"
+        />
       </div>
     </div>
   )

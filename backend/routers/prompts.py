@@ -26,6 +26,17 @@ PROMPT_PATHS = {
         "L3": "prompts/qual_analysis/L3_Logic_Prompt.md",
         "L4": "prompts/qual_analysis/L4_Value_Prompt.md",
     },
+    "long": {
+        "overview": "prompts/long/overview.md",
+        "theory": "prompts/long/theory.md",
+        "methodology": "prompts/long/methodology.md",
+        "results": "prompts/long/results.md",
+        "limitations": "prompts/long/limitations.md",
+        "implications": "prompts/long/implications.md",
+        "comparison": "prompts/long/comparison.md",
+        "future": "prompts/long/future.md",
+        "custom": "prompts/long/custom.md",
+    },
     "filter": {
         "explorer": "prompts/literature_filter/explorer.md",
         "reviewer": "prompts/literature_filter/reviewer.md",
