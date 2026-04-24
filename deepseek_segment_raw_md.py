@@ -163,6 +163,7 @@ Input Text:
     
     resp = client.chat.completions.create(
         model=model_name,
+        extra_body={"thinking": {"type": "disabled"}},
         messages=[
             {"role": "system", "content": "You are a precise academic structure analyzer. Output strict JSON."},
             {"role": "user", "content": prompt},
@@ -221,6 +222,7 @@ def call_deepseek_direct_segment(full_text: str) -> dict:
     try:
         resp = client.chat.completions.create(
             model=model_name,
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": "你是严谨的学术编辑助手。只输出 JSON，不要添加任何解释。"},
                 {"role": "user", "content": prompt},

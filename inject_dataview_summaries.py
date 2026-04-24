@@ -69,6 +69,7 @@ def extract_summaries(filename, content):
     try:
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": "You are a helpful assistant. Output JSON only."},
                 {"role": "user", "content": prompt}

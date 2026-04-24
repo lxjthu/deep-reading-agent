@@ -222,6 +222,7 @@ Output JSON ONLY in this exact shape:
     try:
         response = client.chat.completions.create(
             model="deepseek-v4-flash",
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )

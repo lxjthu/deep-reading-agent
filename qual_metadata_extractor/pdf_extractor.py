@@ -130,6 +130,7 @@ def extract_pdf_metadata_with_qwen(images: list) -> dict:
         
         resp = client.chat.completions.create(
             model="qwen-vl-plus",
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": "你是专业的学术论文元数据提取专家。"},
                 {"role": "user", "content": content_messages}

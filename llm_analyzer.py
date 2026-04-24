@@ -42,6 +42,7 @@ class LLMAnalyzer:
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": "You are a precise academic research assistant."},
                     {"role": "user", "content": prompt}

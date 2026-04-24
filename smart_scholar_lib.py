@@ -61,6 +61,7 @@ class SmartScholar:
         try:
             response = self.client.chat.completions.create(
                 model="deepseek-v4-flash",
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Classify this paper content:\n\n{text_segment[:4000]}"}

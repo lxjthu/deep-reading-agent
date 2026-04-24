@@ -59,6 +59,9 @@ class DeepAnalyzer:
             # Kimi supports JSON mode enforcement
             if json_mode and model_type == "kimi":
                 params["response_format"] = {"type": "json_object"}
+            # Disable thinking for DeepSeek to avoid token waste
+            if model_type == "deepseek":
+                params["extra_body"] = {"thinking": {"type": "disabled"}}
 
             response = client.chat.completions.create(**params)
             content = response.choices[0].message.content

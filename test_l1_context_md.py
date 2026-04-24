@@ -47,6 +47,7 @@ def call_deepseek_markdown(prompt, system_prompt):
     try:
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}

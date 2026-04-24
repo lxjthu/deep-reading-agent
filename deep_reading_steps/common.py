@@ -178,6 +178,7 @@ def call_deepseek(prompt, system_prompt="You are a helpful assistant."):
     try:
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}

@@ -34,6 +34,7 @@ def extract_metadata(paper_text: str, api_key: str) -> dict:
 """
         response = client.chat.completions.create(
             model="deepseek-v4-flash",
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=500

@@ -297,6 +297,7 @@ def summarize_with_deepseek(client, title: str, text: str) -> str:
     try:
         resp = client.chat.completions.create(
             model="deepseek-v4-flash",
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": "你是一个精确的学术内容总结专家。"},
                 {"role": "user", "content": prompt}

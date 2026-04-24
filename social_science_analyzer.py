@@ -64,6 +64,7 @@ class SocialScienceAnalyzer:
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content}

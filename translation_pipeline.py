@@ -204,6 +204,7 @@ def generate_glossary(
             _log(log_cb, f"  [词典] 调用 {model}（第 {attempt + 1} 次）...")
             resp = client.chat.completions.create(
                 model=model,
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": GLOSSARY_SYSTEM},
                     {"role": "user", "content": user_msg},
@@ -268,6 +269,7 @@ def detect_section_level(
         _log(log_cb, f"  [分块] 询问 DeepSeek 章节标题层级...")
         resp = client.chat.completions.create(
             model=model,
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[{"role": "user", "content": prompt}],
             timeout=30,
             max_tokens=10,
@@ -425,6 +427,7 @@ def restate_chunk(
         try:
             resp = client.chat.completions.create(
                 model=model,
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": RESTATE_SYSTEM},
                     {"role": "user", "content": user_msg},
@@ -571,6 +574,7 @@ def translate_md_file(
         glossary,
         client,
         model=model,
+        extra_body={"thinking": {"type": "disabled"}},
         log_cb=log,
         cancel_check=cancel_check,
     )
@@ -802,6 +806,7 @@ def translate_pdf_file(
         log_cb=log_cb,
         cancel_check=cancel_check,
         model=model,
+        extra_body={"thinking": {"type": "disabled"}},
         max_chars=max_chars,
         max_workers=max_workers,
     )

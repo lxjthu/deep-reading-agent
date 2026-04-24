@@ -54,6 +54,7 @@ class MetadataFixer:
             # Re-use SmartScholar's client for consistency
             response = self.scholar.client.chat.completions.create(
                 model="deepseek-v4-flash",
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Extract metadata from this text:\n\n{content}"}

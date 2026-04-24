@@ -183,6 +183,7 @@ def call_deepseek_segment(full_text: str) -> Dict:
     try:
         resp = client.chat.completions.create(
             model=model_name,
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": "你是严谨的学术编辑助手。只输出 JSON，不要添加任何解释。"},
                 {"role": "user", "content": prompt},

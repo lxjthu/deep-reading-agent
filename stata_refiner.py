@@ -58,6 +58,7 @@ class StataRefiner:
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": "You are Daron Acemoglu, an expert econometrics professor. You explain concepts in Chinese."},
                     {"role": "user", "content": prompt}

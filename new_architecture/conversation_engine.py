@@ -162,6 +162,7 @@ class ConversationEngine:
             start_time = __import__('time').time()
             response = self.client.chat.completions.create(
                 model=self.config.model,
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=messages,
                 max_tokens=self.config.max_tokens,
                 temperature=self.config.temperature,

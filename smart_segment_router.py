@@ -230,6 +230,7 @@ class SmartSegmentRouter:
             logger.info(f"Sending classification request for {len(primary_headings)} headings...")
             response = self.client.chat.completions.create(
                 model="deepseek-v4-flash",
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": "你是学术论文结构分析专家。只输出JSON，不添加解释。"},
                     {"role": "user", "content": prompt}
