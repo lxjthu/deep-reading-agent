@@ -693,11 +693,17 @@
             selectedContent[sq] = allSubQs[sq];
           }
         }
+        const fm = paper.frontmatter;
         return {
           filename: paper.filename,
-          title: paper.frontmatter.title || paper.filename,
-          authors: paper.frontmatter.authors || [],
-          year: paper.frontmatter.year,
+          title: fm.title || paper.filename,
+          authors: fm.authors || [],
+          year: fm.year,
+          journal: fm.journal || fm.source || fm['期刊'] || '',
+          volume: fm.volume || fm['卷'] || '',
+          issue: fm.issue || fm['期'] || '',
+          pages: fm.pages || fm['页码'] || '',
+          doi: fm.doi || '',
           subQuestions: selectedContent
         };
       });
