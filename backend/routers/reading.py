@@ -8,6 +8,7 @@ import threading
 import time
 import re
 import json
+from datetime import datetime
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -463,7 +464,8 @@ async def start_long_context(request: LongContextRequest):
         "stage": "等待开始...",
         "logs": [],
         "result": None,
-        "error": None
+        "error": None,
+        "created_at": datetime.now()
     }
     
     thread = threading.Thread(
@@ -494,7 +496,8 @@ async def start_quant(request: dict):
         "stage": "等待开始...",
         "logs": [],
         "result": None,
-        "error": None
+        "error": None,
+        "created_at": datetime.now()
     }
     
     thread = threading.Thread(
@@ -525,7 +528,8 @@ async def start_qual(request: dict):
         "stage": "等待开始...",
         "logs": [],
         "result": None,
-        "error": None
+        "error": None,
+        "created_at": datetime.now()
     }
     
     thread = threading.Thread(
