@@ -33,11 +33,11 @@ class FilterRequest(BaseModel):
 
 
 def get_file_path(file_id: str) -> Optional[str]:
-    """Find uploaded file by file_id"""
+    """Find uploaded file by file_id (returns .txt or .pdf, not .meta)"""
     if not os.path.exists(UPLOAD_DIR):
         return None
     for filename in os.listdir(UPLOAD_DIR):
-        if filename.startswith(file_id):
+        if filename.startswith(file_id) and not filename.endswith('.meta'):
             return os.path.join(UPLOAD_DIR, filename)
     return None
 
@@ -112,16 +112,25 @@ def run_filter_task(task_id: str, file_path: str, mode: str, topic: str, min_yea
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["stage"] = "完成"
         tasks[task_id]["logs"].append(f"✓ 已导出: {os.path.basename(out_path)}")
+        
+        # Convert NaN to None for JSON serialization
+        preview_data = df_display.head(20).to_dict('records')
+        for row in preview_data:
+            for key in row:
+                if pd.isna(row[key]):
+                    row[key] = None
+        
         tasks[task_id]["result"] = {
             "output_path": out_path,
             "row_count": len(df_display),
-            "preview": df_display.head(20).to_dict('records')
+            "preview": preview_data
         }
         
     except Exception as e:
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ 错误: {str(e)}")
+        tasks[task_id]["error"] = str(e)
         tasks[task_id]["error"] = str(e)
 
 

@@ -9,6 +9,7 @@ const TABS = [
   { id: 'qual', label: '四步精读', icon: '◉' },
   { id: 'compare', label: '对比分析', icon: '⇄' },
   { id: 'prompts', label: '提示词管理', icon: '⚙' },
+  { id: 'history', label: '历史记录', icon: '📁' },
 ]
 
 function App() {
@@ -145,11 +146,9 @@ function App() {
         {activeTab === 'quant' && <QuantTab apiKey={apiKey} />}
         {activeTab === 'qual' && <QualTab apiKey={apiKey} />}
         {activeTab === 'compare' && <CompareTab />}
-        {activeTab === 'prompts' && <PromptsTab apiKey={apiKey} />}
+        {activeTab === 'prompts' && <PromptsTab />}
+        {activeTab === 'history' && <HistoryTab />}
       </main>
-
-      {/* History Panel - hidden on compare tab */}
-      {activeTab !== 'compare' && <HistoryPanel />}
     </div>
   )
 }
@@ -497,7 +496,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [dims, setDims] = useState<string[]>(["研究问题", "理论框架", "识别策略"])
   const [customQ, setCustomQ] = useState('')
-  const [extraction, setExtraction] = useState('full')
+  const [extraction, _setExtraction] = useState('full')
   const [isRunning, setIsRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   const [stage, setStage] = useState('等待上传...')
@@ -947,7 +946,7 @@ function QualTab({ apiKey }: { apiKey: string }) {
 }
 
 // Tab 4: 提示词管理
-function PromptsTab({ apiKey }: { apiKey: string }) {
+function PromptsTab() {
   const [promptType, setPromptType] = useState('long')
   const [currentStep, setCurrentStep] = useState('overview')
   const [content, setContent] = useState('')
@@ -971,14 +970,18 @@ function PromptsTab({ apiKey }: { apiKey: string }) {
       { id: 'L4', label: 'L4: 价值与启示' },
     ]},
     { id: 'long', label: '长文本精读', steps: [
-      { id: 'overview', label: '核心贡献识别' },
-      { id: 'theory', label: '理论框架评估' },
-      { id: 'methodology', label: '方法论批判' },
-      { id: 'results', label: '实证结果解读' },
-      { id: 'limitations', label: '局限性分析' },
-      { id: 'implications', label: '实践意义' },
-      { id: 'comparison', label: '跨文献对比' },
-      { id: 'future', label: '未来方向' },
+      { id: 'overview', label: '研究问题' },
+      { id: 'theory', label: '理论框架' },
+      { id: 'methodology', label: '识别策略' },
+      { id: 'data_source', label: '数据来源' },
+      { id: 'variable_measurement', label: '变量度量' },
+      { id: 'identification_assumptions', label: '识别假设' },
+      { id: 'results', label: '统计结果' },
+      { id: 'mechanism', label: '机制分析' },
+      { id: 'robustness', label: '稳健性检验' },
+      { id: 'external_validity', label: '外部有效性' },
+      { id: 'contributions_limitations', label: '贡献与局限' },
+      { id: 'writing_quality', label: '写作质量' },
       { id: 'custom', label: '自定义问题' },
     ]},
     { id: 'filter', label: '文献筛选', steps: [
@@ -1051,17 +1054,23 @@ function PromptsTab({ apiKey }: { apiKey: string }) {
 export default App
 
 // History Panel - Show all generated reports
-function HistoryPanel() {
-  const [files, setFiles] = useState<any[]>([])
+function HistoryTab() {
+  const [subTab, setSubTab] = useState<'reading' | 'synthesis'>('reading')
+  const [readingFiles, setReadingFiles] = useState<any[]>([])
+  const [synthesisFiles, setSynthesisFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const [expanded, setExpanded] = useState(false)
 
-  const fetchHistory = async () => {
+  const fetchAll = async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/history/')
-      const data = await res.json()
-      setFiles(data.all || [])
+      const [readingRes, synthRes] = await Promise.all([
+        fetch('/api/history/'),
+        fetch('/api/history/synthesis/')
+      ])
+      const readingData = await readingRes.json()
+      const synthData = await synthRes.json()
+      setReadingFiles(readingData.all || [])
+      setSynthesisFiles(synthData.all || [])
     } catch (e) {
       console.error('Failed to load history:', e)
     }
@@ -1069,15 +1078,19 @@ function HistoryPanel() {
   }
 
   useEffect(() => {
-    if (expanded) fetchHistory()
-  }, [expanded])
+    fetchAll()
+  }, [])
 
-  const handleDelete = async (filename: string) => {
+  const handleDelete = async (filename: string, isSynthesis: boolean) => {
     if (!confirm(`确定删除 ${filename}？`)) return
     try {
       const res = await fetch(`/api/history/${encodeURIComponent(filename)}`, { method: 'DELETE' })
       if (res.ok) {
-        setFiles(files.filter(f => f.filename !== filename))
+        if (isSynthesis) {
+          setSynthesisFiles(files => files.filter(f => f.filename !== filename))
+        } else {
+          setReadingFiles(files => files.filter(f => f.filename !== filename))
+        }
       }
     } catch (e) {
       console.error('Failed to delete:', e)
@@ -1089,79 +1102,100 @@ function HistoryPanel() {
     '七步精读': '📊',
     '四步精读': '📋',
     '文献筛选': '📑',
+    'AI综述': '🤖',
     '其他': '📎',
   }
 
-  return (
-    <div className="border-t border-gray-200 bg-gray-50">
-      <div className="mx-auto max-w-7xl px-4">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full py-3 flex items-center justify-between text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-        >
-          <span className="flex items-center gap-2">
-            <span>📁</span>
-            历史记录 {files.length > 0 && `(${files.length})`}
-          </span>
-          <span className={`transform transition-transform ${expanded ? 'rotate-180' : ''}`}>▼</span>
-        </button>
-
-        {expanded && (
-          <div className="pb-6">
-            {loading ? (
-              <div className="text-sm text-gray-400 py-4">加载中...</div>
-            ) : files.length === 0 ? (
-              <div className="text-sm text-gray-400 py-4">暂无历史记录</div>
-            ) : (
-              <div className="space-y-2">
-                {files.map((file) => (
-                  <div
-                    key={file.filename}
-                    className="flex items-center justify-between rounded-lg bg-white border border-gray-200 px-4 py-3 hover:border-emerald-300 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-lg">{typeIcon[file.type] || '📎'}</span>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-800 truncate">{file.filename}</div>
-                        <div className="text-xs text-gray-400 flex items-center gap-2">
-                          <span>{file.type}</span>
-                          <span>·</span>
-                          <span>{file.size_human}</span>
-                          <span>·</span>
-                          <span>{file.modified}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      <a
-                        href={`/api/history/${encodeURIComponent(file.filename)}/preview`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
-                      >
-                        👁 预览
-                      </a>
-                      <a
-                        href={`/api/download/${encodeURIComponent(file.filename)}`}
-                        download
-                        className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
-                      >
-                        ⬇ 下载
-                      </a>
-                      <button
-                        onClick={() => handleDelete(file.filename)}
-                        className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
-                      >
-                        🗑 删除
-                      </button>
-                    </div>
-                  </div>
-                ))}
+  const renderFileList = (files: any[], isSynthesis: boolean) => {
+    if (files.length === 0) {
+      return <div className="text-sm text-gray-400 py-8 text-center">暂无记录</div>
+    }
+    return (
+      <div className="space-y-2">
+        {files.map((file) => (
+          <div
+            key={file.filename}
+            className="flex items-center justify-between rounded-lg bg-white border border-gray-200 px-4 py-3 hover:border-emerald-300 transition-colors"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-lg">{typeIcon[file.type] || '📎'}</span>
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-gray-800 truncate">{file.filename}</div>
+                <div className="text-xs text-gray-400 flex items-center gap-2">
+                  <span>{file.type}</span>
+                  <span>·</span>
+                  <span>{file.size_human}</span>
+                  <span>·</span>
+                  <span>{file.modified}</span>
+                </div>
               </div>
-            )}
+            </div>
+            <div className="flex items-center gap-2 ml-4">
+              <a
+                href={`/api/history/${encodeURIComponent(file.filename)}/preview`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+              >
+                👁 预览
+              </a>
+              <a
+                href={`/api/download/${encodeURIComponent(file.filename)}`}
+                download
+                className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+              >
+                ⬇ 下载
+              </a>
+              <button
+                onClick={() => handleDelete(file.filename, isSynthesis)}
+                className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
+              >
+                🗑 删除
+              </button>
+            </div>
           </div>
-        )}
+        ))}
       </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-6">
+      <h2 className="text-lg font-semibold text-gray-800 mb-4">📁 历史记录</h2>
+      
+      {/* Sub tabs */}
+      <div className="flex gap-2 mb-6 border-b border-gray-200">
+        <button
+          onClick={() => setSubTab('reading')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            subTab === 'reading'
+              ? 'border-emerald-600 text-emerald-700'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          📚 文献阅读 ({readingFiles.length})
+        </button>
+        <button
+          onClick={() => setSubTab('synthesis')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            subTab === 'synthesis'
+              ? 'border-emerald-600 text-emerald-700'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          🤖 AI综述 ({synthesisFiles.length})
+        </button>
+        <button
+          onClick={fetchAll}
+          className="ml-auto px-3 py-2 text-sm text-gray-500 hover:text-emerald-600 transition-colors"
+          disabled={loading}
+        >
+          {loading ? '⏳' : '🔄'} 刷新
+        </button>
+      </div>
+
+      {subTab === 'reading' && renderFileList(readingFiles, false)}
+      {subTab === 'synthesis' && renderFileList(synthesisFiles, true)}
     </div>
   )
 }

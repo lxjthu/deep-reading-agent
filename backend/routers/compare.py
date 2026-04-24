@@ -19,6 +19,7 @@ class CompareRequest(BaseModel):
     subQuestions: List[str]
     paperData: list
     api_key: Optional[str] = None
+    mode: Optional[str] = "single"  # "single" or "multi"
 
 
 class LongCompareRequest(BaseModel):
@@ -26,6 +27,7 @@ class LongCompareRequest(BaseModel):
     papers: List[str]
     paperData: list
     api_key: Optional[str] = None
+    mode: Optional[str] = "single"  # "single" or "multi"
 
 
 def get_api_key(provided_key: Optional[str] = None) -> str:
@@ -37,34 +39,73 @@ def get_api_key(provided_key: Optional[str] = None) -> str:
 
 @router.post("/analyze")
 async def analyze_comparison(req: CompareRequest):
-    """Generate AI synthesis for 7-step or 4-step comparison"""
+    """Generate AI synthesis for 7-step or 4-step comparison - one paragraph style"""
     try:
         from openai import OpenAI
-        api_key = get_api_key()
-        if not api_key:
-            # Try to use user's key from request if available
-            # For now, fallback to env
-            pass
-        
         client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
         
-        # Build prompt
-        prompt_parts = [f"请基于以下文献在「{req.step}」下的回答，生成一份文献综述。"]
-        prompt_parts.append("要求：")
-        prompt_parts.append("1. 比较不同文献的观点异同")
-        prompt_parts.append("2. 指出共识和分歧")
-        prompt_parts.append("3. 使用间注法引用（作者，年份）")
-        prompt_parts.append("4. 最后附上参考文献目录")
+        # Build prompt - integrated paragraph style
+        prompt_parts = []
+        prompt_parts.append(f"请将以下文献在「{req.step}」步骤下的回答整合为一段连贯的综述文字。")
         prompt_parts.append("")
-        prompt_parts.append("文献内容：")
+        # Determine mode based on number of sub-questions
+        mode = req.mode or ("multi" if len(req.subQuestions) > 1 else "single")
         
-        for paper in req.paperData:
-            prompt_parts.append(f"\n--- {paper.get('title', paper['filename'])} ---")
-            for sq, content in paper.get('subQuestions', {}).items():
-                prompt_parts.append(f"【{sq}】")
-                prompt_parts.append(content[:1000])  # Limit content length
-        
-        prompt = "\n".join(prompt_parts)
+        # Build prompt based on mode
+        if mode == "multi":
+            # Multi-sub-question: sectioned format
+            prompt_parts = []
+            prompt_parts.append(f"请将以下文献在「{req.step}」步骤下的回答整合为一份文献综述。")
+            prompt_parts.append("")
+            prompt_parts.append("要求：")
+            prompt_parts.append("1. 按子问题分节，每节1-3段，每节有明确的主题")
+            prompt_parts.append("2. 每节内比较不同文献的观点异同，找出共识与分歧")
+            prompt_parts.append("3. 使用间注法引用（作者，年份），例如：(Ludwig et al., 2024)")
+            prompt_parts.append("4. 语言简洁、逻辑连贯")
+            prompt_parts.append("5. 最后在文末统一附上参考文献目录（按作者姓氏排序）")
+            prompt_parts.append("")
+            prompt_parts.append("文献内容：")
+            
+            for paper in req.paperData:
+                title = paper.get('title', paper['filename'])
+                authors = paper.get('authors', [])
+                year = paper.get('year', '年份未知')
+                author_str = ', '.join(authors[:2]) if authors else 'Unknown'
+                if len(authors) > 2:
+                    author_str += ' et al.'
+                prompt_parts.append(f"\n--- {title} ({author_str}, {year}) ---")
+                for sq, content in paper.get('subQuestions', {}).items():
+                    prompt_parts.append(f"【{sq}】")
+                    prompt_parts.append(content[:1000])
+            
+            prompt = "\n".join(prompt_parts)
+        else:
+            # Single sub-question: integrated paragraph
+            prompt_parts = []
+            prompt_parts.append(f"请将以下文献在「{req.step}」步骤下的回答整合为一段连贯的综述文字。")
+            prompt_parts.append("")
+            prompt_parts.append("要求：")
+            prompt_parts.append("1. 输出为一段完整的学术性文字，不要分小节、不要加标题、不要写引言")
+            prompt_parts.append("2. 比较不同文献的观点异同，找出共识与分歧")
+            prompt_parts.append("3. 使用间注法引用（作者，年份），例如：(Ludwig et al., 2024)")
+            prompt_parts.append("4. 语言简洁、逻辑连贯，适合作为论文文献综述中的一个段落")
+            prompt_parts.append("5. 最后在文末附上参考文献目录（按作者姓氏排序）")
+            prompt_parts.append("")
+            prompt_parts.append("文献内容：")
+            
+            for paper in req.paperData:
+                title = paper.get('title', paper['filename'])
+                authors = paper.get('authors', [])
+                year = paper.get('year', '年份未知')
+                author_str = ', '.join(authors[:2]) if authors else 'Unknown'
+                if len(authors) > 2:
+                    author_str += ' et al.'
+                prompt_parts.append(f"\n--- {title} ({author_str}, {year}) ---")
+                for sq, content in paper.get('subQuestions', {}).items():
+                    prompt_parts.append(f"【{sq}】")
+                    prompt_parts.append(content[:1000])
+            
+            prompt = "\n".join(prompt_parts)
         
         response = client.chat.completions.create(
             model="deepseek-chat",
@@ -80,27 +121,66 @@ async def analyze_comparison(req: CompareRequest):
 
 @router.post("/analyze_long")
 async def analyze_long_comparison(req: LongCompareRequest):
-    """Generate AI synthesis for long context comparison"""
+    """Generate AI synthesis for long context comparison - one paragraph style"""
     try:
         from openai import OpenAI
-        api_key = get_api_key()
         client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
         
-        # Build prompt
-        prompt_parts = [f"请基于以下文献在「{req.dimension}」维度下的分析，生成一份文献综述。"]
-        prompt_parts.append("要求：")
-        prompt_parts.append("1. 比较不同文献的观点异同")
-        prompt_parts.append("2. 指出共识和分歧")
-        prompt_parts.append("3. 使用间注法引用（作者，年份）")
-        prompt_parts.append("4. 最后附上参考文献目录")
-        prompt_parts.append("")
-        prompt_parts.append("文献内容：")
+        # Build prompt based on mode
+        mode = req.mode or "single"
         
-        for paper in req.paperData:
-            prompt_parts.append(f"\n--- {paper.get('title', paper['filename'])} ---")
-            prompt_parts.append(paper.get('content', '')[:1500])  # Limit content length
-        
-        prompt = "\n".join(prompt_parts)
+        if mode == "multi":
+            # Multi-dimension: sectioned format
+            prompt_parts = []
+            prompt_parts.append(f"请将以下文献在「{req.dimension}」维度下的分析整合为一份文献综述。")
+            prompt_parts.append("")
+            prompt_parts.append("要求：")
+            prompt_parts.append("1. 按不同文献分节，每节1-3段，每节有明确的主题")
+            prompt_parts.append("2. 每节内比较不同文献的观点异同，找出共识与分歧")
+            prompt_parts.append("3. 使用间注法引用（作者，年份），例如：(Ludwig et al., 2024)")
+            prompt_parts.append("4. 语言简洁、逻辑连贯")
+            prompt_parts.append("5. 最后在文末统一附上参考文献目录（按作者姓氏排序）")
+            prompt_parts.append("")
+            prompt_parts.append("文献内容：")
+            
+            for paper in req.paperData:
+                title = paper.get('title', paper['filename'])
+                authors = paper.get('authors', [])
+                year = paper.get('year', '年份未知')
+                author_str = ', '.join(authors[:2]) if authors else 'Unknown'
+                if len(authors) > 2:
+                    author_str += ' et al.'
+                prompt_parts.append(f"\n--- {title} ({author_str}, {year}) ---")
+                content = paper.get('content', '')[:2000]
+                prompt_parts.append(content)
+            
+            prompt = "\n".join(prompt_parts)
+        else:
+            # Single dimension: integrated paragraph
+            prompt_parts = []
+            prompt_parts.append(f"请将以下文献在「{req.dimension}」维度下的分析整合为一段连贯的综述文字。")
+            prompt_parts.append("")
+            prompt_parts.append("要求：")
+            prompt_parts.append("1. 输出为一段完整的学术性文字，不要分小节、不要加标题、不要写引言")
+            prompt_parts.append("2. 比较不同文献的观点异同，找出共识与分歧")
+            prompt_parts.append("3. 使用间注法引用（作者，年份），例如：(Ludwig et al., 2024)")
+            prompt_parts.append("4. 语言简洁、逻辑连贯，适合作为论文文献综述中的一个段落")
+            prompt_parts.append("5. 最后在文末附上参考文献目录（按作者姓氏排序）")
+            prompt_parts.append("")
+            prompt_parts.append("文献内容：")
+            
+            for paper in req.paperData:
+                title = paper.get('title', paper['filename'])
+                authors = paper.get('authors', [])
+                year = paper.get('year', '年份未知')
+                author_str = ', '.join(authors[:2]) if authors else 'Unknown'
+                if len(authors) > 2:
+                    author_str += ' et al.'
+                prompt_parts.append(f"\n--- {title} ({author_str}, {year}) ---")
+                content = paper.get('content', '')[:2000]
+                prompt_parts.append(content)
+            
+            prompt = "\n".join(prompt_parts)
         
         response = client.chat.completions.create(
             model="deepseek-chat",

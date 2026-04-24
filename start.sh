@@ -11,7 +11,7 @@ sleep 2
 echo "=== 启动后端 (FastAPI) ==="
 cd /root/.openclaw/workspace/deep-reading-agent/backend
 source ../venv/bin/activate
-nohup uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 > /tmp/fastapi.log 2>&1 &
+nohup uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 > /tmp/fastapi.log 2>&1 &
 echo "Backend PID: $!"
 
 echo "=== 启动前端 (Vite) ==="

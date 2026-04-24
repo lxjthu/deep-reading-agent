@@ -2,21 +2,21 @@
 from typing import Dict, List, Optional
 
 
-# 分析维度检查清单
+# 分析维度检查清单 - 12个标准维度
 # 用户/系统可以按需调用，不按固定顺序
 ANALYSIS_DIMENSIONS = {
     "overview": {
-        "name": "核心贡献识别",
+        "name": "研究问题",
         "description": "论文解决了什么问题？创新点在哪里？",
         "default_questions": [
-            "这篇论文的核心贡献是什么？（最多3点）",
+            "这篇论文的核心研究问题是什么？",
             "与现有研究相比，其创新性在哪里？",
             "最突出的局限性是什么？",
         ],
-        "system_prompt_addition": "请聚焦核心贡献，避免泛泛而谈。",
+        "system_prompt_addition": "请聚焦核心研究问题，避免泛泛而谈。",
     },
     "theory": {
-        "name": "理论框架评估",
+        "name": "理论框架",
         "description": "引用了哪些理论？是否存在理论缺口？",
         "default_questions": [
             "论文引用了哪些核心理论？",
@@ -26,7 +26,7 @@ ANALYSIS_DIMENSIONS = {
         "system_prompt_addition": "请具体指出理论来源、适用性和缺口。",
     },
     "methodology": {
-        "name": "方法论批判",
+        "name": "识别策略",
         "description": "研究方法是否合理？因果推断是否可靠？",
         "default_questions": [
             "研究方法是否合理？",
@@ -35,8 +35,38 @@ ANALYSIS_DIMENSIONS = {
         ],
         "system_prompt_addition": "请严格评估方法论，指出所有潜在偏差。",
     },
+    "data_source": {
+        "name": "数据来源",
+        "description": "数据从哪里获取？是否具有代表性？",
+        "default_questions": [
+            "数据从哪里获取？",
+            "样本是否具有代表性？",
+            "数据质量如何？是否存在缺失或测量误差？",
+        ],
+        "system_prompt_addition": "请评估数据来源的可靠性和代表性。",
+    },
+    "variable_measurement": {
+        "name": "变量度量",
+        "description": "关键变量如何度量？是否存在测量误差？",
+        "default_questions": [
+            "关键变量如何度量？",
+            "测量方法是否可靠？",
+            "是否存在测量误差或代理变量问题？",
+        ],
+        "system_prompt_addition": "请评估变量度量的准确性和合理性。",
+    },
+    "identification_assumptions": {
+        "name": "识别假设",
+        "description": "因果识别所依赖的关键假设是什么？是否可信？",
+        "default_questions": [
+            "因果识别所依赖的关键假设是什么？",
+            "这些假设是否可信？",
+            "如果假设不成立，结论会如何变化？",
+        ],
+        "system_prompt_addition": "请严格评估识别假设的可信度和稳健性。",
+    },
     "results": {
-        "name": "实证结果解读",
+        "name": "统计结果",
         "description": "数据是否充分？统计显著性？效应大小？",
         "default_questions": [
             "关键实证结果是什么？",
@@ -45,45 +75,55 @@ ANALYSIS_DIMENSIONS = {
         ],
         "system_prompt_addition": "请聚焦数据本身，避免过度解读。",
     },
-    "limitations": {
-        "name": "局限性分析",
-        "description": "作者承认了哪些局限？还有哪些没提到？",
+    "mechanism": {
+        "name": "机制分析",
+        "description": "论文是否分析了作用机制？机制证据是否充分？",
         "default_questions": [
-            "作者自己承认了哪些局限？",
-            "还有哪些局限性作者没有提到？",
+            "论文是否分析了作用机制？",
+            "机制证据是否充分？",
+            "是否存在其他可能的解释机制？",
+        ],
+        "system_prompt_addition": "请评估机制分析的深度和证据强度。",
+    },
+    "robustness": {
+        "name": "稳健性检验",
+        "description": "结果是否通过了稳健性检验？",
+        "default_questions": [
+            "作者做了哪些稳健性检验？",
+            "结果是否对不同模型设定敏感？",
+            "是否考虑了异质性效应？",
+        ],
+        "system_prompt_addition": "请评估稳健性检验的全面性和说服力。",
+    },
+    "external_validity": {
+        "name": "外部有效性",
+        "description": "结果能否推广到其他场景？",
+        "default_questions": [
+            "结果能否推广到其他场景？",
+            "样本的外部有效性如何？",
+            "在不同群体或时期是否依然成立？",
+        ],
+        "system_prompt_addition": "请评估结果的外部有效性和推广范围。",
+    },
+    "contributions_limitations": {
+        "name": "贡献与局限",
+        "description": "论文的核心贡献和主要局限是什么？",
+        "default_questions": [
+            "论文的核心贡献是什么？（最多3点）",
+            "主要局限性有哪些？",
             "这些局限性对结论的可靠性有多大影响？",
         ],
-        "system_prompt_addition": "请区分作者自述局限和你发现的额外局限。",
+        "system_prompt_addition": "请平衡评价贡献和局限。",
     },
-    "implications": {
-        "name": "实践意义",
-        "description": "对领域、政策、实践有什么启示？",
+    "writing_quality": {
+        "name": "写作质量",
+        "description": "论文的写作和论证质量如何？",
         "default_questions": [
-            "这项研究对该领域有什么启示？",
-            "对政策制定者有什么建议？",
-            "对实践者有什么 actionable 的建议？",
+            "论文的结构是否清晰？",
+            "论证逻辑是否严密？",
+            "图表和表述是否准确易懂？",
         ],
-        "system_prompt_addition": "请提供具体、可操作的启示。",
-    },
-    "comparison": {
-        "name": "跨文献对比",
-        "description": "与相关工作相比，增量贡献是什么？",
-        "default_questions": [
-            "与相关工作相比，关键区别是什么？",
-            "这篇论文的增量贡献是什么？",
-            "如果引用这篇论文，应该在什么场景下引用？",
-        ],
-        "system_prompt_addition": "请具体对比，避免泛泛而谈。",
-    },
-    "future": {
-        "name": "未来方向",
-        "description": "如果让你继续这项研究，你会怎么做？",
-        "default_questions": [
-            "如果让你继续这项研究，你会怎么做？",
-            "下一步最关键的实证工作是什么？",
-            "还有哪些研究问题没有被回答？",
-        ],
-        "system_prompt_addition": "请提供具体、可行的研究建议。",
+        "system_prompt_addition": "请评估写作质量和论证清晰度。",
     },
     "custom": {
         "name": "自定义问题",

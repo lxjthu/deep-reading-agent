@@ -22,7 +22,7 @@ async def upload_file(file: UploadFile = File(...)):
     Returns file_id for subsequent API calls
     """
     # Validate file type
-    allowed_extensions = {'.pdf', '.txt'}
+    allowed_extensions = {'.pdf', '.txt', '.doc', '.docx'}
     file_ext = Path(file.filename).suffix.lower()
     
     if file_ext not in allowed_extensions:
@@ -54,7 +54,7 @@ async def upload_file(file: UploadFile = File(...)):
             "file_id": file_id,
             "filename": file.filename,
             "size": file_size,
-            "type": "pdf" if file_ext == '.pdf' else 'txt',
+            "type": "pdf" if file_ext == '.pdf' else ('doc' if file_ext in {'.doc', '.docx'} else 'txt'),
             "message": "上传成功"
         }
     
@@ -68,9 +68,9 @@ async def upload_file(file: UploadFile = File(...)):
 @router.get("/{file_id}/info")
 async def get_file_info(file_id: str):
     """Get uploaded file info"""
-    # Find file by file_id prefix
+    # Find file by file_id prefix (exclude .meta files)
     for filename in os.listdir(UPLOAD_DIR):
-        if filename.startswith(file_id):
+        if filename.startswith(file_id) and not filename.endswith('.meta'):
             file_path = os.path.join(UPLOAD_DIR, filename)
             return {
                 "file_id": file_id,
@@ -85,10 +85,14 @@ async def get_file_info(file_id: str):
 @router.delete("/{file_id}")
 async def delete_file(file_id: str):
     """Delete uploaded file"""
+    deleted = False
     for filename in os.listdir(UPLOAD_DIR):
         if filename.startswith(file_id):
             file_path = os.path.join(UPLOAD_DIR, filename)
             os.remove(file_path)
-            return {"success": True, "message": "File deleted"}
+            deleted = True
+    
+    if deleted:
+        return {"success": True, "message": "File deleted"}
     
     raise HTTPException(status_code=404, detail="File not found")

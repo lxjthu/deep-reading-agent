@@ -28,3 +28,10 @@ nul
 *.zip
 .claude/
 translation_results/
+
+# Deployment / uploads
+backend/_uploads/
+frontend/dist/
+node_modules/
+fix_boundaries.py
+test_*.txt

@@ -169,15 +169,17 @@ def run_long_context_task(task_id: str, file_path: str, analysis_dims: list, cus
             # Map Chinese dim name to key
             dim_map = {
                 "研究问题": "overview",
-                "理论框架": "theory", 
-                "数据与方法": "methodology",
+                "理论框架": "theory",
                 "识别策略": "methodology",
-                "结果解读": "results",
-                "稳健性": "results",
-                "局限与拓展": "limitations",
-                "实践意义": "implications",
-                "跨文献对比": "comparison",
-                "未来方向": "future",
+                "数据来源": "data_source",
+                "变量度量": "variable_measurement",
+                "识别假设": "identification_assumptions",
+                "统计结果": "results",
+                "机制分析": "mechanism",
+                "稳健性检验": "robustness",
+                "外部有效性": "external_validity",
+                "贡献与局限": "contributions_limitations",
+                "写作质量": "writing_quality",
             }
             mapped_key = dim_map.get(dim_key, "overview")
             

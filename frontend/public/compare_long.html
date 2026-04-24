@@ -291,6 +291,9 @@
           正在生成文献综述，请稍候...
         </div>
         <pre id="synthesisContent" style="display:none;"></pre>
+        <div id="synthesisActions" style="display:none; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+          <button id="btnDownloadSynthesis" class="btn-synthesis" style="background: #3b82f6;">💾 保存到历史记录</button>
+        </div>
       </div>
     </div>
   </div>
@@ -612,13 +615,41 @@
             dimension: selectedDim,
             papers: selectedPapers,
             paperData: paperData,
-            api_key: localStorage.getItem('deepseek_api_key') || ''
+            api_key: localStorage.getItem('deepseek_api_key') || '',
+            mode: 'single'
           })
         });
         const result = await response.json();
         loading.style.display = 'none';
         content.style.display = 'block';
         content.textContent = result.synthesis || '生成失败';
+        
+        // Show save button
+        const actions = document.getElementById('synthesisActions');
+        actions.style.display = 'block';
+        
+        // Save handler
+        document.getElementById('btnDownloadSynthesis').onclick = async () => {
+          try {
+            const saveRes = await fetch('/api/history/synthesis/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                dimension: selectedDim,
+                papers: paperData.map(p => p.title || p.filename),
+                content: result.synthesis
+              })
+            });
+            const saveData = await saveRes.json();
+            if (saveData.success) {
+              alert('✓ 已保存到历史记录');
+            } else {
+              alert('保存失败');
+            }
+          } catch (e) {
+            alert('保存失败: ' + e.message);
+          }
+        };
       } catch (e) {
         loading.style.display = 'none';
         content.style.display = 'block';

@@ -166,21 +166,50 @@ class CNKIParser(BaseParser):
         return pd.DataFrame(data)
 
 def get_parser(file_path):
-    """Factory method to detect format and return appropriate parser."""
+    """Factory method to detect format and return appropriate parser.
+    Supports .txt, .doc (via antiword), and .docx (via python-docx)."""
+    import subprocess
+    import tempfile
+    import os
+    
+    # Handle .doc files by converting to text first
+    if file_path.lower().endswith('.doc'):
+        try:
+            result = subprocess.run(['antiword', file_path], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and result.stdout.strip():
+                # Write converted text to temp file
+                fd, temp_path = tempfile.mkstemp(suffix='.txt')
+                try:
+                    os.write(fd, result.stdout.encode('utf-8'))
+                    os.close(fd)
+                    file_path = temp_path  # Use converted text for parsing
+                except:
+                    os.close(fd)
+                    raise
+        except Exception as e:
+            logger.warning(f"antiword failed for {file_path}: {e}")
+    
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            header = f.read(1024)
+        # Try reading with utf-8 first
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            # Read larger header to handle binary noise at start (.doc files)
+            header = f.read(8192)
     except:
         try:
-            with open(file_path, 'r', encoding='gb18030') as f:
-                header = f.read(1024)
+            with open(file_path, 'r', encoding='gb18030', errors='replace') as f:
+                header = f.read(8192)
         except:
             return None
 
-    if "FN Clarivate" in header or "VR 1.0" in header:
+    # WoS format detection - search in larger window, case-insensitive
+    if "FN Clarivate" in header or "VR 1.0" in header or "Clarivate Analytics Web of Science" in header:
+        logger.info(f"Detected WoS format for {file_path}")
         return WoSParser(file_path)
     elif "SrcDatabase-" in header or "Title-题名" in header:
+        logger.info(f"Detected CNKI format for {file_path}")
         return CNKIParser(file_path)
     else:
-        # Default fallback or error
+        # Log header preview for debugging
+        safe_preview = header[:500].replace('\n', ' ').replace('\r', '')
+        logger.warning(f"Unsupported file format for {file_path}. Header preview: {safe_preview}...")
         return None

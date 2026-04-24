@@ -5,11 +5,20 @@ from typing import List, Dict, Optional
 import markdown
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 router = APIRouter()
 
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deep_reading_results")
 FILTER_DIR = os.path.join(RESULTS_DIR, "literature_filter")
+SYNTHESIS_DIR = os.path.join(RESULTS_DIR, "synthesis")
+os.makedirs(SYNTHESIS_DIR, exist_ok=True)
+
+
+class SaveSynthesisRequest(BaseModel):
+    dimension: str
+    papers: List[str]
+    content: str
 
 
 def _get_file_info(filepath: str) -> Dict:
@@ -49,11 +58,14 @@ def _detect_type(filepath: str) -> str:
 
 
 def _find_file(filename: str) -> Optional[str]:
-    """Find file in results or filter directory"""
+    """Find file in results, filter, or synthesis directory"""
     filepath = os.path.join(RESULTS_DIR, filename)
     if os.path.exists(filepath) and os.path.isfile(filepath):
         return filepath
     filepath = os.path.join(FILTER_DIR, filename)
+    if os.path.exists(filepath) and os.path.isfile(filepath):
+        return filepath
+    filepath = os.path.join(SYNTHESIS_DIR, filename)
     if os.path.exists(filepath) and os.path.isfile(filepath):
         return filepath
     return None
@@ -170,7 +182,54 @@ async def delete_file(filename: str):
     """Delete a history file by filename"""
     filepath = _find_file(filename)
     if not filepath:
+        # Also check synthesis directory
+        synth_path = os.path.join(SYNTHESIS_DIR, filename)
+        if os.path.exists(synth_path):
+            os.remove(synth_path)
+            return {"success": True, "message": f"已删除 {filename}"}
         raise HTTPException(status_code=404, detail="File not found")
     
     os.remove(filepath)
     return {"success": True, "message": f"已删除 {filename}"}
+
+
+# === Synthesis History ===
+
+@router.get("/synthesis/")
+async def list_synthesis():
+    """List all synthesis files"""
+    files = _list_files(SYNTHESIS_DIR)
+    for f in files:
+        f["type"] = "AI综述"
+    return {"synthesis": files, "all": files}
+
+
+@router.post("/synthesis/")
+async def save_synthesis(req: SaveSynthesisRequest):
+    """Save a synthesis result"""
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dim_safe = req.dimension.replace("/", "_").replace("\\", "_")[:30]
+    filename = f"synthesis_{dim_safe}_{timestamp}.md"
+    filepath = os.path.join(SYNTHESIS_DIR, filename)
+    
+    # Build content with metadata
+    papers_str = ", ".join(req.papers[:3])
+    if len(req.papers) > 3:
+        papers_str += f" 等{len(req.papers)}篇"
+    
+    content = f"""# AI文献综述：{req.dimension}
+
+**生成时间**：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}  
+**涉及文献**：{papers_str}  
+**维度/步骤**：{req.dimension}
+
+---
+
+{req.content}
+"""
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(content)
+    
+    return {"success": True, "filename": filename, "path": filepath}
