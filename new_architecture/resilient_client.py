@@ -32,7 +32,7 @@ class ResilientDeepSeekClient:
     def _call_api_streaming(
         self,
         messages: List[Dict[str, str]],
-        max_tokens: int = 2000,
+        max_tokens: int = 8000,
         temperature: float = 0.7,
         timeout: int = 60,
         max_retries: int = 3,
@@ -130,7 +130,7 @@ class ResilientDeepSeekClient:
     def chat_round(
         self,
         messages: List[Dict[str, str]],
-        max_tokens: int = 2000,
+        max_tokens: int = 8000,
         temperature: float = 0.7,
     ) -> str:
         """执行单轮对话（带完整错误处理）"""
@@ -201,7 +201,7 @@ class ConversationManager:
                 summary_parts.append(f"Q: {q}...")
         return "\n".join(summary_parts)
     
-    def ask(self, question: str, max_tokens: int = 2000) -> str:
+    def ask(self, question: str, max_tokens: int = 8000) -> str:
         """
         提问并获取回答
         

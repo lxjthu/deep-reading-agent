@@ -10,7 +10,7 @@ class Config:
     api_key: str
     base_url: str = "https://api.deepseek.com"
     model: str = "deepseek-chat"
-    max_tokens: int = 2000
+    max_tokens: int = 8000
     temperature: float = 0.7
     timeout: int = 120  # 请求超时秒数
     
