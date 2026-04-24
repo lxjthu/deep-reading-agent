@@ -1,31 +1,12 @@
-from .common import call_deepseek, save_step_result, smart_chunk, get_combined_text_for_step
+from .common import call_deepseek, save_step_result, smart_chunk, get_combined_text_for_step, load_prompt_from_file
 import logging
 import os
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """你是一位 Daron Acemoglu 级别的顶级计量经济学家。
-你的任务是分析"变量与测量"，回答以下问题：
-
-### **13. 核心变量定义**
-Y 和 X 具体是什么？其选择有何文献上的来源或依据？
-
-### **14. 衡量方式**
-直接观测还是代理变量（Proxy）？如果是构建指标（如 TFP），具体指标构成要素和算法是什么？
-
-### **15. 控制变量**
-选择了哪些 Z？选择依据是什么？（是为了控制需求冲击，还是供给冲击？）
-
-### **16. 机制分析变量与特殊处理**
-- **机制分析变量**：选择什么变量来做机制分析？具体是如何衡量的？是否使用了中介变量？中介变量具体是什么？是否使用了调节变量？调节变量具体是什么？是否使用了异质性分析？具体如何做的？是否有门槛分析？门槛变量是什么？
-- **特殊处理**：是否进行了对数化、去通胀、标准化等处理？
-
-**格式要求**：
-- 必须使用 `### **` 作为带编号小标题的标记
-- 子项目使用 `-` 列表标记
-- 使用专业、严谨的学术中文回答
-- 如果提供的文本中没有找到相关信息，请明确说明"未找到相关信息"，严禁根据已有知识编造
-"""
+SYSTEM_PROMPT = load_prompt_from_file("step_4_vars", "quant")
+if not SYSTEM_PROMPT:
+    SYSTEM_PROMPT = """你是一位 Daron Acemoglu 级别的顶级计量经济学家。分析变量与测量。"""
 
 def run(sections: dict, assigned_titles: list, output_dir: str, step_id: int = 4):
     """

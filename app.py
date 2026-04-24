@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
-Deep Reading Agent - Gradio GUI
-
-Single-file GUI for the Deep Reading Agent pipeline.
-Launch: python app.py
-Browse: http://127.0.0.1:7860
+Deep Reading Agent v3 - KIMI Edition
+暗琥珀主题 + 长文本精读 + 七步/四步精读
 """
 
 import os
@@ -16,6 +13,8 @@ import shutil
 import subprocess
 import threading
 import time
+import json
+import re as _re
 from datetime import datetime
 from pathlib import Path
 
@@ -24,63 +23,212 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "_gui_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
-# Environment status
+# Gradio Theme - KIMI Dark Amber
 # ---------------------------------------------------------------------------
+KIMI_THEME = gr.themes.Soft(
+    primary_hue=gr.themes.colors.emerald,
+    secondary_hue=gr.themes.colors.teal,
+    neutral_hue=gr.themes.colors.slate,
+    font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+    font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "monospace"],
+).set(
+    button_primary_background_fill="linear-gradient(135deg, #059669, #10b981)",
+    button_primary_background_fill_hover="linear-gradient(135deg, #10b981, #34d399)",
+    button_primary_text_color="white",
+    button_primary_border_color="transparent",
+    slider_color="#10b981",
+    loader_color="#10b981",
+)
 
-def _local_paddleocr_available() -> bool:
-    """Check if local PaddleOCR (paddleocr + paddlex) is installed."""
-    try:
-        from paddleocr_local import is_available
-        return is_available()
-    except ImportError:
-        return False
+# ---------------------------------------------------------------------------
+# Extra CSS - 补充样式
+# ---------------------------------------------------------------------------
+EXTRA_CSS = """
+/* 隐藏 footer */
+footer { display: none !important; }
 
+/* Emoji 图标 - 使用 Unicode 符号替代 */
+.icon-upload::before { content: "↗"; }
+.icon-target::before { content: "★"; }
+.icon-chat::before { content: "✉"; }
+.icon-chart::before { content: "■"; }
+.icon-edit::before { content: "✎"; }
+.icon-download::before { content: "↓"; }
+.icon-folder::before { content: "□"; }
+.icon-pencil::before { content: "✏"; }
+.icon-crystal::before { content: "◉"; }
+.icon-ruler::before { content: "△"; }
+.icon-gear::before { content: "⚙"; }
+.icon-rocket::before { content: "➤"; }
+.icon-filter::before { content: "□"; }
 
-_LOCAL_POCR = _local_paddleocr_available()
+/* 隐藏 no-label 组件的默认标签 */
+.no-label fieldset.block > span:first-child,
+.no-label .block > span:first-child {
+  display: none !important;
+}
 
+/* 按钮 */
+.btn-kimi {
+  background: linear-gradient(135deg, #059669, #10b981) !important;
+  color: white !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25) !important;
+  font-weight: 600 !important;
+  padding: 12px 24px !important;
+  border-radius: 8px !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-kimi:hover {
+  background: linear-gradient(135deg, #10b981, #34d399) !important;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35) !important;
+  transform: translateY(-1px);
+}
+
+.btn-kimi-danger {
+  background: #fef2f2 !important;
+  color: #dc2626 !important;
+  border: 1px solid #fecaca !important;
+  border-radius: 8px !important;
+  padding: 12px 24px !important;
+  font-weight: 600 !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-kimi-danger:hover {
+  background: #fee2e2 !important;
+  transform: translateY(-1px);
+}
+
+/* Header */
+.kimi-header {
+  position: relative;
+  overflow: hidden;
+  padding-top: 3px;
+}
+
+.kimi-header::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #059669, #10b981, #059669);
+}
+
+/* 卡片 */
+.kimi-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  margin-bottom: 16px;
+}
+
+/* 标题 */
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 上传区域 */
+.upload-hint {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* 日志框 */
+.log-box {
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 12px !important;
+  line-height: 1.6 !important;
+  white-space: pre-wrap !important;
+  background: #f9fafb !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 8px !important;
+  padding: 12px 16px !important;
+}
+
+/* Markdown 预览 */
+.md-preview {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px;
+  max-height: 600px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.md-preview h1 { color: #059669 !important; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; }
+.md-preview h2 { color: #1f2937 !important; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+.md-preview h3 { color: #10b981 !important; }
+.md-preview code { color: #059669 !important; background: #f0fdf4 !important; padding: 2px 6px !important; border-radius: 4px !important; }
+.md-preview pre { background: #f9fafb !important; border: 1px solid #e5e7eb !important; padding: 14px !important; border-radius: 8px !important; }
+.md-preview blockquote { border-left: 3px solid #059669 !important; background: #f0fdf4 !important; padding: 10px 16px !important; }
+.md-preview th { color: #059669 !important; background: #f0fdf4 !important; }
+.md-preview td { border-bottom: 1px solid #e5e7eb !important; }
+
+/* Prompt 编辑器 */
+.prompt-box {
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 13px !important;
+  line-height: 1.7 !important;
+}
+
+/* 维度标签 */
+.dim-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+"""
+
+# ---------------------------------------------------------------------------
+# Env status
+# ---------------------------------------------------------------------------
 
 def _env_status():
-    """Return a short status string about configured API keys."""
     parts = []
     ds_key = os.getenv("DEEPSEEK_API_KEY", "")
-    parts.append(f"DeepSeek API: {'Configured' if ds_key else 'Missing'}")
-
-    # PaddleOCR status: local GPU + remote API
-    pocr_parts = []
-    if _LOCAL_POCR:
-        pocr_parts.append("Local GPU")
-    pocr_url = os.getenv("PADDLEOCR_REMOTE_URL", "")
-    if pocr_url:
-        pocr_parts.append("Remote API")
-    if pocr_parts:
-        parts.append(f"PaddleOCR: {' + '.join(pocr_parts)}")
-    else:
-        parts.append("PaddleOCR: Not available (will use pdfplumber fallback)")
-
-    qwen_key = os.getenv("QWEN_API_KEY", "")
-    parts.append(f"Qwen Vision: {'Configured' if qwen_key else 'Not configured'}")
+    parts.append(f"DeepSeek API: {'✓' if ds_key else '✗'}")
     return " | ".join(parts)
 
-
 # ---------------------------------------------------------------------------
-# Log capture utilities
+# Log capture (保留)
 # ---------------------------------------------------------------------------
 
 class QueueHandler(logging.Handler):
-    """Sends log records into a queue for Gradio streaming."""
-
     def __init__(self, log_queue: queue.Queue):
         super().__init__()
         self.log_queue = log_queue
-
     def emit(self, record):
         try:
             msg = self.format(record)
@@ -88,54 +236,39 @@ class QueueHandler(logging.Handler):
         except Exception:
             pass
 
-
 class TeeWriter:
-    """Captures print() / stdout writes into a queue."""
-
     def __init__(self, log_queue: queue.Queue, original):
         self.log_queue = log_queue
         self.original = original
-
     def write(self, s):
         if s and s.strip():
             self.log_queue.put(s.strip())
         if self.original:
             self.original.write(s)
-
     def flush(self):
         if self.original:
             self.original.flush()
 
-
 class OutputCapture:
-    """Context manager that captures logging + stdout into a queue."""
-
     def __init__(self, log_queue: queue.Queue):
         self.log_queue = log_queue
         self._handler = None
         self._tee = None
         self._orig_stdout = None
-
     def __enter__(self):
-        # Attach queue handler to root logger
         self._handler = QueueHandler(self.log_queue)
         self._handler.setLevel(logging.DEBUG)
         self._handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
         logging.getLogger().addHandler(self._handler)
-
-        # Redirect stdout
         self._orig_stdout = sys.stdout
         self._tee = TeeWriter(self.log_queue, self._orig_stdout)
         sys.stdout = self._tee
         return self
-
     def __exit__(self, *exc):
         sys.stdout = self._orig_stdout
         logging.getLogger().removeHandler(self._handler)
 
-
-def _drain_queue(log_queue: queue.Queue, log_lines: list, max_lines: int = 500):
-    """Drain all pending messages from queue into log_lines list."""
+def _drain_queue(log_queue: queue.Queue, log_lines: list, max_lines: int = 300):
     while True:
         try:
             msg = log_queue.get_nowait()
@@ -147,148 +280,84 @@ def _drain_queue(log_queue: queue.Queue, log_lines: list, max_lines: int = 500):
         except queue.Empty:
             return False
 
-
 def _stable_copy(uploaded_file) -> str:
-    """Copy a Gradio uploaded file into _gui_uploads/ and return stable path."""
     if uploaded_file is None:
         return ""
     src = uploaded_file if isinstance(uploaded_file, str) else uploaded_file.name
     basename = os.path.basename(src)
     dst = os.path.join(UPLOAD_DIR, basename)
+    if os.path.abspath(src) == os.path.abspath(dst):
+        return dst
     shutil.copy2(src, dst)
     return dst
 
-
-# ---------------------------------------------------------------------------
-# Cancel mechanism
-# ---------------------------------------------------------------------------
-
 _cancel_event = threading.Event()
-
 
 def _request_cancel():
     _cancel_event.set()
-    return "Cancellation requested... will stop after current stage."
-
+    return "已请求取消..."
 
 def _check_cancel():
     if _cancel_event.is_set():
-        raise InterruptedError("Cancelled by user")
-
-
-# ---------------------------------------------------------------------------
-# Tab 1: PDF Extraction backend
-# ---------------------------------------------------------------------------
-
-def run_extraction(
-    pdf_file,
-    out_dir,
-    use_local_gpu,
-    use_table,
-    use_formula,
-    use_chart,
-    use_orientation,
-    download_images,
-    max_pages,
-    no_fallback,
-    force_legacy,
-):
-    """Generator that yields (log, preview, metadata, download_file) tuples."""
-    log_q = queue.Queue()
-    log_lines = []
-    result = {}
-
-    pdf_path = _stable_copy(pdf_file)
-    if not pdf_path:
-        yield "未提供 PDF 文件", "", "{}", None
-        return
-
-    out_dir = out_dir.strip() or "paddleocr_md"
-    if not os.path.isabs(out_dir):
-        out_dir = os.path.join(BASE_DIR, out_dir)
-    os.makedirs(out_dir, exist_ok=True)
-
-    def worker():
-        try:
-            with OutputCapture(log_q):
-                from paddleocr_pipeline import (
-                    extract_with_fallback, extract_pdf_legacy,
-                    extract_pdf_local_paddleocr,
-                )
-
-                if force_legacy:
-                    md_path, metadata = extract_pdf_legacy(pdf_path, out_dir)
-                elif use_local_gpu:
-                    md_path, metadata = extract_with_fallback(
-                        pdf_path,
-                        out_dir=out_dir,
-                        use_table_recognition=use_table,
-                        use_formula_recognition=use_formula,
-                        use_chart_recognition=use_chart,
-                        use_doc_orientation_classify=use_orientation,
-                        no_fallback=no_fallback,
-                        force_local=True,
-                    )
-                else:
-                    md_path, metadata = extract_with_fallback(
-                        pdf_path,
-                        out_dir=out_dir,
-                        download_images=download_images,
-                        use_table_recognition=use_table,
-                        use_formula_recognition=use_formula,
-                        use_chart_recognition=use_chart,
-                        use_doc_orientation_classify=use_orientation,
-                        max_pages_per_chunk=int(max_pages),
-                        no_fallback=no_fallback,
-                    )
-                result["md_path"] = md_path
-                result["metadata"] = metadata
-        except Exception as e:
-            log_q.put(f"ERROR: {e}")
-            result["error"] = str(e)
-        finally:
-            log_q.put("__DONE__")
-
-    threading.Thread(target=worker, daemon=True).start()
-
-    # Stream logs
-    while True:
-        done = _drain_queue(log_q, log_lines)
-        log_text = "\n".join(log_lines)
-        yield log_text, "", "{}", None
-        if done:
-            break
-        time.sleep(0.5)
-
-    # Final yield with results
-    log_text = "\n".join(log_lines)
-    if "error" in result:
-        yield log_text, f"提取失败: {result['error']}", "{}", None
-        return
-
-    md_path = result.get("md_path", "")
-    metadata = result.get("metadata", {})
-
-    # Read markdown preview
-    preview = ""
-    if md_path and os.path.exists(md_path):
-        with open(md_path, "r", encoding="utf-8") as f:
-            preview = f.read(10000)
-        if len(preview) >= 10000:
-            preview += "\n\n...（已截断）..."
-
-    import json
-    meta_str = json.dumps(metadata, indent=2, ensure_ascii=False, default=str)
-
-    yield log_text, preview, meta_str, md_path if md_path and os.path.exists(md_path) else None
-
+        raise InterruptedError("用户取消")
 
 # ---------------------------------------------------------------------------
-# Tab 2: Full Pipeline Deep Reading backend
+# Prompt management
 # ---------------------------------------------------------------------------
 
-def run_full_pipeline(pdf_file, extraction_method):
-    """Generator that yields (stage, log, preview, download_file) tuples."""
+QUANT_PROMPT_DIR = os.path.join(BASE_DIR, "prompts", "quant_analysis")
+QUAL_PROMPT_DIR = os.path.join(BASE_DIR, "prompts", "qual_analysis")
+
+QUANT_STEPS = [
+    ("step_1_overview", "全景扫描", "📊"),
+    ("step_2_theory", "理论与假说", "📚"),
+    ("step_3_data", "数据考古", "🔍"),
+    ("step_4_vars", "变量与测量", "📏"),
+    ("step_5_identification", "识别策略", "🎯"),
+    ("step_6_results", "结果解读", "📈"),
+    ("step_7_critique", "专家批判", "⚡"),
+]
+
+QUAL_STEPS = [
+    ("L1_Context", "背景层", "🌐"),
+    ("L2_Theory", "理论层", "🏛️"),
+    ("L3_Logic", "逻辑层", "🔗"),
+    ("L4_Value", "价值层", "💎"),
+]
+
+ANALYSIS_DIMS = [
+    ("overview", "核心贡献识别", "识别论文核心贡献、创新性和局限性"),
+    ("theory", "理论框架评估", "评估理论来源、适用性和缺口"),
+    ("methodology", "方法论批判", "批判研究方法、因果推断和偏差"),
+    ("results", "实证结果解读", "解读数据、显著性和效应大小"),
+    ("limitations", "局限性分析", "分析作者自述和额外局限"),
+    ("implications", "实践意义", "提炼对领域、政策和实践的启示"),
+    ("comparison", "跨文献对比", "与相关工作对比增量贡献"),
+    ("future", "未来方向", "提出可执行的新选题方向"),
+]
+
+def _load_prompt_file(step_name: str, prompt_type: str) -> str:
+    prompt_dir = QUANT_PROMPT_DIR if prompt_type == "quant" else QUAL_PROMPT_DIR
+    file_path = os.path.join(prompt_dir, f"{step_name}.md")
+    if not os.path.exists(file_path):
+        return ""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def _save_prompt_file(step_name: str, prompt_type: str, content: str) -> str:
+    prompt_dir = QUANT_PROMPT_DIR if prompt_type == "quant" else QUAL_PROMPT_DIR
+    os.makedirs(prompt_dir, exist_ok=True)
+    file_path = os.path.join(prompt_dir, f"{step_name}.md")
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return f"✓ 已保存 {step_name}.md"
+
+# ---------------------------------------------------------------------------
+# Backend: Long Context Pipeline (新架构)
+# ---------------------------------------------------------------------------
+
+def run_long_context(pdf_file, selected_dims, custom_question, progress=gr.Progress()):
+    """长文本精读 - 使用 ConversationEngine"""
     _cancel_event.clear()
     log_q = queue.Queue()
     log_lines = []
@@ -296,7 +365,181 @@ def run_full_pipeline(pdf_file, extraction_method):
 
     pdf_path = _stable_copy(pdf_file)
     if not pdf_path:
-        yield "错误", "未提供 PDF 文件", "", None
+        yield {"logs": "请先上传 PDF", "stage": "等待上传", "progress": 0, "preview": "", "turns": [], "download": None}
+        return
+
+    def worker():
+        try:
+            with OutputCapture(log_q):
+                log_q.put("[阶段 1/3] 提取 PDF...")
+                progress(0.1, desc="提取 PDF")
+                _check_cancel()
+
+                from paddleocr_pipeline import extract_with_fallback
+                paddleocr_md_dir = os.path.join(BASE_DIR, "paddleocr_md")
+                os.makedirs(paddleocr_md_dir, exist_ok=True)
+                md_path, metadata = extract_with_fallback(pdf_path, out_dir=paddleocr_md_dir)
+                
+                with open(md_path, "r", encoding="utf-8") as f:
+                    full_text = f.read()
+                
+                log_q.put(f"✓ 提取完成: {len(full_text)} 字符")
+
+                # 导入新架构
+                log_q.put("[阶段 2/3] 初始化长文本引擎...")
+                progress(0.2, desc="初始化引擎")
+                sys.path.insert(0, os.path.join(BASE_DIR, "new_architecture"))
+                from new_architecture.config import Config
+                from new_architecture.paper_cache import PaperCache, PaperMetadata
+                from new_architecture.conversation_engine import ConversationEngine
+                
+                config = Config.from_env()
+                paper_meta = PaperMetadata(
+                    title=os.path.splitext(os.path.basename(pdf_path))[0],
+                    authors=[],
+                    source="PDF",
+                )
+                cache = PaperCache(full_text, paper_meta)
+                engine = ConversationEngine(config, cache, max_history_turns=2)
+                
+                log_q.put("✓ 引擎就绪")
+
+                # 执行选中的维度
+                log_q.put("[阶段 3/3] 执行分析...")
+                from new_architecture.analysis_dimensions import ANALYSIS_DIMENSIONS
+                
+                turns_data = []
+                # 名称 → key 映射
+                _name_to_key = {d[1]: d[0] for d in ANALYSIS_DIMS}
+                dim_list = [_name_to_key.get(d, d) for d in selected_dims] if selected_dims else list(ANALYSIS_DIMENSIONS.keys())
+                
+                for i, dim_key in enumerate(dim_list):
+                    _check_cancel()
+                    progress(0.2 + 0.7 * (i + 1) / len(dim_list), desc=f"分析: {dim_key}")
+                    
+                    dim_info = ANALYSIS_DIMENSIONS.get(dim_key, {})
+                    questions = dim_info.get("default_questions", [f"请分析论文的{dim_info.get('name', dim_key)}"])
+                    
+                    for q in questions[:2]:  # 每个维度最多2个问题
+                        log_q.put(f"  ▶ {dim_info.get('name', dim_key)}: {q[:60]}...")
+                        answer = engine.ask(q, dimension=dim_key)
+                        
+                        # 获取token信息
+                        last_turn = engine.results[-1] if engine.results else None
+                        tokens_info = ""
+                        if last_turn:
+                            tokens_info = f"{last_turn.prompt_tokens}t / {last_turn.completion_tokens}t"
+                        
+                        turns_data.append({
+                            "dimension": dim_info.get("name", dim_key),
+                            "question": q,
+                            "answer": answer,
+                            "tokens": tokens_info,
+                        })
+                        log_q.put(f"    ✓ 完成 ({tokens_info})")
+
+                # 合成报告
+                log_q.put("正在合成最终报告...")
+                report_path = os.path.join(BASE_DIR, "deep_reading_results", 
+                                           f"long_context_{paper_meta.title}.md")
+                os.makedirs(os.path.dirname(report_path), exist_ok=True)
+                
+                with open(report_path, "w", encoding="utf-8") as f:
+                    f.write(f"# 长文本精读报告: {paper_meta.title}\n\n")
+                    f.write(f"> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+                    f.write(f"> 分析维度: {len(dim_list)} 个\n")
+                    f.write(f"> 论文长度: {len(full_text)} 字符\n\n")
+                    f.write("---\n\n")
+                    
+                    for turn in turns_data:
+                        f.write(f"## {turn['dimension']}\n\n")
+                        f.write(f"**Q**: {turn['question']}\n\n")
+                        f.write(f"{turn['answer']}\n\n")
+                        f.write(f"*Tokens: {turn['tokens']}*\n\n")
+                        f.write("---\n\n")
+                
+                result["report"] = report_path
+                result["turns"] = turns_data
+                log_q.put("✅ 全部完成！")
+                progress(1.0, desc="完成")
+
+        except InterruptedError:
+            log_q.put("⚠ 用户取消了流水线")
+            result["cancelled"] = True
+        except Exception as e:
+            log_q.put(f"❌ 错误: {e}")
+            result["error"] = str(e)
+        finally:
+            log_q.put("__DONE__")
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    while True:
+        done = _drain_queue(log_q, log_lines)
+        log_text = "\n".join(log_lines)
+        
+        stage = "处理中..."
+        for line in reversed(log_lines):
+            if line.startswith("[") or line.startswith("▶") or line.startswith("✓"):
+                stage = line
+                break
+
+        progress_val = 0
+        if "提取" in log_text:
+            progress_val = 10
+        if "初始化" in log_text:
+            progress_val = 20
+        if "分析:" in log_text:
+            progress_val = 20 + min(70, log_text.count("▶") * 10)
+        if "✅" in log_text:
+            progress_val = 100
+
+        # 构建turns markdown
+        turns_md = ""
+        for i, turn in enumerate(result.get("turns", [])):
+            turns_md += f"\n### {turn['dimension']}\n\n"
+            turns_md += f"**Q**: {turn['question']}\n\n"
+            turns_md += turn['answer'][:2000] + ("\n\n..." if len(turn['answer']) > 2000 else "")
+            turns_md += f"\n\n*{turn['tokens']}*\n\n---\n"
+
+        yield {
+            "logs": log_text,
+            "stage": stage,
+            "progress": progress_val,
+            "preview": turns_md,
+            "turns": result.get("turns", []),
+            "download": result.get("report") if result.get("report") and os.path.exists(result["report"]) else None,
+        }
+
+        if done:
+            break
+        time.sleep(0.5)
+
+
+# ---------------------------------------------------------------------------
+# Backend: Classic Pipeline (七步精读 - 新架构改造)
+# ---------------------------------------------------------------------------
+
+STEP_PROMPTS = [
+    ("step_1_overview", "研究概览", "1/7"),
+    ("step_2_theory", "理论框架", "2/7"),
+    ("step_3_data", "数据与样本", "3/7"),
+    ("step_4_vars", "变量定义", "4/7"),
+    ("step_5_identification", "识别策略", "5/7"),
+    ("step_6_results", "实证结果", "6/7"),
+    ("step_7_critique", "批判性评价", "7/7"),
+]
+
+def run_deep_reading(pdf_file, extraction_method, progress=gr.Progress()):
+    """七步精读 - 使用 ConversationEngine 新架构"""
+    _cancel_event.clear()
+    log_q = queue.Queue()
+    log_lines = []
+    result = {}
+
+    pdf_path = _stable_copy(pdf_file)
+    if not pdf_path:
+        yield {"logs": "未提供 PDF", "stage": "错误", "progress": 0, "preview": "", "download": None}
         return
 
     basename = os.path.splitext(os.path.basename(pdf_path))[0]
@@ -304,1260 +547,933 @@ def run_full_pipeline(pdf_file, extraction_method):
     def worker():
         try:
             with OutputCapture(log_q):
-                # ---- Stage 1: Extraction ----
-                log_q.put(f"[阶段 1/5] 提取 PDF: {basename}")
+                log_q.put("[阶段 1/3] 提取 PDF...")
+                progress(0.1, desc="提取 PDF")
                 _check_cancel()
 
                 from paddleocr_pipeline import extract_with_fallback, extract_pdf_legacy
-
                 paddleocr_md_dir = os.path.join(BASE_DIR, "paddleocr_md")
                 os.makedirs(paddleocr_md_dir, exist_ok=True)
 
                 if extraction_method == "PaddleOCR (本地GPU)":
-                    md_path, metadata = extract_with_fallback(
-                        pdf_path, out_dir=paddleocr_md_dir, force_local=True)
+                    md_path, metadata = extract_with_fallback(pdf_path, out_dir=paddleocr_md_dir, force_local=True)
                 elif extraction_method == "Legacy (pdfplumber)":
                     md_path, metadata = extract_pdf_legacy(pdf_path, out_dir=paddleocr_md_dir)
                 else:
-                    # "PaddleOCR (远程API)" or default
                     md_path, metadata = extract_with_fallback(pdf_path, out_dir=paddleocr_md_dir)
 
                 result["source_md"] = md_path
-                log_q.put(f"提取完成: {md_path}")
+                log_q.put(f"✓ 提取完成: {os.path.basename(md_path)}")
 
-                # ---- Stage 2: Deep Reading (7 steps) ----
-                log_q.put(f"[阶段 2/5] 深度阅读（7步分析）...")
+                with open(md_path, "r", encoding="utf-8") as f:
+                    full_text = f.read()
+
+                log_q.put("[阶段 2/3] 初始化长文本引擎...")
+                progress(0.2, desc="初始化引擎")
                 _check_cancel()
 
-                from deep_reading_steps import (
-                    common,
-                    step_1_overview, step_2_theory, step_3_data,
-                    step_4_vars, step_5_identification, step_6_results,
-                    step_7_critique,
+                sys.path.insert(0, os.path.join(BASE_DIR, "new_architecture"))
+                from new_architecture.config import Config
+                from new_architecture.paper_cache import PaperCache, PaperMetadata
+                from new_architecture.conversation_engine import ConversationEngine
+
+                config = Config.from_env()
+                paper_meta = PaperMetadata(
+                    title=basename,
+                    authors=[],
+                    source="PDF",
                 )
-                from deep_reading_steps.semantic_router import generate_semantic_index
+                cache = PaperCache(full_text, paper_meta)
+                engine = ConversationEngine(config, cache, max_history_turns=2)
+                log_q.put("✓ 引擎就绪 (论文全文已缓存)")
 
-                sections = common.load_md_sections(md_path)
-                paper_basename = basename
-                if paper_basename.endswith("_segmented"):
-                    paper_basename = paper_basename[:-10]
-
-                paper_output_dir = os.path.join(BASE_DIR, "deep_reading_results", paper_basename)
+                log_q.put("[阶段 3/3] 七步深度阅读...")
+                paper_output_dir = os.path.join(BASE_DIR, "deep_reading_results", basename)
                 os.makedirs(paper_output_dir, exist_ok=True)
                 result["output_dir"] = paper_output_dir
 
-                # Set env var for common.py
-                os.environ["DEEP_READING_OUTPUT_DIR"] = paper_output_dir
-
-                # Semantic index
-                index_path = os.path.join(paper_output_dir, "semantic_index.json")
-                if not os.path.exists(index_path):
-                    full_text = "\n\n".join(sections.values())
-                    log_q.put("正在生成语义索引...")
-                    generate_semantic_index(full_text, paper_output_dir)
-
-                section_routing = common.route_sections_to_steps(sections)
-                common.save_routing_result(section_routing, sections, paper_output_dir)
-
-                step_modules = [
-                    (step_1_overview, 1, "研究概览"),
-                    (step_2_theory, 2, "理论框架"),
-                    (step_3_data, 3, "数据与样本"),
-                    (step_4_vars, 4, "变量定义"),
-                    (step_5_identification, 5, "识别策略"),
-                    (step_6_results, 6, "实证结果"),
-                    (step_7_critique, 7, "批判性评价"),
-                ]
-
-                for mod, sid, name in step_modules:
+                # 加载并执行7步提示词
+                step_results = []
+                for i, (prompt_file, step_name, step_label) in enumerate(STEP_PROMPTS):
                     _check_cancel()
-                    log_q.put(f"  步骤 {sid}/7: {name}...")
-                    assigned = section_routing.get(sid, [])
-                    mod.run(sections, assigned, paper_output_dir, step_id=sid)
+                    progress(0.2 + 0.6 * (i + 1) / len(STEP_PROMPTS), desc=f"步骤 {step_label}: {step_name}")
+                    log_q.put(f"  步骤 {step_label}: {step_name}...")
 
-                # Synthesize final report
+                    prompt_path = os.path.join(QUANT_PROMPT_DIR, f"{prompt_file}.md")
+                    if not os.path.exists(prompt_path):
+                        log_q.put(f"  ⚠ 未找到提示词: {prompt_path}")
+                        continue
+
+                    with open(prompt_path, "r", encoding="utf-8") as f:
+                        prompt_text = f.read()
+
+                    # 在提示词前添加步骤标记，帮助模型定位
+                    full_prompt = f"【步骤 {step_label}: {step_name}】\n\n{prompt_text}"
+                    answer = engine.ask(full_prompt, dimension=step_name)
+
+                    # 获取 token 信息
+                    last_turn = engine.results[-1] if engine.results else None
+                    tokens_info = ""
+                    if last_turn:
+                        tokens_info = f"{last_turn.prompt_tokens}t / {last_turn.completion_tokens}t"
+
+                    # 保存单步结果
+                    step_md_path = os.path.join(paper_output_dir, f"{i+1}_{step_name.replace(' ', '_')}.md")
+                    with open(step_md_path, "w", encoding="utf-8") as f:
+                        f.write(f"# 步骤 {step_label}: {step_name}\n\n")
+                        f.write(f"> Token: {tokens_info}\n\n")
+                        f.write(answer)
+
+                    step_results.append({
+                        "step": step_label,
+                        "name": step_name,
+                        "file": step_md_path,
+                        "tokens": tokens_info,
+                        "answer": answer,
+                    })
+                    log_q.put(f"    ✓ 完成 ({tokens_info})")
+
+                # 合成最终报告
                 log_q.put("正在合成最终报告...")
-                import re as _re
                 final_report_path = os.path.join(paper_output_dir, "Final_Deep_Reading_Report.md")
                 with open(final_report_path, "w", encoding="utf-8") as f:
-                    f.write(f"# 深度阅读报告: {paper_basename}\n\n")
-                    step_names = [
-                        "1_Overview", "2_Theory", "3_Data", "4_Variables",
-                        "5_Identification", "6_Results", "7_Critique",
-                    ]
-                    for sn in step_names:
-                        sf_path = os.path.join(paper_output_dir, f"{sn}.md")
-                        if os.path.exists(sf_path):
-                            with open(sf_path, "r", encoding="utf-8") as sf:
-                                content = sf.read()
-                            # strip YAML frontmatter
-                            content = _re.sub(r"^---\n.*?\n---\n", "", content, flags=_re.DOTALL)
-                            for marker in ["## \u5bfc\u822a", "## Navigation"]:
-                                if marker in content:
-                                    content = content.split(marker)[0]
-                            f.write(f"## {sn.replace('_', ' ')}\n\n{content.strip()}\n\n")
+                    f.write(f"# 深度阅读报告: {basename}\n\n")
+                    f.write(f"> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+                    f.write(f"> 论文长度: {len(full_text)} 字符\n")
+                    f.write(f"> 分析步骤: 7 步\n")
+                    f.write(f"> 缓存命中: ConversationEngine (自动)\n\n")
+                    f.write("---\n\n")
+
+                    for sr in step_results:
+                        f.write(f"## {sr['step']}: {sr['name']}\n\n")
+                        f.write(f"*Token: {sr['tokens']}*\n\n")
+                        f.write(sr["answer"])
+                        f.write("\n\n---\n\n")
 
                 result["final_report"] = final_report_path
-                log_q.put("深度阅读完成")
+                log_q.put("✓ 深度阅读完成")
 
-                # ---- Stage 3: Supplemental Check ----
-                log_q.put(f"[阶段 3/5] 补充检查...")
-                _check_cancel()
-                try:
-                    env = os.environ.copy()
-                    env["DEEP_READING_OUTPUT_DIR"] = paper_output_dir
-                    subprocess.run(
-                        [sys.executable, os.path.join(BASE_DIR, "run_supplemental_reading.py"),
-                         final_report_path, "--regenerate"],
-                        check=True, env=env, cwd=BASE_DIR,
-                        capture_output=True, text=True,
-                    )
-                    log_q.put("补充检查完成")
-                except subprocess.CalledProcessError as e:
-                    log_q.put(f"补充检查警告: {e.stderr or e}")
-                except FileNotFoundError:
-                    log_q.put("未找到补充阅读脚本，跳过")
+                # 保存元数据
+                meta_path = os.path.join(paper_output_dir, "meta.json")
+                import json
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "title": basename,
+                        "source_pdf": pdf_path,
+                        "source_md": md_path,
+                        "generation_time": datetime.now().isoformat(),
+                        "steps": [{"step": s["step"], "name": s["name"], "tokens": s["tokens"]} for s in step_results],
+                    }, f, ensure_ascii=False, indent=2)
+                log_q.put(f"✓ 元数据已保存: {meta_path}")
 
-                # ---- Stage 4: Dataview Summaries ----
-                log_q.put(f"[阶段 4/5] 注入 Dataview 摘要...")
-                _check_cancel()
-                try:
-                    subprocess.run(
-                        [sys.executable, os.path.join(BASE_DIR, "inject_dataview_summaries.py"),
-                         paper_output_dir],
-                        check=True, cwd=BASE_DIR,
-                        capture_output=True, text=True,
-                    )
-                    log_q.put("Dataview 摘要注入完成")
-                except subprocess.CalledProcessError as e:
-                    log_q.put(f"Dataview 摘要警告: {e.stderr or e}")
-                except FileNotFoundError:
-                    log_q.put("未找到 inject_dataview_summaries.py，跳过")
-
-                # ---- Stage 5: Obsidian Metadata ----
-                log_q.put(f"[阶段 5/5] 注入 Obsidian 元数据...")
-                _check_cancel()
-                try:
-                    # Build command with PDF vision extraction if Qwen API is configured
-                    meta_cmd = [
-                        sys.executable, os.path.join(BASE_DIR, "inject_obsidian_meta.py"),
-                        md_path, paper_output_dir,
-                    ]
-                    if os.getenv("QWEN_API_KEY"):
-                        meta_cmd.extend(["--use_pdf_vision", "--pdf_path", pdf_path])
-                        log_q.put("  已启用 PDF 视觉提取（检测到 Qwen API）")
-
-                    subprocess.run(
-                        meta_cmd,
-                        check=True, cwd=BASE_DIR,
-                        capture_output=True, text=True,
-                    )
-                    log_q.put("Obsidian 元数据注入完成")
-                except subprocess.CalledProcessError as e:
-                    log_q.put(f"元数据注入警告: {e.stderr or e}")
-                except FileNotFoundError:
-                    log_q.put("未找到 inject_obsidian_meta.py，跳过")
-
-                log_q.put("全部 5 个阶段完成！")
+                progress(1.0, desc="完成")
+                log_q.put("✅ 全部处理完成！")
 
         except InterruptedError:
-            log_q.put("用户取消了流水线")
+            log_q.put("⚠ 用户取消了流水线")
             result["cancelled"] = True
         except Exception as e:
-            log_q.put(f"错误: {e}")
+            log_q.put(f"❌ 错误: {e}")
             result["error"] = str(e)
         finally:
             log_q.put("__DONE__")
 
     threading.Thread(target=worker, daemon=True).start()
 
-    # Stream updates
     while True:
         done = _drain_queue(log_q, log_lines)
         log_text = "\n".join(log_lines)
-        # Determine current stage from last stage line
         stage = ""
         for line in reversed(log_lines):
-            if line.startswith("[阶段"):
+            if line.startswith("[") or line.startswith("✓") or line.startswith("⚠"):
                 stage = line
                 break
-        yield stage, log_text, "", None
+
+        progress_val = 0
+        if "提取" in log_text: progress_val = 10
+        if "引擎" in log_text: progress_val = 20
+        if "步骤" in log_text:
+            progress_val = 20 + min(60, log_text.count("步骤") * 9)
+        if "合成" in log_text: progress_val = 90
+        if "✅" in log_text: progress_val = 100
+
+        preview = ""
+        final_report = result.get("final_report", "")
+        if final_report and os.path.exists(final_report):
+            with open(final_report, "r", encoding="utf-8") as f:
+                preview = f.read(8000)
+            if len(preview) >= 8000:
+                preview += "\n\n...（内容较长，请下载查看完整报告）..."
+
+        yield {
+            "logs": log_text,
+            "stage": stage or "处理中...",
+            "progress": progress_val,
+            "preview": preview,
+            "download": final_report if final_report and os.path.exists(final_report) else None,
+        }
+
         if done:
             break
         time.sleep(0.5)
 
-    # Final yield
-    log_text = "\n".join(log_lines)
-    stage = "完成" if "error" not in result and "cancelled" not in result else "错误/已取消"
-    preview = ""
-    final_report = result.get("final_report", "")
-    if final_report and os.path.exists(final_report):
-        with open(final_report, "r", encoding="utf-8") as f:
-            preview = f.read(15000)
-        if len(preview) >= 15000:
-            preview += "\n\n...（已截断）..."
-
-    output_dir = result.get("output_dir", "")
-    yield stage, log_text, preview, output_dir if output_dir and os.path.isdir(output_dir) else None
-
 
 # ---------------------------------------------------------------------------
-# Tab 3: Batch Processing backend
+# Backend: Qual Analysis Pipeline (四步精读 - 新架构)
 # ---------------------------------------------------------------------------
 
-def validate_folder(folder_path):
-    """Validate a folder path and return status info."""
-    folder_path = folder_path.strip()
-    if not folder_path:
-        return "请输入文件夹路径"
-    if not os.path.isdir(folder_path):
-        return f"目录不存在: {folder_path}"
-    pdf_count = 0
-    for root, _, files in os.walk(folder_path):
-        for f in files:
-            if f.lower().endswith(".pdf"):
-                pdf_count += 1
-    return f"找到 {pdf_count} 个 PDF 文件"
+QUAL_PROMPTS = [
+    ("L1_Context_Prompt", "背景层", "1/4"),
+    ("L2_Theory_Prompt", "理论层", "2/4"),
+    ("L3_Logic_Prompt", "逻辑层", "3/4"),
+    ("L4_Value_Prompt", "价值层", "4/4"),
+]
 
-
-def run_batch(folder_path, skip_processed, extraction_method="PaddleOCR (远程API)"):
-    """Generator yielding (progress_df, log, overall) tuples."""
+def run_qual_analysis(pdf_file, extraction_method, progress=gr.Progress()):
+    """四步精读 - 使用 ConversationEngine 新架构"""
     _cancel_event.clear()
     log_q = queue.Queue()
     log_lines = []
-    progress_data = []  # list of [filename, type, status, elapsed]
     result = {}
 
-    folder_path = folder_path.strip()
-    if not folder_path or not os.path.isdir(folder_path):
-        import pandas as pd
-        yield pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"]), "无效的文件夹路径", ""
+    pdf_path = _stable_copy(pdf_file)
+    if not pdf_path:
+        yield {"logs": "未提供 PDF", "stage": "错误", "progress": 0, "preview": "", "download": None}
         return
+
+    basename = os.path.splitext(os.path.basename(pdf_path))[0]
 
     def worker():
         try:
             with OutputCapture(log_q):
-                from smart_scholar_lib import SmartScholar
-                from state_manager import StateManager
+                log_q.put("[阶段 1/3] 提取 PDF...")
+                progress(0.1, desc="提取 PDF")
+                _check_cancel()
 
-                scholar = SmartScholar()
-                state_mgr = StateManager()
+                from paddleocr_pipeline import extract_with_fallback, extract_pdf_legacy
+                paddleocr_md_dir = os.path.join(BASE_DIR, "paddleocr_md")
+                os.makedirs(paddleocr_md_dir, exist_ok=True)
 
-                # Configure extraction method for SmartScholar
                 if extraction_method == "PaddleOCR (本地GPU)":
-                    os.environ["PADDLEOCR_FORCE_LOCAL"] = "1"
-                    log_q.put("使用本地 PaddleOCR (GPU) 进行提取")
+                    md_path, metadata = extract_with_fallback(pdf_path, out_dir=paddleocr_md_dir, force_local=True)
+                elif extraction_method == "Legacy (pdfplumber)":
+                    md_path, metadata = extract_pdf_legacy(pdf_path, out_dir=paddleocr_md_dir)
                 else:
-                    os.environ.pop("PADDLEOCR_FORCE_LOCAL", None)
+                    md_path, metadata = extract_with_fallback(pdf_path, out_dir=paddleocr_md_dir)
 
-                # Find PDFs
-                pdf_files = []
-                for root, _, files in os.walk(folder_path):
-                    for f in files:
-                        if f.lower().endswith(".pdf"):
-                            pdf_files.append(os.path.join(root, f))
-                pdf_files.sort()
+                result["source_md"] = md_path
+                log_q.put(f"✓ 提取完成: {os.path.basename(md_path)}")
 
-                if not pdf_files:
-                    log_q.put("未找到 PDF 文件")
-                    result["done"] = True
-                    return
+                with open(md_path, "r", encoding="utf-8") as f:
+                    full_text = f.read()
 
-                log_q.put(f"找到 {len(pdf_files)} 个 PDF 文件")
+                log_q.put("[阶段 2/3] 初始化长文本引擎...")
+                progress(0.2, desc="初始化引擎")
+                _check_cancel()
 
-                deep_reading_results_dir = os.path.join(BASE_DIR, "deep_reading_results")
-                qual_results_dir = os.path.join(BASE_DIR, "social_science_results_v2")
+                sys.path.insert(0, os.path.join(BASE_DIR, "new_architecture"))
+                from new_architecture.config import Config
+                from new_architecture.paper_cache import PaperCache, PaperMetadata
+                from new_architecture.conversation_engine import ConversationEngine
 
-                for i, pdf_path in enumerate(pdf_files):
+                config = Config.from_env()
+                paper_meta = PaperMetadata(
+                    title=basename,
+                    authors=[],
+                    source="PDF",
+                )
+                cache = PaperCache(full_text, paper_meta)
+                engine = ConversationEngine(config, cache, max_history_turns=2)
+                log_q.put("✓ 引擎就绪 (论文全文已缓存)")
+
+                log_q.put("[阶段 3/3] 四步深度阅读...")
+                paper_output_dir = os.path.join(BASE_DIR, "deep_reading_results", basename)
+                os.makedirs(paper_output_dir, exist_ok=True)
+                result["output_dir"] = paper_output_dir
+
+                # 加载并执行4步提示词
+                step_results = []
+                for i, (prompt_file, step_name, step_label) in enumerate(QUAL_PROMPTS):
                     _check_cancel()
-                    bname = os.path.splitext(os.path.basename(pdf_path))[0]
-                    t0 = time.time()
+                    progress(0.2 + 0.6 * (i + 1) / len(QUAL_PROMPTS), desc=f"步骤 {step_label}: {step_name}")
+                    log_q.put(f"  步骤 {step_label}: {step_name}...")
 
-                    # --- check skip ---
-                    if skip_processed:
-                        def _output_exists(d):
-                            return (
-                                d and os.path.exists(d)
-                                and (
-                                    os.path.exists(os.path.join(d, "Final_Deep_Reading_Report.md"))
-                                    or os.path.exists(os.path.join(d, f"{bname}_Full_Report.md"))
-                                )
-                            )
+                    prompt_path = os.path.join(QUAL_PROMPT_DIR, f"{prompt_file}.md")
+                    if not os.path.exists(prompt_path):
+                        log_q.put(f"  ⚠ 未找到提示词: {prompt_path}")
+                        continue
 
-                        if state_mgr.is_processed(pdf_path, output_check_func=_output_exists):
-                            elapsed = f"{time.time() - t0:.1f}s"
-                            progress_data.append([bname, "-", "已跳过(哈希)", elapsed])
-                            log_q.put(f"[跳过] {bname}")
-                            continue
+                    with open(prompt_path, "r", encoding="utf-8") as f:
+                        prompt_text = f.read()
 
-                        # fallback filename check
-                        quant_report = os.path.join(deep_reading_results_dir, bname, "Final_Deep_Reading_Report.md")
-                        qual_report = os.path.join(qual_results_dir, bname, f"{bname}_Full_Report.md")
-                        if os.path.exists(quant_report):
-                            state_mgr.mark_completed(pdf_path, os.path.dirname(quant_report), "QUANT")
-                            progress_data.append([bname, "QUANT", "已跳过(已存在)", f"{time.time() - t0:.1f}s"])
-                            log_q.put(f"[跳过] {bname} (已有 QUANT 结果)")
-                            continue
-                        if os.path.exists(qual_report):
-                            state_mgr.mark_completed(pdf_path, os.path.dirname(qual_report), "QUAL")
-                            progress_data.append([bname, "QUAL", "已跳过(已存在)", f"{time.time() - t0:.1f}s"])
-                            log_q.put(f"[跳过] {bname} (已有 QUAL 结果)")
-                            continue
+                    full_prompt = f"【步骤 {step_label}: {step_name}】\n\n{prompt_text}"
+                    answer = engine.ask(full_prompt, dimension=step_name)
 
-                    log_q.put(f"\n[{i+1}/{len(pdf_files)}] 处理中: {bname}")
-                    state_mgr.mark_started(pdf_path)
+                    last_turn = engine.results[-1] if engine.results else None
+                    tokens_info = ""
+                    if last_turn:
+                        tokens_info = f"{last_turn.prompt_tokens}t / {last_turn.completion_tokens}t"
 
-                    try:
-                        # 1. Extract
-                        extracted_md_path = scholar.ensure_extracted_md(pdf_path)
-                        if not extracted_md_path:
-                            state_mgr.mark_failed(pdf_path, "提取失败")
-                            progress_data.append([bname, "-", "失败(提取)", f"{time.time() - t0:.1f}s"])
-                            continue
+                    step_md_path = os.path.join(paper_output_dir, f"{i+1}_{step_name.replace(' ', '_')}.md")
+                    with open(step_md_path, "w", encoding="utf-8") as f:
+                        f.write(f"# 步骤 {step_label}: {step_name}\n\n")
+                        f.write(f"> Token: {tokens_info}\n\n")
+                        f.write(answer)
 
-                        # 2. Classify
-                        with open(extracted_md_path, "r", encoding="utf-8") as f:
-                            preview = f.read(5000)
-                        paper_type = scholar.classify_paper(preview)
-                        log_q.put(f"  分类结果: {paper_type}")
+                    step_results.append({
+                        "step": step_label,
+                        "name": step_name,
+                        "file": step_md_path,
+                        "tokens": tokens_info,
+                        "answer": answer,
+                    })
+                    log_q.put(f"    ✓ 完成 ({tokens_info})")
 
-                        if paper_type == "IGNORE":
-                            state_mgr.mark_completed(pdf_path, None, "IGNORE")
-                            progress_data.append([bname, "IGNORE", "已跳过", f"{time.time() - t0:.1f}s"])
-                            continue
+                # 合成最终报告
+                log_q.put("正在合成最终报告...")
+                final_report_path = os.path.join(paper_output_dir, "Final_Qual_Analysis_Report.md")
+                with open(final_report_path, "w", encoding="utf-8") as f:
+                    f.write(f"# 四步精读报告 (定性): {basename}\n\n")
+                    f.write(f"> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+                    f.write(f"> 论文长度: {len(full_text)} 字符\n")
+                    f.write(f"> 分析步骤: 4 步 (背景层→理论层→逻辑层→价值层)\n")
+                    f.write(f"> 缓存命中: ConversationEngine (自动)\n\n")
+                    f.write("---\n\n")
 
-                        # 3. Dispatch
-                        if paper_type == "QUANT":
-                            paper_output_dir = os.path.join(deep_reading_results_dir, bname)
-                            env = os.environ.copy()
-                            env["DEEP_READING_OUTPUT_DIR"] = paper_output_dir
-                            scholar.run_command(
-                                [sys.executable, os.path.join(BASE_DIR, "deep_read_pipeline.py"), extracted_md_path,
-                                 "--out_dir", deep_reading_results_dir],
-                                cwd=BASE_DIR,
-                            )
-                            # Inject metadata
-                            if os.path.exists(extracted_md_path):
-                                try:
-                                    meta_cmd = [
-                                        sys.executable, os.path.join(BASE_DIR, "inject_obsidian_meta.py"),
-                                        extracted_md_path, paper_output_dir,
-                                    ]
-                                    if os.getenv("QWEN_API_KEY"):
-                                        meta_cmd.extend(["--use_pdf_vision", "--pdf_path", pdf_path])
-                                    scholar.run_command(meta_cmd, cwd=BASE_DIR)
-                                except Exception as me:
-                                    log_q.put(f"  元数据警告: {me}")
+                    for sr in step_results:
+                        f.write(f"## {sr['step']}: {sr['name']}\n\n")
+                        f.write(f"*Token: {sr['tokens']}*\n\n")
+                        f.write(sr["answer"])
+                        f.write("\n\n---\n\n")
 
-                            state_mgr.mark_completed(pdf_path, paper_output_dir, "QUANT")
+                result["final_report"] = final_report_path
+                log_q.put("✓ 四步精读完成")
 
-                        elif paper_type == "QUAL":
-                            extraction_dir = os.path.dirname(extracted_md_path)
-                            scholar.run_command(
-                                [sys.executable, os.path.join(BASE_DIR, "social_science_analyzer_v2.py"),
-                                 extraction_dir, "--filter", bname],
-                                cwd=BASE_DIR,
-                            )
-                            paper_output_dir = os.path.join(qual_results_dir, bname)
-                            pdf_dir_for_meta = os.path.dirname(pdf_path)
-                            try:
-                                # 直接传递 PDF 路径，避免文件名匹配问题
-                                qual_meta_cmd = [
-                                    sys.executable, "-m", "qual_metadata_extractor.extractor",
-                                    paper_output_dir, pdf_dir_for_meta,
-                                    "--pdf_path", pdf_path,
-                                ]
-                                scholar.run_command(qual_meta_cmd, cwd=BASE_DIR)
-                            except Exception as me:
-                                log_q.put(f"  QUAL 元数据警告: {me}")
-                            state_mgr.mark_completed(pdf_path, paper_output_dir, "QUAL")
+                # 保存元数据
+                meta_path = os.path.join(paper_output_dir, "qual_meta.json")
+                import json
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "title": basename,
+                        "source_pdf": pdf_path,
+                        "source_md": md_path,
+                        "generation_time": datetime.now().isoformat(),
+                        "steps": [{"step": s["step"], "name": s["name"], "tokens": s["tokens"]} for s in step_results],
+                    }, f, ensure_ascii=False, indent=2)
+                log_q.put(f"✓ 元数据已保存: {meta_path}")
 
-                        elapsed = f"{time.time() - t0:.1f}s"
-                        progress_data.append([bname, paper_type, "完成", elapsed])
-                        log_q.put(f"  完成，耗时 {elapsed}")
-
-                    except Exception as e:
-                        state_mgr.mark_failed(pdf_path, str(e))
-                        progress_data.append([bname, "-", f"失败: {e}", f"{time.time() - t0:.1f}s"])
-                        log_q.put(f"  错误: {e}")
-
-                log_q.put("\n批量处理完成")
-                result["done"] = True
+                progress(1.0, desc="完成")
+                log_q.put("✅ 全部处理完成！")
 
         except InterruptedError:
-            log_q.put("用户取消了批量处理")
+            log_q.put("⚠ 用户取消了流水线")
+            result["cancelled"] = True
         except Exception as e:
-            log_q.put(f"批量处理错误: {e}")
+            log_q.put(f"❌ 错误: {e}")
+            result["error"] = str(e)
         finally:
             log_q.put("__DONE__")
 
     threading.Thread(target=worker, daemon=True).start()
 
-    import pandas as pd
     while True:
         done = _drain_queue(log_q, log_lines)
         log_text = "\n".join(log_lines)
-        df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"])
-        total = f"已处理: {len(progress_data)} 个文件"
-        yield df, log_text, total
+        stage = ""
+        for line in reversed(log_lines):
+            if line.startswith("[") or line.startswith("✓") or line.startswith("⚠"):
+                stage = line
+                break
+
+        progress_val = 0
+        if "提取" in log_text: progress_val = 10
+        if "引擎" in log_text: progress_val = 20
+        if "步骤" in log_text:
+            progress_val = 20 + min(60, log_text.count("步骤") * 15)
+        if "合成" in log_text: progress_val = 90
+        if "✅" in log_text: progress_val = 100
+
+        preview = ""
+        final_report = result.get("final_report", "")
+        if final_report and os.path.exists(final_report):
+            with open(final_report, "r", encoding="utf-8") as f:
+                preview = f.read(8000)
+            if len(preview) >= 8000:
+                preview += "\n\n...（内容较长，请下载查看完整报告）..."
+
+        yield {
+            "logs": log_text,
+            "stage": stage or "处理中...",
+            "progress": progress_val,
+            "preview": preview,
+            "download": final_report if final_report and os.path.exists(final_report) else None,
+        }
+
         if done:
             break
         time.sleep(0.5)
-
-    # Final
-    log_text = "\n".join(log_lines)
-    df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"])
-    done_count = sum(1 for r in progress_data if r[2] == "完成")
-    skip_count = sum(1 for r in progress_data if "跳过" in r[2])
-    fail_count = sum(1 for r in progress_data if "失败" in r[2])
-    total = f"总计: {len(progress_data)} | 完成: {done_count} | 跳过: {skip_count} | 失败: {fail_count}"
-    yield df, log_text, total
-
-
 # ---------------------------------------------------------------------------
-# Tab 4: Literature Filter backend
+# Backend: Literature Filter (文献筛选)
 # ---------------------------------------------------------------------------
 
-def run_literature_filter(input_file, ai_mode, topic, min_year, keywords, limit_num):
-    """Generator yielding (log, result_df, download_file) tuples."""
+FILTER_MODES = {
+    "explorer": "探索者模式",
+    "reviewer": "评审者模式",
+    "empiricist": "实证主义者模式",
+}
+
+def _run_literature_filter(txt_file, mode, topic, min_year, keywords, progress=gr.Progress()):
+    """文献筛选 - 基于 smart_literature_filter.py"""
+    _cancel_event.clear()
     log_q = queue.Queue()
     log_lines = []
-    result = {}
+    result = {"df": None, "output_path": None}
 
-    file_path = _stable_copy(input_file)
-    if not file_path:
-        import pandas as pd
-        yield "未提供文件", pd.DataFrame(), None
+    if txt_file is None:
+        yield {"logs": "请先上传文献题录文件", "stage": "错误", "progress": 0,
+               "filter_table": [], "download": None}
+        return
+
+    if not topic or not topic.strip():
+        yield {"logs": "请输入研究主题（筛选目标）", "stage": "错误", "progress": 0,
+               "filter_table": [], "download": None}
         return
 
     def worker():
         try:
             with OutputCapture(log_q):
-                from parsers import get_parser
-                from smart_literature_filter import filter_literature, AIEvaluator, PromptManager
+                log_q.put(f"[模式] {FILTER_MODES.get(mode, mode)} | 主题: {topic}")
 
-                # 1. Parse
-                log_q.put(f"正在解析文件: {os.path.basename(file_path)}")
-                parser_instance = get_parser(file_path)
+                # 1. 解析文件
+                log_q.put("[1/4] 解析文献题录...")
+                progress(0.1, desc="解析文献题录")
+                _check_cancel()
+
+                from parsers import get_parser
+                parser_instance = get_parser(txt_file)
                 if not parser_instance:
-                    log_q.put("错误：不支持的文件格式，请上传 WoS (savedrecs.txt) 或 CNKI 导出文件")
-                    result["error"] = "Unsupported format"
-                    return
+                    raise ValueError("不支持的文件格式，请上传 Web of Science (savedrecs.txt) 或 CNKI 导出文件")
 
                 parser_instance.parse()
                 df = parser_instance.to_dataframe()
-                log_q.put(f"解析完成：{len(df)} 条记录（来源: {df['SourceType'].iloc[0] if len(df) > 0 else '未知'}）")
+                log_q.put(f"✓ 解析完成: {len(df)} 篇文献")
 
                 if df.empty:
-                    log_q.put("文件中未找到记录")
-                    result["df"] = df
-                    return
+                    raise ValueError("未找到任何文献记录")
 
-                # 2. Filter by year / keywords
-                kw_list = [k.strip() for k in keywords.split(",") if k.strip()] if keywords.strip() else None
-                yr = int(min_year) if min_year and str(min_year).strip() else None
+                # 2. 基础过滤
+                log_q.put("[2/4] 基础过滤...")
+                progress(0.25, desc="基础过滤")
+                _check_cancel()
 
-                if yr or kw_list:
-                    before = len(df)
-                    df = filter_literature(df, min_year=yr, keywords=kw_list)
-                    log_q.put(f"过滤结果: {before} -> {len(df)} 条记录")
+                from smart_literature_filter import filter_literature
+                kw_list = [k.strip() for k in keywords.split(",") if k.strip()] if keywords else None
+                df = filter_literature(df, min_year=min_year, keywords=kw_list)
+                log_q.put(f"✓ 过滤后: {len(df)} 篇文献")
 
                 if df.empty:
-                    log_q.put("没有符合过滤条件的论文")
-                    result["df"] = df
-                    return
+                    raise ValueError("过滤后无匹配文献")
 
-                # 3. AI evaluation
-                # 映射中文选项到英文模式名
-                ai_mode_map = {
-                    "无": None,
-                    "explorer (广泛探索)": "explorer",
-                    "reviewer (严格评审)": "reviewer",
-                    "empiricist (实证导向)": "empiricist",
-                    # 兼容旧版英文选项
-                    "None": None,
-                    "explorer": "explorer",
-                    "reviewer": "reviewer",
-                    "empiricist": "empiricist",
-                }
-                actual_ai_mode = ai_mode_map.get(ai_mode)
+                # 3. AI 评估
+                log_q.put("[3/4] AI 评估...")
+                progress(0.4, desc="AI 评估")
+                _check_cancel()
 
-                if actual_ai_mode:
-                    if not topic or not topic.strip():
-                        log_q.put("错误：AI 评估模式需要填写研究主题")
-                        result["df"] = df
-                        return
+                from smart_literature_filter import AIEvaluator, PromptManager
+                evaluator = AIEvaluator()
+                prompt_template = PromptManager.load_prompt(mode)
 
-                    log_q.put(f"开始 AI 评估（模式: {actual_ai_mode}, 主题: {topic}）")
-                    evaluator = AIEvaluator()
-                    prompt_template = PromptManager.load_prompt(actual_ai_mode)
+                ai_results = evaluator.evaluate_batch(df, prompt_template, topic)
+                log_q.put(f"✓ AI 评估完成: {len(ai_results)} 篇")
 
-                    lim = int(limit_num) if limit_num else 0
-                    if lim > 0:
-                        df_to_eval = df.head(lim).copy()
-                        log_q.put(f"限制 AI 评估数量: {lim} 篇")
-                    else:
-                        df_to_eval = df.copy()
+                # 合并结果
+                import pandas as pd
+                ai_df = pd.DataFrame(ai_results)
+                if not ai_df.empty and "original_index" in ai_df.columns:
+                    ai_df.set_index("original_index", inplace=True)
+                    df = df.join(ai_df, how="left")
+                    if "score" in df.columns:
+                        df["score"] = pd.to_numeric(df["score"], errors="coerce")
+                        df = df.sort_values(by="score", ascending=False)
 
-                    import concurrent.futures
-                    import json as _json
+                # 4. 导出 Excel
+                log_q.put("[4/4] 导出结果...")
+                progress(0.9, desc="导出结果")
+                _check_cancel()
 
-                    evaluated = 0
-                    total = len(df_to_eval)
-                    ai_results = []
+                out_dir = os.path.join(BASE_DIR, "deep_reading_results", "literature_filter")
+                os.makedirs(out_dir, exist_ok=True)
+                out_path = os.path.join(out_dir, f"filtered_{mode}_{int(time.time())}.xlsx")
 
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                        future_to_idx = {
-                            executor.submit(evaluator.evaluate_paper, row, prompt_template, topic): idx
-                            for idx, row in df_to_eval.iterrows()
-                        }
-                        for future in concurrent.futures.as_completed(future_to_idx):
-                            idx = future_to_idx[future]
-                            try:
-                                res = future.result()
-                                res["original_index"] = idx
-                                ai_results.append(res)
-                            except Exception as e:
-                                ai_results.append({"original_index": idx, "error": str(e)})
-                            evaluated += 1
-                            if evaluated % 5 == 0 or evaluated == total:
-                                log_q.put(f"  AI 评估进度: {evaluated}/{total}")
-
-                    import pandas as _pd
-                    ai_df = _pd.DataFrame(ai_results)
-                    if not ai_df.empty:
-                        ai_df.set_index("original_index", inplace=True)
-                        df = df.join(ai_df, how="left")
-                        if "score" in df.columns:
-                            df["score"] = _pd.to_numeric(df["score"], errors="coerce")
-                            df = df.sort_values(by="score", ascending=False)
-
-                    log_q.put(f"AI 评估完成，已评分 {len(ai_results)} 篇论文")
-
-                # 4. Save Excel
                 if "Year_Num" in df.columns:
-                    df = df.drop(columns=["Year_Num"])
+                    df = df.drop(columns=["Year_Num"], errors="ignore")
 
-                out_path = os.path.join(UPLOAD_DIR, "literature_filter_result.xlsx")
-                df.to_excel(out_path, index=False)
-                log_q.put(f"结果已保存: {out_path}（共 {len(df)} 篇）")
+                # 选择要显示的列
+                display_cols = ["Title", "Authors", "Journal", "Year", "score", "reason"]
+                if "title_cn" in df.columns:
+                    display_cols.insert(1, "title_cn")
+                if "abstract_cn" in df.columns:
+                    display_cols.append("abstract_cn")
+                if "journal_tier" in df.columns:
+                    display_cols.insert(4, "journal_tier")
 
-                result["df"] = df
-                result["excel"] = out_path
+                # 只保留存在的列
+                final_cols = [c for c in display_cols if c in df.columns]
+                df_display = df[final_cols].copy()
 
-        except Exception as e:
-            log_q.put(f"ERROR: {e}")
-            result["error"] = str(e)
-        finally:
-            log_q.put("__DONE__")
+                df_display.to_excel(out_path, index=False)
+                log_q.put(f"✓ 已导出: {os.path.basename(out_path)}")
 
-    threading.Thread(target=worker, daemon=True).start()
-
-    import pandas as pd
-    while True:
-        done = _drain_queue(log_q, log_lines)
-        log_text = "\n".join(log_lines)
-        yield log_text, pd.DataFrame(), None
-        if done:
-            break
-        time.sleep(0.5)
-
-    log_text = "\n".join(log_lines)
-    df_out = result.get("df", pd.DataFrame())
-
-    # Trim display columns for readability
-    display_cols = [c for c in ["Title", "Authors", "Journal", "Year", "score", "relevance", "recommendation", "SourceType"] if c in df_out.columns]
-    df_display = df_out[display_cols] if display_cols else df_out
-
-    excel_path = result.get("excel")
-    yield log_text, df_display, excel_path if excel_path and os.path.exists(excel_path) else None
-
-
-# ---------------------------------------------------------------------------
-# Tab 5: MD Deep Reading backend
-# ---------------------------------------------------------------------------
-
-def validate_md_folder(folder_path):
-    """Validate a folder path and return MD file statistics."""
-    folder_path = folder_path.strip()
-    if not folder_path:
-        return "请输入文件夹路径。"
-    if not os.path.isdir(folder_path):
-        return f"目录不存在: {folder_path}"
-    total = 0
-    for root, _, files in os.walk(folder_path):
-        for f in files:
-            if f.lower().endswith(".md"):
-                total += 1
-    return f"找到 {total} 个 MD 文件"
-
-
-def _clean_paper_basename(filename):
-    """Strip known suffixes to get a clean paper name."""
-    name = os.path.splitext(filename)[0]
-    for suffix in ("_segmented", "_paddleocr", "_raw"):
-        if name.endswith(suffix):
-            name = name[: -len(suffix)]
-    return name
-
-
-def run_md_reading(mode, md_file, folder_path, skip_processed):
-    """Generator yielding (progress_df, log, overall, preview, download) tuples."""
-    _cancel_event.clear()
-    log_q = queue.Queue()
-    log_lines = []
-    progress_data = []  # [filename, type, status, elapsed]
-    result = {}
-
-    import pandas as pd
-
-    empty_df = pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"])
-
-    # Collect MD file list
-    md_paths = []
-    if mode == "单文件":
-        stable = _stable_copy(md_file)
-        if not stable:
-            yield empty_df, "未提供 MD 文件。", "", "", None
-            return
-        md_paths.append(stable)
-    else:
-        fp = (folder_path or "").strip()
-        if not fp or not os.path.isdir(fp):
-            yield empty_df, "文件夹路径无效。", "", "", None
-            return
-        for root, _, files in os.walk(fp):
-            for f in sorted(files):
-                if f.lower().endswith(".md"):
-                    md_paths.append(os.path.join(root, f))
-        if not md_paths:
-            yield empty_df, "文件夹中没有找到 .md 文件。", "", "", None
-            return
-
-    def worker():
-        try:
-            with OutputCapture(log_q):
-                from smart_scholar_lib import SmartScholar
-
-                scholar = SmartScholar()
-
-                deep_reading_results_dir = os.path.join(BASE_DIR, "deep_reading_results")
-                qual_results_dir = os.path.join(BASE_DIR, "social_science_results_v2")
-
-                log_q.put(f"待处理 MD 文件: {len(md_paths)} 个")
-
-                for i, md_path in enumerate(md_paths):
-                    _check_cancel()
-                    fname = os.path.basename(md_path)
-                    bname = _clean_paper_basename(fname)
-                    t0 = time.time()
-                    log_q.put(f"\n[{i+1}/{len(md_paths)}] 处理: {fname}")
-
-                    # --- skip check ---
-                    if skip_processed:
-                        quant_report = os.path.join(deep_reading_results_dir, bname, "Final_Deep_Reading_Report.md")
-                        qual_report = os.path.join(qual_results_dir, bname, f"{bname}_Full_Report.md")
-                        if os.path.exists(quant_report) or os.path.exists(qual_report):
-                            elapsed = f"{time.time() - t0:.1f}s"
-                            progress_data.append([fname, "-", "已跳过", elapsed])
-                            log_q.put(f"  [SKIP] 已存在结果: {bname}")
-                            continue
-
-                    # --- classify ---
-                    with open(md_path, "r", encoding="utf-8") as f:
-                        preview_text = f.read(5000)
-                    paper_type = scholar.classify_paper(preview_text)
-                    log_q.put(f"  分类结果: {paper_type}")
-
-                    if paper_type == "IGNORE":
-                        elapsed = f"{time.time() - t0:.1f}s"
-                        progress_data.append([fname, "IGNORE", "已跳过", elapsed])
-                        continue
-
-                    # --- dispatch ---
-                    try:
-                        if paper_type == "QUANT":
-                            paper_output_dir = os.path.join(deep_reading_results_dir, bname)
-                            scholar.run_command(
-                                [sys.executable, os.path.join(BASE_DIR, "deep_read_pipeline.py"),
-                                 md_path, "--out_dir", deep_reading_results_dir],
-                                cwd=BASE_DIR,
-                            )
-                            # Inject metadata
-                            try:
-                                scholar.run_command(
-                                    [sys.executable, os.path.join(BASE_DIR, "inject_obsidian_meta.py"),
-                                     md_path, paper_output_dir],
-                                    cwd=BASE_DIR,
-                                )
-                            except Exception as me:
-                                log_q.put(f"  元数据注入警告: {me}")
-                            result_path = os.path.join(paper_output_dir, "Final_Deep_Reading_Report.md")
-
-                        elif paper_type == "QUAL":
-                            md_dir = os.path.dirname(md_path)
-                            scholar.run_command(
-                                [sys.executable, os.path.join(BASE_DIR, "social_science_analyzer_v2.py"),
-                                 md_dir, "--filter", bname],
-                                cwd=BASE_DIR,
-                            )
-                            paper_output_dir = os.path.join(qual_results_dir, bname)
-                            try:
-                                scholar.run_command(
-                                    [sys.executable, "-m", "qual_metadata_extractor.extractor",
-                                     paper_output_dir, os.path.dirname(md_path)],
-                                    cwd=BASE_DIR,
-                                )
-                            except Exception as me:
-                                log_q.put(f"  QUAL 元数据警告: {me}")
-                            result_path = os.path.join(paper_output_dir, f"{bname}_Full_Report.md")
-
-                        elapsed = f"{time.time() - t0:.1f}s"
-                        progress_data.append([fname, paper_type, "完成", elapsed])
-                        log_q.put(f"  完成，耗时 {elapsed}")
-
-                        # Store last result path for single-file preview
-                        result["last_report"] = result_path
-                        result["last_output_dir"] = paper_output_dir
-
-                    except Exception as e:
-                        elapsed = f"{time.time() - t0:.1f}s"
-                        progress_data.append([fname, paper_type, f"失败: {e}", elapsed])
-                        log_q.put(f"  ERROR: {e}")
-
-                log_q.put("\n精读处理完成。")
-                result["done"] = True
+                result["df"] = df_display
+                result["output_path"] = out_path
+                result["row_count"] = len(df_display)
+                progress(1.0, desc="完成")
+                log_q.put("✅ 全部完成！")
 
         except InterruptedError:
-            log_q.put("已被用户取消。")
+            log_q.put("⚠ 用户取消了筛选")
+            result["cancelled"] = True
         except Exception as e:
-            log_q.put(f"ERROR: {e}")
+            log_q.put(f"❌ 错误: {e}")
             result["error"] = str(e)
         finally:
             log_q.put("__DONE__")
 
     threading.Thread(target=worker, daemon=True).start()
 
-    # Stream updates
     while True:
         done = _drain_queue(log_q, log_lines)
         log_text = "\n".join(log_lines)
-        df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else empty_df
-        total = f"已处理: {len(progress_data)} 个文件"
-        yield df, log_text, total, "", None
+
+        stage = "处理中..."
+        for line in reversed(log_lines):
+            if line.startswith("[") or line.startswith("✓") or line.startswith("⚠"):
+                stage = line
+                break
+
+        progress_val = 0
+        if "解析" in log_text: progress_val = 10
+        if "过滤" in log_text: progress_val = 25
+        if "评估" in log_text: progress_val = 40 + min(50, int(log_text.count("✓") * 10))
+        if "导出" in log_text: progress_val = 90
+        if "✅" in log_text: progress_val = 100
+
+        # 构建表格预览
+        table_data = []
+        df = result.get("df")
+        if df is not None and not df.empty:
+            for _, row in df.head(20).iterrows():
+                table_data.append([
+                    str(row.get("Title", ""))[:60],
+                    str(row.get("Authors", ""))[:40],
+                    str(row.get("Journal", ""))[:30],
+                    str(row.get("Year", "")),
+                    str(row.get("score", "")),
+                    str(row.get("reason", ""))[:80],
+                ])
+
+        yield {
+            "logs": log_text,
+            "stage": stage,
+            "progress": progress_val,
+            "filter_table": table_data,
+            "download": result.get("output_path") if result.get("output_path") and os.path.exists(result["output_path"]) else None,
+        }
+
         if done:
             break
         time.sleep(0.5)
 
-    # Final yield
-    log_text = "\n".join(log_lines)
-    df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else empty_df
-    done_count = sum(1 for r in progress_data if r[2] == "完成")
-    skip_count = sum(1 for r in progress_data if "跳过" in r[2])
-    fail_count = sum(1 for r in progress_data if "失败" in r[2] or "FAIL" in r[2])
-    total = f"总计: {len(progress_data)} | 完成: {done_count} | 跳过: {skip_count} | 失败: {fail_count}"
-
-    # Single-file mode: read final report for preview
-    preview = ""
-    download_path = None
-    if mode == "单文件":
-        report_path = result.get("last_report", "")
-        if report_path and os.path.exists(report_path):
-            with open(report_path, "r", encoding="utf-8") as f:
-                preview = f.read(15000)
-            if len(preview) >= 15000:
-                preview += "\n\n... (truncated) ..."
-            download_path = report_path
-    else:
-        # Folder mode: offer the output directory path
-        last_dir = result.get("last_output_dir", "")
-        if last_dir and os.path.isdir(last_dir):
-            download_path = last_dir
-
-    yield df, log_text, total, preview, download_path
-
 
 # ---------------------------------------------------------------------------
-# Tab 6: 中文重述 backend
-# ---------------------------------------------------------------------------
-
-def run_translation(mode, single_file, folder_path, model, max_chars, extraction_method, max_workers):
-    """
-    Generator → yields (log, progress_df, total_status, preview, download_file).
-    Handles single-file (PDF or MD) and batch-folder modes.
-    """
-    import pandas as pd
-    from translation_pipeline import (
-        translate_md_file, translate_pdf_file, collect_files,
-    )
-
-    _cancel_event.clear()
-    log_q = queue.Queue()
-    log_lines = []
-    progress_data = []   # [[filename, type, status, elapsed], ...]
-    result = {}
-    max_chars = int(max_chars)
-
-    empty_df = pd.DataFrame(columns=["文件名", "类型", "状态", "耗时"])
-
-    # --- Validate inputs ---
-    if mode == "单文件":
-        if not single_file:
-            yield "未提供文件", empty_df, "", "", None
-            return
-        file_path = _stable_copy(single_file)
-        files = [file_path]
-    else:
-        folder_path = (folder_path or "").strip()
-        if not folder_path or not os.path.isdir(folder_path):
-            yield f"文件夹不存在或为空：{folder_path}", empty_df, "", "", None
-            return
-        files = collect_files(folder_path)
-        if not files:
-            yield f"文件夹中未找到 PDF 或 MD 文件：{folder_path}", empty_df, "", "", None
-            return
-
-    def worker():
-        try:
-            with OutputCapture(log_q):
-                for idx, fpath in enumerate(files, 1):
-                    if _cancel_event.is_set():
-                        log_q.put("已被用户取消。")
-                        break
-
-                    fname = os.path.basename(fpath)
-                    ext = os.path.splitext(fpath)[1].lower()
-                    ftype = "PDF" if ext == ".pdf" else "MD"
-                    log_q.put(f"\n[{idx}/{len(files)}] {fname}  ({ftype})")
-                    t0 = time.time()
-
-                    try:
-                        cancel_check = lambda: _cancel_event.is_set()
-                        log_cb = log_q.put
-
-                        if ext == ".pdf":
-                            cn_path, glossary_path = translate_pdf_file(
-                                fpath,
-                                log_cb=log_cb,
-                                cancel_check=cancel_check,
-                                model=model,
-                                max_chars=max_chars,
-                                extraction_method=extraction_method,
-                                max_workers=int(max_workers),
-                            )
-                        else:
-                            cn_path, glossary_path = translate_md_file(
-                                fpath,
-                                log_cb=log_cb,
-                                cancel_check=cancel_check,
-                                model=model,
-                                max_chars=max_chars,
-                                max_workers=int(max_workers),
-                            )
-
-                        elapsed = f"{time.time() - t0:.1f}s"
-                        progress_data.append([fname, ftype, "完成", elapsed])
-                        result["last_cn"] = cn_path
-                        result["last_glossary"] = glossary_path
-                        log_q.put(f"  ✓ 完成，耗时 {elapsed}")
-
-                    except InterruptedError:
-                        elapsed = f"{time.time() - t0:.1f}s"
-                        progress_data.append([fname, ftype, "已取消", elapsed])
-                        log_q.put("  已取消")
-                        break
-                    except Exception as e:
-                        elapsed = f"{time.time() - t0:.1f}s"
-                        progress_data.append([fname, ftype, f"失败: {e}", elapsed])
-                        log_q.put(f"  ERROR: {e}")
-
-                log_q.put("\n中文重述处理完成。")
-
-        except Exception as e:
-            log_q.put(f"ERROR: {e}")
-            result["error"] = str(e)
-        finally:
-            log_q.put("__DONE__")
-
-    threading.Thread(target=worker, daemon=True).start()
-
-    # Stream updates
-    while True:
-        done = _drain_queue(log_q, log_lines)
-        log_text = "\n".join(log_lines)
-        df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else empty_df
-        total = f"已处理: {len(progress_data)} / {len(files)} 个文件"
-        yield log_text, df, total, "", None
-        if done:
-            break
-        time.sleep(0.5)
-
-    # Final yield
-    log_text = "\n".join(log_lines)
-    df = pd.DataFrame(progress_data, columns=["文件名", "类型", "状态", "耗时"]) if progress_data else empty_df
-    done_count = sum(1 for r in progress_data if r[2] == "完成")
-    fail_count = sum(1 for r in progress_data if "失败" in r[2])
-    total = f"总计: {len(files)} | 完成: {done_count} | 失败: {fail_count}"
-
-    preview = ""
-    download_path = None
-    if mode == "单文件":
-        cn_path = result.get("last_cn", "")
-        if cn_path and os.path.exists(cn_path):
-            with open(cn_path, "r", encoding="utf-8") as f:
-                preview = f.read(15000)
-            if len(preview) >= 15000:
-                preview += "\n\n...（已截断）..."
-            download_path = cn_path
-
-    yield log_text, df, total, preview, download_path
-
-
-# ---------------------------------------------------------------------------
-# Gradio UI
+# UI Builder
 # ---------------------------------------------------------------------------
 
 def build_ui():
-    with gr.Blocks(title="深度阅读助手") as app:
-        gr.Markdown("# 深度阅读助手 Deep Reading Agent")
-        gr.Markdown(f"**环境状态:** {_env_status()}")
+    with gr.Blocks(title="Deep Reading Agent | KIMI") as app:
+        
+        # ===== HEADER =====
+        with gr.Row(elem_classes="kimi-header"):
+            with gr.Column():
+                gr.Markdown("""
+                <div class="brand">
+                  <div class="brand-icon">❤️‍🔥</div>
+                  <div class="brand-text">
+                    <h1>Deep Reading Agent</h1>
+                    <div class="tagline">学术论文深度精读系统</div>
+                  </div>
+                </div>
+                """)
+            with gr.Column():
+                gr.Markdown(f"""
+                <div class="env-pills" style="justify-content: flex-end;">
+                  <span class="pill ok">DeepSeek ✓</span>
+                  <span class="pill">KIMI v3</span>
+                </div>
+                """)
 
-        # ===== Tab 1: 论文筛选 =====
-        with gr.Tab("论文筛选"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    lf_file = gr.File(label="上传 WoS/CNKI 导出文件", file_types=[".txt"])
-                    lf_mode = gr.Radio(
-                        label="AI 评估模式",
-                        choices=["无", "explorer (广泛探索)", "reviewer (严格评审)", "empiricist (实证导向)"],
-                        value="无",
-                    )
-                    lf_topic = gr.Textbox(
-                        label="研究主题（AI 模式必填）",
-                        placeholder="例如：ESG与企业价值",
-                    )
-                    lf_year = gr.Textbox(label="最早年份（可选）", placeholder="例如：2015")
-                    lf_keywords = gr.Textbox(
-                        label="关键词过滤（逗号分隔，可选）",
-                        placeholder="例如：DID, 回归, 面板数据",
-                    )
-                    lf_limit = gr.Slider(
-                        label="AI 评估数量限制（0 = 全部）",
-                        minimum=0, maximum=500, step=10, value=0,
-                    )
-                    lf_btn = gr.Button("开始筛选", variant="primary")
-
-                    # 提示词编辑折叠面板
-                    with gr.Accordion("编辑 AI 评估提示词", open=False):
-                        lf_prompt_mode = gr.Dropdown(
-                            label="选择模式",
-                            choices=["explorer", "reviewer", "empiricist"],
-                            value="explorer",
-                        )
-                        lf_prompt_load = gr.Button("加载提示词", size="sm")
-                        lf_prompt_text = gr.Textbox(
-                            label="提示词内容",
-                            lines=15,
-                            placeholder="点击「加载提示词」查看当前模式的提示词...",
-                        )
-                        lf_prompt_save = gr.Button("保存提示词", variant="secondary")
-                        lf_prompt_status = gr.Textbox(label="状态", interactive=False, lines=1)
-
-                with gr.Column(scale=2):
-                    lf_log = gr.Textbox(label="运行日志", lines=10, interactive=False)
-                    lf_df = gr.Dataframe(label="筛选结果", interactive=False)
-                    lf_dl = gr.File(label="下载 Excel")
-
-            # 提示词加载和保存函数
-            def load_prompt(mode_name):
-                prompt_dir = os.path.join(BASE_DIR, "prompts", "literature_filter")
-                file_path = os.path.join(prompt_dir, f"{mode_name}.md")
-                if os.path.exists(file_path):
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        return f.read(), f"已加载 {mode_name} 模式的提示词"
-                return "", f"未找到提示词文件: {file_path}"
-
-            def save_prompt(mode_name, content):
-                if not content.strip():
-                    return "错误：提示词内容不能为空"
-                prompt_dir = os.path.join(BASE_DIR, "prompts", "literature_filter")
-                os.makedirs(prompt_dir, exist_ok=True)
-                file_path = os.path.join(prompt_dir, f"{mode_name}.md")
-                try:
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(content)
-                    return f"已保存 {mode_name} 模式的提示词"
-                except Exception as e:
-                    return f"保存失败: {e}"
-
-            lf_prompt_load.click(
-                fn=load_prompt,
-                inputs=[lf_prompt_mode],
-                outputs=[lf_prompt_text, lf_prompt_status],
-            )
-            lf_prompt_save.click(
-                fn=save_prompt,
-                inputs=[lf_prompt_mode, lf_prompt_text],
-                outputs=[lf_prompt_status],
-            )
-
-            lf_btn.click(
-                fn=run_literature_filter,
-                inputs=[lf_file, lf_mode, lf_topic, lf_year, lf_keywords, lf_limit],
-                outputs=[lf_log, lf_df, lf_dl],
-            )
-
-        # ===== Tab 2: 单文件精读 =====
-        with gr.Tab("单文件精读"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    fp_pdf = gr.File(label="上传 PDF 文件", file_types=[".pdf"])
-                    _fp_choices = ["PaddleOCR (本地GPU)", "PaddleOCR (远程API)", "Legacy (pdfplumber)"]
-                    _fp_default = "PaddleOCR (本地GPU)" if _LOCAL_POCR else "PaddleOCR (远程API)"
-                    fp_method = gr.Radio(
-                        label="提取方式",
-                        choices=_fp_choices,
-                        value=_fp_default,
-                    )
-                    fp_btn = gr.Button("开始精读", variant="primary")
-                    fp_cancel = gr.Button("停止", variant="stop")
-
-                with gr.Column(scale=2):
-                    fp_stage = gr.Textbox(label="当前阶段", interactive=False)
-                    fp_log = gr.Textbox(label="运行日志", lines=15, interactive=False)
-                    fp_preview = gr.Markdown(label="最终报告预览")
-                    fp_dl = gr.Textbox(label="结果目录", interactive=False)
-
-            fp_btn.click(
-                fn=run_full_pipeline,
-                inputs=[fp_pdf, fp_method],
-                outputs=[fp_stage, fp_log, fp_preview, fp_dl],
-            )
-            fp_cancel.click(fn=_request_cancel, outputs=[fp_stage])
-
-        # ===== Tab 3: 批量精读 =====
-        with gr.Tab("批量精读"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    bp_folder = gr.Textbox(label="PDF 文件夹路径", placeholder=r"E:\pdf\002")
-                    bp_validate = gr.Button("验证路径")
-                    bp_status = gr.Textbox(label="文件夹状态", interactive=False)
-                    bp_skip = gr.Checkbox(label="跳过已处理", value=True)
-                    _bp_choices = ["PaddleOCR (本地GPU)", "PaddleOCR (远程API)", "Legacy (pdfplumber)"]
-                    _bp_default = "PaddleOCR (本地GPU)" if _LOCAL_POCR else "PaddleOCR (远程API)"
-                    bp_method = gr.Radio(
-                        label="提取方式",
-                        choices=_bp_choices,
-                        value=_bp_default,
-                    )
-                    bp_btn = gr.Button("开始批量精读", variant="primary")
-                    bp_cancel = gr.Button("停止", variant="stop")
-
-                with gr.Column(scale=2):
-                    bp_df = gr.Dataframe(
-                        label="处理进度",
-                        headers=["文件名", "类型", "状态", "耗时"],
-                        interactive=False,
-                    )
-                    bp_log = gr.Textbox(label="当前日志", lines=10, interactive=False)
-                    bp_total = gr.Textbox(label="总体进度", interactive=False)
-
-            bp_validate.click(fn=validate_folder, inputs=[bp_folder], outputs=[bp_status])
-            bp_btn.click(
-                fn=run_batch,
-                inputs=[bp_folder, bp_skip, bp_method],
-                outputs=[bp_df, bp_log, bp_total],
-            )
-            bp_cancel.click(fn=_request_cancel, outputs=[bp_total])
-
-        # ===== Tab 4: PDF 提取 =====
-        with gr.Tab("PDF 提取"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    ext_pdf = gr.File(label="上传 PDF 文件", file_types=[".pdf"])
-                    ext_out_dir = gr.Textbox(label="输出目录", value="paddleocr_md")
-                    ext_local_gpu = gr.Checkbox(
-                        label="使用本地 PaddleOCR (GPU)",
-                        value=_LOCAL_POCR,
-                        interactive=_LOCAL_POCR,
-                        info="需要 paddleocr + paddlex" if not _LOCAL_POCR else "已检测到 PPStructureV3",
-                    )
-                    ext_table = gr.Checkbox(label="表格识别", value=True)
-                    ext_formula = gr.Checkbox(label="公式识别", value=True)
-                    ext_chart = gr.Checkbox(label="图表解析", value=False)
-                    ext_orient = gr.Checkbox(label="方向矫正", value=False)
-                    ext_images = gr.Checkbox(label="下载图片", value=False)
-                    ext_pages = gr.Slider(label="每批页数", minimum=5, maximum=50, step=5, value=10)
-                    ext_no_fb = gr.Checkbox(label="禁用回退", value=False)
-                    ext_legacy = gr.Checkbox(label="强制使用 pdfplumber", value=False)
-                    ext_btn = gr.Button("开始提取", variant="primary")
-
-                with gr.Column(scale=2):
-                    ext_log = gr.Textbox(label="提取日志", lines=12, interactive=False)
-                    ext_preview = gr.Markdown(label="Markdown 预览")
-                    ext_meta = gr.Code(label="元数据 (JSON)", language="json")
-                    ext_dl = gr.File(label="下载结果")
-
-            ext_btn.click(
-                fn=run_extraction,
-                inputs=[ext_pdf, ext_out_dir, ext_local_gpu, ext_table, ext_formula, ext_chart,
-                        ext_orient, ext_images, ext_pages, ext_no_fb, ext_legacy],
-                outputs=[ext_log, ext_preview, ext_meta, ext_dl],
-            )
-
-        # ===== Tab 5: MD 文件精读 =====
-        with gr.Tab("MD 文件精读"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    md_mode = gr.Radio(
-                        label="模式",
-                        choices=["单文件", "文件夹"],
-                        value="单文件",
-                    )
-                    md_file_row = gr.Row(visible=True)
-                    with md_file_row:
-                        md_file = gr.File(label="上传 MD 文件", file_types=[".md"])
-                    md_folder_row = gr.Row(visible=False)
-                    with md_folder_row:
-                        md_folder = gr.Textbox(
-                            label="MD 文件夹路径",
-                            placeholder=r"E:\papers\paddleocr_md",
-                        )
-                        md_validate_btn = gr.Button("验证路径")
-                    md_folder_status = gr.Textbox(label="文件夹状态", interactive=False, visible=False)
-                    md_skip = gr.Checkbox(label="跳过已处理", value=True)
-                    md_btn = gr.Button("开始精读", variant="primary")
-                    md_cancel = gr.Button("停止", variant="stop")
-
-                with gr.Column(scale=2):
-                    md_df = gr.Dataframe(
-                        label="处理进度",
-                        headers=["文件名", "类型", "状态", "耗时"],
-                        interactive=False,
-                    )
-                    md_log = gr.Textbox(label="当前日志", lines=12, interactive=False)
-                    md_total = gr.Textbox(label="总体进度", interactive=False)
-                    md_preview = gr.Markdown(label="最终报告预览")
-                    md_dl = gr.File(label="下载结果")
-
-            def _toggle_md_mode(mode):
-                return (
-                    gr.update(visible=(mode == "单文件")),
-                    gr.update(visible=(mode == "文件夹")),
-                    gr.update(visible=(mode == "文件夹")),
-                )
-
-            md_mode.change(
-                fn=_toggle_md_mode,
-                inputs=[md_mode],
-                outputs=[md_file_row, md_folder_row, md_folder_status],
-            )
-            md_validate_btn.click(
-                fn=validate_md_folder,
-                inputs=[md_folder],
-                outputs=[md_folder_status],
-            )
-            md_btn.click(
-                fn=run_md_reading,
-                inputs=[md_mode, md_file, md_folder, md_skip],
-                outputs=[md_df, md_log, md_total, md_preview, md_dl],
-            )
-            md_cancel.click(fn=_request_cancel, outputs=[md_total])
-
-        # ===== Tab 6: 中文重述 =====
-        with gr.Tab("中文重述"):
-            with gr.Row():
-                with gr.Column(scale=1):
-                    tr_mode = gr.Radio(
-                        label="模式",
-                        choices=["单文件", "批量文件夹"],
-                        value="单文件",
-                    )
-
-                    tr_file_row = gr.Row(visible=True)
-                    with tr_file_row:
-                        tr_file = gr.File(
-                            label="上传文件（PDF 或 MD）",
-                            file_types=[".pdf", ".md"],
-                        )
-
-                    tr_folder_row = gr.Row(visible=False)
-                    with tr_folder_row:
-                        tr_folder = gr.Textbox(
-                            label="文件夹路径（PDF/MD 混合均可）",
-                            placeholder=r"E:\papers\pdf",
-                        )
-
-                    _tr_ext_choices = ["PaddleOCR (本地GPU)", "PaddleOCR (远程API)", "Legacy (pdfplumber)"]
-                    _tr_ext_default = "PaddleOCR (本地GPU)" if _LOCAL_POCR else "PaddleOCR (远程API)"
-                    tr_extract = gr.Radio(
-                        label="PDF 提取方式（仅对 PDF 文件生效）",
-                        choices=_tr_ext_choices,
-                        value=_tr_ext_default,
-                    )
-                    tr_model = gr.Radio(
-                        label="重述模型",
-                        choices=["deepseek-chat", "deepseek-reasoner"],
-                        value="deepseek-chat",
-                        info="chat 速度快、成本低；reasoner 质量更高",
-                    )
-                    tr_chunk = gr.Slider(
-                        label="每块最大字符数",
-                        minimum=2000,
-                        maximum=8000,
-                        step=500,
-                        value=5000,
-                        info="越小分块越细，API 调用次数越多",
-                    )
-                    tr_workers = gr.Slider(
-                        label="并发重述数",
-                        minimum=1,
-                        maximum=10,
-                        step=1,
-                        value=5,
-                        info="同时发出的 API 请求数，deepseek-chat 建议 5，reasoner 建议 3",
-                    )
-                    tr_btn = gr.Button("开始重述", variant="primary")
-                    tr_cancel = gr.Button("停止", variant="stop")
-
-                with gr.Column(scale=2):
-                    tr_log = gr.Textbox(label="运行日志", lines=14, interactive=False)
-                    tr_df = gr.Dataframe(
-                        label="处理进度",
-                        headers=["文件名", "类型", "状态", "耗时"],
-                        interactive=False,
-                    )
-                    tr_total = gr.Textbox(label="总体进度", interactive=False)
-                    tr_preview = gr.Markdown(label="中文重述预览（单文件）")
-                    tr_dl = gr.File(label="下载中文版 MD（单文件）")
-
-            def _toggle_tr_mode(mode):
-                return (
-                    gr.update(visible=(mode == "单文件")),
-                    gr.update(visible=(mode == "批量文件夹")),
-                )
-
-            tr_mode.change(
-                fn=_toggle_tr_mode,
-                inputs=[tr_mode],
-                outputs=[tr_file_row, tr_folder_row],
-            )
-
-            tr_btn.click(
-                fn=run_translation,
-                inputs=[tr_mode, tr_file, tr_folder, tr_model, tr_chunk, tr_extract, tr_workers],
-                outputs=[tr_log, tr_df, tr_total, tr_preview, tr_dl],
-            )
-            tr_cancel.click(fn=_request_cancel, outputs=[tr_total])
-
+        # ===== TABS =====
+        with gr.Tabs(elem_classes="kimi-tabs") as tabs:
+            
+            # --- TAB 0: 文献筛选 ---
+            with gr.Tab("□ 文献筛选", id="filter"):
+                with gr.Row():
+                    # Left sidebar
+                    with gr.Column(scale=1, min_width=300):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-filter'></span> 上传文献题录</div>")
+                            f_file = gr.File(
+                                label="",
+                                show_label=False,
+                                file_types=[".txt"],
+                                elem_classes="no-label",
+                            )
+                            gr.Markdown("<div class='upload-hint'>Web of Science (savedrecs.txt) 或 CNKI 导出文件</div>")
+                        
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-target'></span> 筛选设置</div>")
+                            f_mode = gr.Radio(
+                                label="",
+                                show_label=False,
+                                choices=[
+                                    ("探索者模式", "explorer"),
+                                    ("评审者模式", "reviewer"),
+                                    ("实证主义者模式", "empiricist"),
+                                ],
+                                value="explorer",
+                                elem_classes="no-label",
+                            )
+                            f_topic = gr.Textbox(
+                                label="",
+                                show_label=False,
+                                placeholder="研究主题（如：数字普惠金融）",
+                                elem_classes="no-label",
+                            )
+                            f_min_year = gr.Number(
+                                label="",
+                                show_label=False,
+                                value=2015,
+                                precision=0,
+                                elem_classes="no-label",
+                            )
+                            gr.Markdown("<div style='font-size:11px;color:var(--text-muted);'>最小年份（0=不限制）</div>")
+                            f_keywords = gr.Textbox(
+                                label="",
+                                show_label=False,
+                                placeholder="关键词过滤，逗号分隔（可选）",
+                                elem_classes="no-label",
+                            )
+                        
+                        with gr.Row():
+                            f_start = gr.Button("开始筛选", elem_classes="btn-kimi")
+                            f_cancel = gr.Button("停止", elem_classes="btn-kimi-danger")
+                        
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-chart'></span> 处理进度</div>")
+                            f_stage = gr.Textbox(label="", show_label=False, value="等待上传...", interactive=False, elem_classes="no-label")
+                            f_progress = gr.Slider(label="", show_label=False, minimum=0, maximum=100, value=0, interactive=False, elem_classes="no-label")
+                            f_log = gr.Textbox(label="", show_label=False, lines=8, interactive=False, elem_classes=["log-box", "no-label"])
+                    
+                    # Right main
+                    with gr.Column(scale=2):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-target'></span> 筛选结果</div>")
+                            f_table = gr.Dataframe(
+                                headers=["标题", "作者", "期刊", "年份", "评分", "判定理由"],
+                                label="",
+                                show_label=False,
+                                interactive=False,
+                                elem_classes="no-label",
+                            )
+                            gr.Markdown("<div style='font-size:12px;color:var(--text-muted);margin-top:8px;'>评分 1-10，按分数降序排列</div>")
+                        
+                        with gr.Group(elem_classes="kimi-card", visible=False) as f_download_card:
+                            gr.Markdown("<div class='card-title'><span class='icon icon-download'></span> 下载结果</div>")
+                            f_download = gr.File(label="", show_label=False, interactive=False)
+            
+            # --- TAB 1: 长文本精读 ---
+            with gr.Tab("➤ 长文本精读", id="long"):
+                with gr.Row():
+                    # Left sidebar
+                    with gr.Column(scale=1, min_width=300):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-upload'></span> 上传论文</div>")
+                            lc_pdf = gr.File(label="", show_label=False, file_types=[".pdf"], elem_classes="no-label")
+                            gr.Markdown("<div class='upload-hint'>PDF 格式，完整论文一次性上传</div>")
+                        
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-target'></span> 分析维度</div>")
+                            lc_dims = gr.CheckboxGroup(
+                                label="",
+                                show_label=False,
+                                choices=[f"{d[1]}" for d in ANALYSIS_DIMS],
+                                value=[d[1] for d in ANALYSIS_DIMS[:4]],
+                                elem_classes="no-label",
+                            )
+                            gr.Markdown("<div style='font-size:11px;color:var(--text-muted);margin-top:8px;'>选中维度将依次执行，论文全文作为缓存前缀</div>")
+                        
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-chat'></span> 自定义问题</div>")
+                            lc_custom = gr.Textbox(
+                                label="",
+                                show_label=False,
+                                placeholder="（可选）追加一个自定义问题...",
+                                lines=2,
+                                elem_classes="no-label",
+                            )
+                        
+                        with gr.Row():
+                            lc_start = gr.Button("开始精读", elem_classes="btn-kimi")
+                            lc_cancel = gr.Button("停止", elem_classes="btn-kimi-danger")
+                    
+                    # Right main
+                    with gr.Column(scale=2):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-chart'></span> 处理进度</div>")
+                            lc_stage = gr.Textbox(label="", show_label=False, value="等待上传...", interactive=False, elem_classes="no-label")
+                            lc_progress = gr.Slider(label="", show_label=False, minimum=0, maximum=100, value=0, interactive=False, elem_classes="no-label")
+                            lc_log = gr.Textbox(label="", show_label=False, lines=8, interactive=False, elem_classes=["log-box", "no-label"])
+                        
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-edit'></span> 分析结果</div>")
+                            lc_preview = gr.Markdown("*上传 PDF 并选择维度后，点击「开始精读」*", elem_classes="md-preview")
+                        
+                        with gr.Group(elem_classes="kimi-card", visible=False) as lc_download_card:
+                            gr.Markdown("<div class='card-title'><span class='icon icon-download'></span> 下载报告</div>")
+                            lc_download = gr.File(label="", show_label=False, interactive=False)
+            
+            # --- TAB 2: 七步精读 ---
+            with gr.Tab("△ 七步精读 (QUANT)", id="quant"):
+                with gr.Row():
+                    with gr.Column(scale=1, min_width=300):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-upload'></span> 上传论文</div>")
+                            q_pdf = gr.File(label="", file_types=[".pdf"])
+                            q_method = gr.Radio(
+                                label="提取方式",
+                                choices=["PaddleOCR (远程API)", "PaddleOCR (本地GPU)", "Legacy (pdfplumber)"],
+                                value="Legacy (pdfplumber)",
+                            )
+                            with gr.Row():
+                                q_start = gr.Button("开始精读", elem_classes="btn-kimi")
+                                q_cancel = gr.Button("停止", elem_classes="btn-kimi-danger")
+                    
+                    with gr.Column(scale=2):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-chart'></span> 处理进度</div>")
+                            q_stage = gr.Textbox(label="当前阶段", value="等待上传...", interactive=False)
+                            q_progress = gr.Slider(label="进度", minimum=0, maximum=100, value=0, interactive=False)
+                            q_log = gr.Textbox(label="运行日志", lines=8, interactive=False, elem_classes="log-box")
+                        
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-edit'></span> 报告预览</div>")
+                            q_preview = gr.Markdown("*上传 PDF 后点击「开始精读」*", elem_classes="md-preview")
+                        
+                        with gr.Group(elem_classes="kimi-card", visible=False) as q_download_card:
+                            gr.Markdown("<div class='card-title'><span class='icon icon-download'></span> 下载报告</div>")
+                            q_download = gr.File(label="完整报告", interactive=False)
+            
+            # --- TAB 3: 四步精读 ---
+            with gr.Tab("◉ 四步精读 (QUAL)", id="qual"):
+                with gr.Row():
+                    with gr.Column(scale=1, min_width=300):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-upload'></span> 上传论文</div>")
+                            ql_pdf = gr.File(label="", show_label=False, file_types=[".pdf"], elem_classes="no-label")
+                            ql_method = gr.Radio(
+                                label="",
+                                show_label=False,
+                                choices=["PaddleOCR (远程API)", "PaddleOCR (本地GPU)", "Legacy (pdfplumber)"],
+                                value="Legacy (pdfplumber)",
+                                elem_classes="no-label",
+                            )
+                            with gr.Row():
+                                ql_start = gr.Button("开始精读", elem_classes="btn-kimi")
+                                ql_cancel = gr.Button("停止", elem_classes="btn-kimi-danger")
+                    
+                    with gr.Column(scale=2):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-chart'></span> 处理进度</div>")
+                            ql_stage = gr.Textbox(label="", show_label=False, value="等待上传...", interactive=False, elem_classes="no-label")
+                            ql_progress = gr.Slider(label="", show_label=False, minimum=0, maximum=100, value=0, interactive=False, elem_classes="no-label")
+                            ql_log = gr.Textbox(label="", show_label=False, lines=8, interactive=False, elem_classes=["log-box", "no-label"])
+                        
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-edit'></span> 报告预览</div>")
+                            ql_preview = gr.Markdown("*上传 PDF 后点击「开始精读」*", elem_classes="md-preview")
+                        
+                        with gr.Group(elem_classes="kimi-card", visible=False) as ql_download_card:
+                            gr.Markdown("<div class='card-title'><span class='icon icon-download'></span> 下载报告</div>")
+                            ql_download = gr.File(label="", show_label=False, interactive=False)
+            
+            # --- TAB 4: 提示词管理 ---
+            with gr.Tab("⚙ 提示词管理", id="prompts"):
+                with gr.Row():
+                    with gr.Column(scale=1, min_width=300):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-folder'></span> 选择提示词</div>")
+                            p_type = gr.Radio(label="模式", choices=["七步精读", "四步精读"], value="七步精读")
+                            p_step = gr.Dropdown(
+                                label="步骤",
+                                choices=[f"{s[2]} {s[1]}" for s in QUANT_STEPS],
+                                value=f"{QUANT_STEPS[0][2]} {QUANT_STEPS[0][1]}",
+                            )
+                            p_status = gr.Textbox(label="", show_label=False, interactive=False)
+                            with gr.Row():
+                                p_load = gr.Button("加载", elem_classes="btn-kimi-secondary")
+                                p_save = gr.Button("保存", elem_classes="btn-kimi-secondary")
+                    
+                    with gr.Column(scale=2):
+                        with gr.Group(elem_classes="kimi-card"):
+                            gr.Markdown("<div class='card-title'><span class='icon icon-pencil'></span> 编辑器</div>")
+                            p_editor = gr.Textbox(label="", lines=24, elem_classes="prompt-box")
+        
+        # ===== EVENTS =====
+        
+        # Filter events (文献筛选)
+        def _f_start(file, mode, topic, min_year, keywords):
+            if file is None:
+                return {"f_log": "请先上传文献题录文件", "f_stage": "错误", "f_progress": 0,
+                        "filter_table": [], "f_download": None, "f_download_card": gr.update(visible=False)}
+            for output in _run_literature_filter(file, mode, topic, min_year, keywords):
+                yield {
+                    "f_log": output["logs"],
+                    "f_stage": output["stage"],
+                    "f_progress": output["progress"],
+                    "filter_table": output["filter_table"],
+                    "f_download": output["download"],
+                    "f_download_card": gr.update(visible=bool(output["download"])),
+                }
+        
+        f_start.click(
+            fn=_f_start,
+            inputs=[f_file, f_mode, f_topic, f_min_year, f_keywords],
+            outputs=[f_log, f_stage, f_progress, f_table, f_download, f_download_card],
+        )
+        f_cancel.click(fn=_request_cancel, outputs=[f_stage])
+        
+        # Long context events
+        def _lc_start(pdf, dims, custom_q):
+            if pdf is None:
+                return {"lc_log": "请先上传 PDF", "lc_stage": "错误", "lc_progress": 0, 
+                        "lc_preview": "", "lc_download": None, "lc_download_card": gr.update(visible=False)}
+            # Map display names back to keys
+            dim_keys = []
+            for d in dims:
+                for ak, an, _ in ANALYSIS_DIMS:
+                    if an == d:
+                        dim_keys.append(ak)
+            
+            for output in run_long_context(pdf, dim_keys, custom_q):
+                yield {
+                    "lc_log": output["logs"],
+                    "lc_stage": output["stage"],
+                    "lc_progress": output["progress"],
+                    "lc_preview": output["preview"] or "*正在分析...*",
+                    "lc_download": output["download"],
+                    "lc_download_card": gr.update(visible=bool(output["download"])),
+                }
+        
+        lc_start.click(
+            fn=_lc_start,
+            inputs=[lc_pdf, lc_dims, lc_custom],
+            outputs=[lc_log, lc_stage, lc_progress, lc_preview, lc_download, lc_download_card],
+        )
+        lc_cancel.click(fn=_request_cancel, outputs=[lc_stage])
+        
+        # Quant events
+        def _q_start(pdf, method):
+            if pdf is None:
+                return {"q_log": "请先上传 PDF", "q_stage": "错误", "q_progress": 0,
+                        "q_preview": "", "q_download": None, "q_download_card": gr.update(visible=False)}
+            for output in run_deep_reading(pdf, method):
+                yield {
+                    "q_log": output["logs"],
+                    "q_stage": output["stage"],
+                    "q_progress": output["progress"],
+                    "q_preview": output["preview"] or "*正在生成报告...*",
+                    "q_download": output["download"],
+                    "q_download_card": gr.update(visible=bool(output["download"])),
+                }
+        
+        q_start.click(
+            fn=_q_start,
+            inputs=[q_pdf, q_method],
+            outputs=[q_log, q_stage, q_progress, q_preview, q_download, q_download_card],
+        )
+        q_cancel.click(fn=_request_cancel, outputs=[q_stage])
+        
+        # Qual events (四步精读)
+        def _ql_start(pdf, method):
+            if pdf is None:
+                return {"ql_log": "请先上传 PDF", "ql_stage": "错误", "ql_progress": 0,
+                        "ql_preview": "", "ql_download": None, "ql_download_card": gr.update(visible=False)}
+            for output in run_qual_analysis(pdf, method):
+                yield {
+                    "ql_log": output["logs"],
+                    "ql_stage": output["stage"],
+                    "ql_progress": output["progress"],
+                    "ql_preview": output["preview"] or "*正在生成报告...*",
+                    "ql_download": output["download"],
+                    "ql_download_card": gr.update(visible=bool(output["download"])),
+                }
+        
+        ql_start.click(
+            fn=_ql_start,
+            inputs=[ql_pdf, ql_method],
+            outputs=[ql_log, ql_stage, ql_progress, ql_preview, ql_download, ql_download_card],
+        )
+        ql_cancel.click(fn=_request_cancel, outputs=[ql_stage])
+        
+        # Prompt events
+        def _p_type_change(pt):
+            is_quant = pt == "七步精读"
+            choices = [f"{s[2]} {s[1]}" for s in (QUANT_STEPS if is_quant else QUAL_STEPS)]
+            return gr.update(choices=choices, value=choices[0])
+        
+        p_type.change(fn=_p_type_change, inputs=[p_type], outputs=[p_step])
+        
+        def _p_load(pt, ps):
+            is_quant = pt == "七步精读"
+            step_name = ps.split(" ", 1)[1] if " " in ps else ps
+            # Map display to file name
+            name_map = {
+                "全景扫描": "step_1_overview", "理论与假说": "step_2_theory",
+                "数据考古": "step_3_data", "变量与测量": "step_4_vars",
+                "识别策略": "step_5_identification", "结果解读": "step_6_results",
+                "专家批判": "step_7_critique",
+                "背景层": "L1_Context", "理论层": "L2_Theory",
+                "逻辑层": "L3_Logic", "价值层": "L4_Value",
+            }
+            actual = name_map.get(step_name, step_name.replace(" ", "_").lower())
+            ptype = "quant" if is_quant else "qual"
+            content = _load_prompt_file(actual, ptype)
+            status = f"✓ 已加载 {actual}.md" if content else f"未找到 {actual}.md"
+            return content, status, actual, ptype
+        
+        p_load.click(
+            fn=_p_load,
+            inputs=[p_type, p_step],
+            outputs=[p_editor, p_status, gr.State(), gr.State()],
+        )
+        
+        # Initial load
+        app.load(
+            fn=lambda: _load_prompt_file("step_1_overview", "quant"),
+            outputs=[p_editor],
+        )
+    
     return app
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     app = build_ui()
-    app.queue()
-    app.launch(server_name="127.0.0.1", server_port=7860, theme=gr.themes.Soft())
+    app.queue(max_size=20)
+    app.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=False,
+        show_error=True,
+        css=EXTRA_CSS,
+        theme=KIMI_THEME,
+    )

@@ -1,0 +1,111 @@
+- main [ref=e6]:
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: ❤️‍🔥
+        - generic [ref=e16]:
+          - heading "Deep Reading Agent" [level=1] [ref=e17]
+          - generic [ref=e18]: 学术论文深度精读系统
+      - generic [ref=e24]: DeepSeek ✓ KIMI v3
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - button [ref=e28] [cursor=pointer]: □ 文献筛选
+          - button [ref=e29] [cursor=pointer]: ➤ 长文本精读
+          - button [ref=e30] [cursor=pointer]: △ 七步精读 (QUANT)
+          - button [ref=e31] [cursor=pointer]: ◉ 四步精读 (QUAL)
+          - button [ref=e32] [cursor=pointer]: ⚙ 提示词管理
+        - tablist [ref=e33]:
+          - tab "□ 文献筛选" [ref=e34] [cursor=pointer]
+          - tab "➤ 长文本精读" [active] [selected] [ref=e35] [cursor=pointer]
+          - tab "△ 七步精读 (QUANT)" [ref=e36] [cursor=pointer]
+          - tab "◉ 四步精读 (QUAL)" [ref=e37] [cursor=pointer]
+          - tab "⚙ 提示词管理" [ref=e38] [cursor=pointer]
+      - text: □ ★ ■ ★
+      - tabpanel [ref=e39]:
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - generic [ref=e44]:
+              - generic [ref=e49]:
+                - generic [ref=e50]: ↗
+                - text: 上传论文
+              - button "Click to upload or drop files" [ref=e52] [cursor=pointer]:
+                - generic [ref=e53]:
+                  - img [ref=e55]
+                  - text: Drop File Here
+                  - generic [ref=e58]: "- or -"
+                  - text: Click to Upload
+              - generic [ref=e63]: PDF 格式，完整论文一次性上传
+            - generic [ref=e65]:
+              - generic [ref=e70]:
+                - generic [ref=e71]: ★
+                - text: 分析维度
+              - group [ref=e73]:
+                - generic [ref=e75]:
+                  - generic [ref=e76] [cursor=pointer]:
+                    - checkbox "核心贡献识别" [checked] [ref=e77]
+                    - generic [ref=e78]: 核心贡献识别
+                  - generic [ref=e79] [cursor=pointer]:
+                    - checkbox "理论框架评估" [checked] [ref=e80]
+                    - generic [ref=e81]: 理论框架评估
+                  - generic [ref=e82] [cursor=pointer]:
+                    - checkbox "方法论批判" [checked] [ref=e83]
+                    - generic [ref=e84]: 方法论批判
+                  - generic [ref=e85] [cursor=pointer]:
+                    - checkbox "实证结果解读" [checked] [ref=e86]
+                    - generic [ref=e87]: 实证结果解读
+                  - generic [ref=e88] [cursor=pointer]:
+                    - checkbox "局限性分析" [ref=e89]
+                    - generic [ref=e90]: 局限性分析
+                  - generic [ref=e91] [cursor=pointer]:
+                    - checkbox "实践意义" [ref=e92]
+                    - generic [ref=e93]: 实践意义
+                  - generic [ref=e94] [cursor=pointer]:
+                    - checkbox "跨文献对比" [ref=e95]
+                    - generic [ref=e96]: 跨文献对比
+                  - generic [ref=e97] [cursor=pointer]:
+                    - checkbox "未来方向" [ref=e98]
+                    - generic [ref=e99]: 未来方向
+              - generic [ref=e104]: 选中维度将依次执行，论文全文作为缓存前缀
+            - generic [ref=e106]:
+              - generic [ref=e111]:
+                - generic [ref=e112]: ✉
+                - text: 自定义问题
+              - generic [ref=e115]:
+                - generic [ref=e116]: Textbox
+                - textbox "Textbox" [ref=e118]:
+                  - /placeholder: （可选）追加一个自定义问题...
+            - generic [ref=e119]:
+              - button "开始精读" [ref=e120] [cursor=pointer]
+              - button "停止" [ref=e121] [cursor=pointer]
+          - generic [ref=e122]:
+            - generic [ref=e124]:
+              - generic [ref=e129]:
+                - generic [ref=e130]: ■
+                - text: 处理进度
+              - generic [ref=e131]:
+                - generic [ref=e133]:
+                  - generic [ref=e134]: Textbox
+                  - textbox "Textbox" [disabled] [ref=e136]:
+                    - /placeholder: ""
+                    - text: 等待上传...
+                - generic [ref=e138]:
+                  - generic [ref=e139]:
+                    - generic [ref=e140]: Slider
+                    - generic [ref=e141]:
+                      - spinbutton "number input for" [disabled] [ref=e142]: "0"
+                      - button "Reset to default value" [disabled] [ref=e143]: ↺
+                  - generic [ref=e144]:
+                    - generic [ref=e145]: "0"
+                    - slider "range slider for" [disabled] [ref=e146]: "0"
+                    - generic [ref=e147]: "100"
+                - generic [ref=e149]:
+                  - generic [ref=e150]: Textbox
+                  - textbox "Textbox" [disabled] [ref=e152]:
+                    - /placeholder: ""
+            - generic [ref=e154]:
+              - generic [ref=e159]:
+                - generic [ref=e160]: ✎
+                - text: 分析结果
+              - paragraph [ref=e165]:
+                - emphasis [ref=e166]: 上传 PDF 并选择维度后，点击「开始精读」

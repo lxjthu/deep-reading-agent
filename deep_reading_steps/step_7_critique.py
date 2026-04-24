@@ -1,22 +1,11 @@
-from .common import call_deepseek, save_step_result, smart_chunk, get_combined_text_for_step
+from .common import call_deepseek, save_step_result, smart_chunk, get_combined_text_for_step, load_prompt_from_file
 import logging
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """你是一位 Daron Acemoglu 级别的顶级计量经济学家。
-你的任务是进行"专家批判与展望"，回答以下问题：
-
-### **26. 致命伤 (The Achilles' Heel)**
-这篇文章最大的弱点是什么？（如：IV 的相关性太弱？外部有效性存疑？）
-
-### **27. 未来选题**
-基于本文的不足或未尽之处，提出 1-2 个具体的、可执行的新选题方向。
-
-**格式要求**：
-- 必须使用 `### **` 作为带编号小标题的标记
-- 子项目使用 `-` 列表标记
-- 使用专业、严谨的学术中文回答
-"""
+SYSTEM_PROMPT = load_prompt_from_file("step_7_critique", "quant")
+if not SYSTEM_PROMPT:
+    SYSTEM_PROMPT = """你是一位 Daron Acemoglu 级别的顶级计量经济学家。进行专家批判与展望。"""
 
 def run(sections: dict, assigned_titles: list, output_dir: str, step_id: int = 7):
     """

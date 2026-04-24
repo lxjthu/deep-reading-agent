@@ -27,6 +27,36 @@ def get_deepseek_client():
         return None
     return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
+
+def load_prompt_from_file(step_name: str, prompt_type: str = "quant") -> str:
+    """
+    Load system prompt from external file.
+    
+    Args:
+        step_name: e.g., "step_1_overview", "L1_Context"
+        prompt_type: "quant" or "qual"
+    
+    Returns:
+        Prompt string content
+    """
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    prompts_dir = os.path.join(base_dir, "prompts", f"{prompt_type}_analysis")
+    prompt_file = os.path.join(prompts_dir, f"{step_name}.md")
+    
+    if not os.path.exists(prompt_file):
+        logger.error(f"Prompt file not found: {prompt_file}")
+        return ""
+    
+    try:
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        logger.info(f"Loaded prompt from file: {step_name}")
+        return content
+    except Exception as e:
+        logger.error(f"Error loading prompt file {prompt_file}: {e}")
+        return ""
+
+
 def get_combined_text_for_step(sections, assigned_titles, output_dir=None, step_id=None):
     """
     Retrieves and combines text for a list of assigned section titles.

@@ -1,0 +1,82 @@
+- main [ref=e6]:
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: ❤️‍🔥
+        - generic [ref=e16]:
+          - heading "Deep Reading Agent" [level=1] [ref=e17]
+          - generic [ref=e18]: 学术论文深度精读系统
+      - generic [ref=e24]: DeepSeek ✓ KIMI v3
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - button [ref=e28] [cursor=pointer]: □ 文献筛选
+          - button [ref=e29] [cursor=pointer]: ➤ 长文本精读
+          - button [ref=e30] [cursor=pointer]: △ 七步精读 (QUANT)
+          - button [ref=e31] [cursor=pointer]: ◉ 四步精读 (QUAL)
+          - button [ref=e32] [cursor=pointer]: ⚙ 提示词管理
+        - tablist [ref=e33]:
+          - tab "□ 文献筛选" [ref=e34] [cursor=pointer]
+          - tab "➤ 长文本精读" [ref=e35] [cursor=pointer]
+          - tab "△ 七步精读 (QUANT)" [ref=e36] [cursor=pointer]
+          - tab "◉ 四步精读 (QUAL)" [active] [selected] [ref=e37] [cursor=pointer]
+          - tab "⚙ 提示词管理" [ref=e38] [cursor=pointer]
+      - text: □ ★ ■ ★ ↗ ★ ✉ ■ ✎ ↗ ■ ✎
+      - tabpanel [ref=e249]:
+        - generic [ref=e251]:
+          - generic [ref=e254]:
+            - generic [ref=e259]:
+              - generic [ref=e260]: ↗
+              - text: 上传论文
+            - button "Click to upload or drop files" [ref=e262] [cursor=pointer]:
+              - generic [ref=e263]:
+                - img [ref=e265]
+                - text: Drop File Here
+                - generic [ref=e268]: "- or -"
+                - text: Click to Upload
+            - group [ref=e270]:
+              - generic [ref=e271]: Radio
+              - generic [ref=e272]:
+                - generic [ref=e273] [cursor=pointer]:
+                  - radio "PaddleOCR (远程API)" [ref=e274]
+                  - generic [ref=e275]: PaddleOCR (远程API)
+                - generic [ref=e276] [cursor=pointer]:
+                  - radio "PaddleOCR (本地GPU)" [ref=e277]
+                  - generic [ref=e278]: PaddleOCR (本地GPU)
+                - generic [ref=e279] [cursor=pointer]:
+                  - radio "Legacy (pdfplumber)" [checked] [ref=e280]
+                  - generic [ref=e281]: Legacy (pdfplumber)
+            - generic [ref=e282]:
+              - button "开始精读" [ref=e283] [cursor=pointer]
+              - button "停止" [ref=e284] [cursor=pointer]
+          - generic [ref=e285]:
+            - generic [ref=e287]:
+              - generic [ref=e292]:
+                - generic [ref=e293]: ■
+                - text: 处理进度
+              - generic [ref=e294]:
+                - generic [ref=e296]:
+                  - generic [ref=e297]: Textbox
+                  - textbox "Textbox" [disabled] [ref=e299]:
+                    - /placeholder: ""
+                    - text: 等待上传...
+                - generic [ref=e301]:
+                  - generic [ref=e302]:
+                    - generic [ref=e303]: Slider
+                    - generic [ref=e304]:
+                      - spinbutton "number input for" [disabled] [ref=e305]: "0"
+                      - button "Reset to default value" [disabled] [ref=e306]: ↺
+                  - generic [ref=e307]:
+                    - generic [ref=e308]: "0"
+                    - slider "range slider for" [disabled] [ref=e309]: "0"
+                    - generic [ref=e310]: "100"
+                - generic [ref=e312]:
+                  - generic [ref=e313]: Textbox
+                  - textbox "Textbox" [disabled] [ref=e315]:
+                    - /placeholder: ""
+            - generic [ref=e317]:
+              - generic [ref=e322]:
+                - generic [ref=e323]: ✎
+                - text: 报告预览
+              - paragraph [ref=e328]:
+                - emphasis [ref=e329]: 上传 PDF 后点击「开始精读」

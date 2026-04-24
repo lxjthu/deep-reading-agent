@@ -1,0 +1,145 @@
+- main [ref=e6]:
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: ❤️‍🔥
+        - generic [ref=e16]:
+          - heading "Deep Reading Agent" [level=1] [ref=e17]
+          - generic [ref=e18]: 学术论文深度精读系统
+      - generic [ref=e24]: DeepSeek ✓ KIMI v3
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - button [ref=e28] [cursor=pointer]: □ 文献筛选
+          - button [ref=e29] [cursor=pointer]: ➤ 长文本精读
+          - button [ref=e30] [cursor=pointer]: △ 七步精读 (QUANT)
+          - button [ref=e31] [cursor=pointer]: ◉ 四步精读 (QUAL)
+          - button [ref=e32] [cursor=pointer]: ⚙ 提示词管理
+        - tablist [ref=e33]:
+          - tab "□ 文献筛选" [active] [selected] [ref=e34] [cursor=pointer]
+          - tab "➤ 长文本精读" [ref=e35] [cursor=pointer]
+          - tab "△ 七步精读 (QUANT)" [ref=e36] [cursor=pointer]
+          - tab "◉ 四步精读 (QUAL)" [ref=e37] [cursor=pointer]
+          - tab "⚙ 提示词管理" [ref=e38] [cursor=pointer]
+      - tabpanel [ref=e382]:
+        - generic [ref=e384]:
+          - generic [ref=e385]:
+            - generic [ref=e387]:
+              - generic [ref=e392]:
+                - generic [ref=e393]: □
+                - text: 上传文献题录
+              - button "Click to upload or drop files" [ref=e395] [cursor=pointer]:
+                - generic [ref=e396]:
+                  - img [ref=e398]
+                  - text: Drop File Here
+                  - generic [ref=e401]: "- or -"
+                  - text: Click to Upload
+              - generic [ref=e406]: Web of Science (savedrecs.txt) 或 CNKI 导出文件
+            - generic [ref=e408]:
+              - generic [ref=e413]:
+                - generic [ref=e414]: ★
+                - text: 筛选设置
+              - generic [ref=e415]:
+                - group [ref=e416]:
+                  - generic [ref=e417]: Radio
+                  - generic [ref=e418]:
+                    - generic [ref=e419] [cursor=pointer]:
+                      - radio "探索者模式" [checked] [ref=e420]
+                      - generic [ref=e421]: 探索者模式
+                    - generic [ref=e422] [cursor=pointer]:
+                      - radio "评审者模式" [ref=e423]
+                      - generic [ref=e424]: 评审者模式
+                    - generic [ref=e425] [cursor=pointer]:
+                      - radio "实证主义者模式" [ref=e426]
+                      - generic [ref=e427]: 实证主义者模式
+                - generic [ref=e429]:
+                  - generic [ref=e430]: Textbox
+                  - textbox "Textbox" [ref=e432]:
+                    - /placeholder: 研究主题（如：数字普惠金融）
+                - spinbutton "Number" [ref=e435]: "2015"
+              - generic [ref=e440]: 最小年份（0=不限制）
+              - generic [ref=e443]:
+                - generic [ref=e444]: Textbox
+                - textbox "Textbox" [ref=e446]:
+                  - /placeholder: 关键词过滤，逗号分隔（可选）
+            - generic [ref=e447]:
+              - button "开始筛选" [ref=e448] [cursor=pointer]
+              - button "停止" [ref=e449] [cursor=pointer]
+            - generic [ref=e451]:
+              - generic [ref=e456]:
+                - generic [ref=e457]: ■
+                - text: 处理进度
+              - generic [ref=e458]:
+                - generic [ref=e460]:
+                  - generic [ref=e461]: Textbox
+                  - textbox "Textbox" [disabled] [ref=e463]:
+                    - /placeholder: ""
+                    - text: 等待上传...
+                - generic [ref=e465]:
+                  - generic [ref=e466]:
+                    - generic [ref=e467]: Slider
+                    - generic [ref=e468]:
+                      - spinbutton "number input for" [disabled] [ref=e469]: "0"
+                      - button "Reset to default value" [disabled] [ref=e470]: ↺
+                  - generic [ref=e471]:
+                    - generic [ref=e472]: "0"
+                    - slider "range slider for" [disabled] [ref=e473]: "0"
+                    - generic [ref=e474]: "100"
+                - generic [ref=e476]:
+                  - generic [ref=e477]: Textbox
+                  - textbox "Textbox" [disabled] [ref=e479]:
+                    - /placeholder: ""
+          - generic [ref=e482]:
+            - generic [ref=e487]:
+              - generic [ref=e488]: ★
+              - text: 筛选结果
+            - grid [ref=e492]:
+              - table [ref=e493]:
+                - rowgroup [ref=e494]:
+                  - row [ref=e495]:
+                    - columnheader [ref=e496]:
+                      - button [ref=e499] [cursor=pointer]:
+                        - button [ref=e500]: 标题
+                    - columnheader [ref=e501]:
+                      - button [ref=e504] [cursor=pointer]:
+                        - button [ref=e505]: 作者
+                    - columnheader [ref=e506]:
+                      - button [ref=e509] [cursor=pointer]:
+                        - button [ref=e510]: 期刊
+                    - columnheader [ref=e511]:
+                      - button [ref=e514] [cursor=pointer]:
+                        - button [ref=e515]: 年份
+                    - columnheader [ref=e516]:
+                      - button [ref=e519] [cursor=pointer]:
+                        - button [ref=e520]: 评分
+                    - columnheader [ref=e521]:
+                      - button [ref=e524] [cursor=pointer]:
+                        - button [ref=e525]: 判定理由
+              - button "Drop CSV or TSV files here to import data into dataframe" [ref=e526]:
+                - table [ref=e530]:
+                  - rowgroup [ref=e531]:
+                    - row "标题 作者 期刊 年份 评分 判定理由" [ref=e532]:
+                      - columnheader "标题" [ref=e533]:
+                        - button "标题" [ref=e536] [cursor=pointer]:
+                          - button "标题" [ref=e537]
+                      - columnheader "作者" [ref=e538]:
+                        - button "作者" [ref=e541] [cursor=pointer]:
+                          - button "作者" [ref=e542]
+                      - columnheader "期刊" [ref=e543]:
+                        - button "期刊" [ref=e546] [cursor=pointer]:
+                          - button "期刊" [ref=e547]
+                      - columnheader "年份" [ref=e548]:
+                        - button "年份" [ref=e551] [cursor=pointer]:
+                          - button "年份" [ref=e552]
+                      - columnheader "评分" [ref=e553]:
+                        - button "评分" [ref=e556] [cursor=pointer]:
+                          - button "评分" [ref=e557]
+                      - columnheader "判定理由" [ref=e558]:
+                        - button "判定理由" [ref=e561] [cursor=pointer]:
+                          - button "判定理由" [ref=e562]
+                    - iframe [ref=e563]:
+                      
+                  - rowgroup
+                  - rowgroup
+            - generic [ref=e568]: 评分 1-10，按分数降序排列
+      - text: ↗ ★ ✉ ■ ✎ ↗ ■ ✎ ↗ ■ ✎ □ ✏

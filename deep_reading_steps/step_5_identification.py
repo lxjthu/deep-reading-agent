@@ -1,30 +1,8 @@
-from .common import call_deepseek, save_step_result, smart_chunk, get_combined_text_for_step
+from .common import call_deepseek, save_step_result, smart_chunk, get_combined_text_for_step, load_prompt_from_file
 
-SYSTEM_PROMPT = """你是一位 Daron Acemoglu 级别的顶级计量经济学家。
-你的任务是剖析"识别策略与实证"，回答以下问题：
-
-### **17. 计量模型**
-写出核心回归方程（Y_it = alpha + beta X_it + ...）。
-
-### **18. 识别挑战**
-核心解释变量 X 是外生的吗？潜在的内生性来源是什么？（遗漏变量？反向因果？测量误差？）
-
-### **19. 解决策略**
-作者用了什么招数解决内生性？（IV, DID, RDD, Bunching?）
-
-### **20. 机制检验**
-绘制**影响机制图谱** (Mechanism Map)（使用 Mermaid 代码），说明 X -> M -> Y 的传导路径。
-
-### **21. 稳健性检验 (Robustness)**
-- *识别假设检验*：平行趋势、安慰剂检验、排他性约束检验。
-- *替代性解释排除*：是否排除了其他竞争性假说？
-- *异质性分析*：结果在不同子样本中是否稳健？
-
-**格式要求**：
-- 必须使用 `### **` 作为带编号小标题的标记
-- 子项目使用 `-` 列表标记
-- 使用专业、严谨的学术中文回答
-"""
+SYSTEM_PROMPT = load_prompt_from_file("step_5_identification", "quant")
+if not SYSTEM_PROMPT:
+    SYSTEM_PROMPT = """你是一位 Daron Acemoglu 级别的顶级计量经济学家。剖析识别策略与实证。"""
 
 def run(sections: dict, assigned_titles: list, output_dir: str, step_id: int = 5):
     """

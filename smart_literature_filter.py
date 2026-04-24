@@ -45,13 +45,15 @@ class PromptManager:
         return p
 
 class AIEvaluator:
-    def __init__(self, model="deepseek-chat"):
-        self.api_key = os.getenv("DEEPSEEK_API_KEY")
+    def __init__(self, model="deepseek-chat", api_key=None):
         self.base_url = "https://api.deepseek.com"
         self.model = model
         
+        # Use provided key first, fallback to env
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        
         if not self.api_key:
-            raise ValueError("DEEPSEEK_API_KEY not found in environment variables.")
+            raise ValueError("DEEPSEEK_API_KEY not found. Please provide an API key.")
 
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
@@ -91,33 +93,23 @@ class AIEvaluator:
                 return {"error": "JSON Parse Error", "raw_output": content}
                 
         except Exception as e:
-            return {"error": str(e)}
+            raise e
 
     def evaluate_batch(self, df, prompt_template, topic, max_workers=5):
-        """Evaluates a batch of papers concurrently."""
+        """Evaluates a batch of papers concurrently. Raises on first error."""
         results = []
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Create a list of futures
             future_to_index = {
                 executor.submit(self.evaluate_paper, row, prompt_template, topic): index 
                 for index, row in df.iterrows()
             }
             
-            # Use tqdm for progress bar
-            for future in tqdm(concurrent.futures.as_completed(future_to_index), total=len(df), desc="AI Evaluating"):
+            for future in concurrent.futures.as_completed(future_to_index):
                 index = future_to_index[future]
-                try:
-                    res = future.result()
-                    if "error" in res:
-                        logger.error(f"Error in row {index}: {res['error']}")
-                        if "raw_output" in res:
-                            logger.error(f"Raw Output: {res['raw_output'][:500]}...") # Print first 500 chars
-                    res['original_index'] = index # Keep track of original index
-                    results.append(res)
-                except Exception as e:
-                    logger.error(f"Error processing row {index}: {e}")
-                    results.append({"original_index": index, "error": str(e)})
+                res = future.result()  # Will raise if evaluate_paper raised
+                res['original_index'] = index
+                results.append(res)
         
         return results
 

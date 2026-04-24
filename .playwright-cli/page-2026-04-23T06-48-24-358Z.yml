@@ -1,0 +1,62 @@
+- main [ref=e6]:
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: ❤️‍🔥
+        - generic [ref=e16]:
+          - heading "Deep Reading Agent" [level=1] [ref=e17]
+          - generic [ref=e18]: 学术论文深度精读系统
+      - generic [ref=e24]: DeepSeek ✓ KIMI v3
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - button [ref=e28] [cursor=pointer]: □ 文献筛选
+          - button [ref=e29] [cursor=pointer]: ➤ 长文本精读
+          - button [ref=e30] [cursor=pointer]: △ 七步精读 (QUANT)
+          - button [ref=e31] [cursor=pointer]: ◉ 四步精读 (QUAL)
+          - button [ref=e32] [cursor=pointer]: ⚙ 提示词管理
+        - tablist [ref=e33]:
+          - tab "□ 文献筛选" [ref=e34] [cursor=pointer]
+          - tab "➤ 长文本精读" [ref=e35] [cursor=pointer]
+          - tab "△ 七步精读 (QUANT)" [ref=e36] [cursor=pointer]
+          - tab "◉ 四步精读 (QUAL)" [ref=e37] [cursor=pointer]
+          - tab "⚙ 提示词管理" [active] [selected] [ref=e38] [cursor=pointer]
+      - text: □ ★ ■ ★ ↗ ★ ✉ ■ ✎ ↗ ■ ✎ ↗ ■ ✎
+      - tabpanel [ref=e330]:
+        - generic [ref=e332]:
+          - generic [ref=e335]:
+            - generic [ref=e340]:
+              - generic [ref=e341]: □
+              - text: 选择提示词
+            - generic [ref=e342]:
+              - group [ref=e343]:
+                - generic [ref=e344]: 模式
+                - generic [ref=e345]:
+                  - generic [ref=e346] [cursor=pointer]:
+                    - radio "七步精读" [checked] [ref=e347]
+                    - generic [ref=e348]: 七步精读
+                  - generic [ref=e349] [cursor=pointer]:
+                    - radio "四步精读" [ref=e350]
+                    - generic [ref=e351]: 四步精读
+              - generic [ref=e353]:
+                - generic [ref=e354]: 步骤
+                - generic [ref=e357]:
+                  - listbox "步骤" [ref=e358]: 📊 全景扫描
+                  - generic:
+                    - img
+              - generic [ref=e360]:
+                - generic [ref=e361]: Textbox
+                - textbox "Textbox" [disabled] [ref=e363]:
+                  - /placeholder: ""
+            - generic [ref=e364]:
+              - button "加载" [ref=e365] [cursor=pointer]
+              - button "保存" [ref=e366] [cursor=pointer]
+          - generic [ref=e369]:
+            - generic [ref=e374]:
+              - generic [ref=e375]: ✏
+              - text: 编辑器
+            - generic [ref=e378]:
+              - generic [ref=e379]: Textbox
+              - textbox "Textbox" [disabled] [ref=e381]:
+                - /placeholder: ""
+                - text: "# 角色 你是一位 Daron Acemoglu 级别的顶级计量经济学家。 你的任务是对论文进行\"全景扫描\"，回答以下问题： # 要求 ### **1. 研究主题与核心结论** 用一句话概括这篇文章在讲什么，发现了什么？ ### **2. 问题意识** 这篇文章解决了什么具体的科学问题？这个问题在实践和政策上有何重要意义？ ### **3. 重要性 (The \"So What?\" Question)** 为什么这个问题值得研究？如果不解决它，我们会失去什么？ ### **4. 贡献定位** - **理论贡献**：修正了哪个模型？填补了哪个空白？ - **实践贡献**：对政策制定或商业实践有何具体指导？ # 格式要求 - 必须使用 `### **` 作为带编号小标题的标记（如：### **1. 研究主题**） - 子项目使用 `-` 列表标记 - 使用专业、严谨的学术中文回答 - 只给出答案，无需寒暄或尾语"
