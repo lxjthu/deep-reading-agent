@@ -93,6 +93,20 @@
     .paper-checkbox:hover { background: #e5e7eb; }
     .paper-checkbox input { cursor: pointer; }
     .paper-checkbox.checked { background: #d1fae5; color: #065f46; }
+    .dim-checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      background: #f3f4f6;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+      user-select: none;
+    }
+    .dim-checkbox-label:hover { background: #e5e7eb; }
+    .dim-checkbox-label.checked { background: #d1fae5; color: #065f46; }
     .btn-delete {
       background: none;
       border: none;
@@ -255,12 +269,12 @@
     </div>
     
     <div class="controls">
-      <div class="controls-row">
-        <label>选择维度：</label>
-        <select id="dimSelect">
-          <option value="">加载中...</option>
-        </select>
-        <button class="btn-synthesis" id="btnSynthesis" disabled>🤖 生成 AI 综述</button>
+      <div class="controls-row" style="align-items:flex-start">
+        <label style="padding-top:6px">选择维度：<span id="dimCount" style="font-weight:400;font-size:12px;color:#059669;margin-left:6px"></span></label>
+        <div id="dimCheckboxes" style="display:flex;flex-wrap:wrap;gap:8px;">
+          <span style="color:#9ca3af;font-size:13px">加载中...</span>
+        </div>
+        <button class="btn-synthesis" id="btnSynthesis" disabled style="flex-shrink:0">🤖 生成 AI 综述</button>
       </div>
       <div class="controls-row">
         <label>选择文献：</label>
@@ -301,7 +315,7 @@
   <script>
     // Global state
     let allReports = [];
-    let selectedDim = '';
+    let selectedDims = new Set();
     let selectedPapers = [];
     let allDimensions = new Set();
     
@@ -458,7 +472,7 @@
         }
         
         renderPaperList();
-        renderDimSelect();
+        renderDimCheckboxes();
       } catch (e) {
         console.error('Error loading reports:', e);
         document.getElementById('paperList').innerHTML = '<span style="color:red">加载失败，请刷新重试</span>';
@@ -489,16 +503,20 @@
       }).join('');
     }
     
-    function renderDimSelect() {
-      const select = document.getElementById('dimSelect');
+    function renderDimCheckboxes() {
+      const container = document.getElementById('dimCheckboxes');
       const dims = Array.from(allDimensions).sort();
       if (dims.length === 0) {
-        select.innerHTML = '<option value="">暂无可用维度</option>';
+        container.innerHTML = '<span style="color:#9ca3af;font-size:13px">暂无可用维度</span>';
         return;
       }
-      select.innerHTML = '<option value="">请选择维度</option>' + 
-        dims.map(d => `<option value="${d}">${d}</option>`).join('');
-      select.onchange = (e) => selectDim(e.target.value);
+      container.innerHTML = dims.map(d => {
+        const escaped = d.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const checked = selectedDims.has(d);
+        return `<label class="dim-checkbox-label${checked ? ' checked' : ''}">
+          <input type="checkbox" style="cursor:pointer" ${checked ? 'checked' : ''} onchange="toggleDim('${escaped}', this.parentElement)"> ${d}
+        </label>`;
+      }).join('');
     }
     
     async function deleteReport(filename) {
@@ -510,7 +528,7 @@
           if (idx > -1) selectedPapers.splice(idx, 1);
           allReports = allReports.filter(r => r.filename !== filename);
           renderPaperList();
-          if (selectedDim && selectedPapers.length > 0) renderComparisonTable();
+          if (selectedDims.size > 0 && selectedPapers.length > 0) renderComparisonTable();
           else document.getElementById('tableContainer').innerHTML = `<div class="empty"><div class="empty-icon">📋</div><p>请选择维度和文献开始对比</p></div>`;
         } else alert('删除失败');
       } catch (e) { alert('删除失败: ' + e.message); }
@@ -523,75 +541,79 @@
       updateUI();
     }
     
-    function selectDim(dimName) {
-      selectedDim = dimName;
+    function toggleDim(dimName, labelEl) {
+      if (selectedDims.has(dimName)) {
+        selectedDims.delete(dimName);
+        labelEl.classList.remove('checked');
+        labelEl.querySelector('input').checked = false;
+      } else {
+        selectedDims.add(dimName);
+        labelEl.classList.add('checked');
+        labelEl.querySelector('input').checked = true;
+      }
       updateUI();
     }
     
     function updateUI() {
       const btn = document.getElementById('btnSynthesis');
-      const canSynthesize = selectedDim && selectedPapers.length > 0;
+      const canSynthesize = selectedDims.size > 0 && selectedPapers.length > 0;
       btn.disabled = !canSynthesize;
-      if (selectedDim && selectedPapers.length > 0) renderComparisonTable();
+      const badge = document.getElementById('dimCount');
+      if (badge) badge.textContent = selectedDims.size > 0 ? `已选 ${selectedDims.size} 个` : '';
+      if (selectedDims.size > 0 && selectedPapers.length > 0) renderComparisonTable();
     }
     
     function renderComparisonTable() {
       const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      if (papers.length === 0 || !selectedDim) return;
-      
-      // Check if all selected papers have this dimension
-      const papersWithDim = papers.filter(p => p.dimensions.includes(selectedDim));
-      const papersWithoutDim = papers.filter(p => !p.dimensions.includes(selectedDim));
-      
+      if (papers.length === 0 || selectedDims.size === 0) return;
+      const dims = Array.from(selectedDims);
+
       let html = '<div class="table-scroll"><table>';
-      html += '<thead><tr><th style="width:200px">维度内容</th>';
+      html += '<thead><tr><th style="width:160px">维度</th>';
       for (const paper of papers) {
         const fm = paper.frontmatter;
-        const hasDim = paper.dimensions.includes(selectedDim);
-        html += `<th style="${hasDim ? '' : 'opacity:0.5'}">
+        html += `<th>
           <div class="paper-title">${fm.title || paper.filename}</div>
           <div class="paper-header">${fm.authors ? fm.authors.join(', ') : ''} ${fm.year ? `(${fm.year})` : ''}</div>
-          ${!hasDim ? '<div style="color:#ef4444;font-size:11px;margin-top:4px">⚠ 无此维度</div>' : ''}
         </th>`;
       }
-      html += '</tr></thead><tbody><tr>';
-      html += `<td style="font-weight:600;color:#374151;background:#f9fafb">${selectedDim}</td>`;
-      
-      for (const paper of papers) {
-        const content = getDimensionContent(paper.content, selectedDim);
-        if (content && content.trim()) {
-          html += `<td><div class="cell-content" onclick="this.classList.toggle('expanded')">${content}</div></td>`;
-        } else {
-          html += `<td><span class="cell-empty">（未包含此维度）</span></td>`;
+      html += '</tr></thead><tbody>';
+
+      for (const dim of dims) {
+        html += '<tr>';
+        html += `<td style="font-weight:600;color:#374151;background:#f9fafb;vertical-align:top;padding-top:12px">${dim}</td>`;
+        for (const paper of papers) {
+          const content = getDimensionContent(paper.content, dim);
+          if (content && content.trim()) {
+            html += `<td><div class="cell-content" onclick="this.classList.toggle('expanded')">${content}</div></td>`;
+          } else {
+            html += `<td><span class="cell-empty">（未包含此维度）</span></td>`;
+          }
         }
+        html += '</tr>';
       }
-      
-      html += '</tr></tbody></table></div>';
-      
-      if (papersWithoutDim.length > 0) {
-        html += `<div style="margin-top:12px;padding:12px;background:#fef3c7;border-radius:6px;color:#92400e;font-size:13px">
-          ⚠ 以下文献未包含"${selectedDim}"维度：${papersWithoutDim.map(p => p.frontmatter.title || p.filename).join('、')}
-        </div>`;
-      }
-      
+
+      html += '</tbody></table></div>';
       document.getElementById('tableContainer').innerHTML = html;
     }
     
     document.getElementById('btnSynthesis').onclick = async () => {
-      if (!selectedDim || selectedPapers.length === 0) return;
-      
+      if (selectedDims.size === 0 || selectedPapers.length === 0) return;
+
       const modal = document.getElementById('modalOverlay');
       const loading = document.getElementById('synthesisLoading');
       const content = document.getElementById('synthesisContent');
       modal.classList.add('active');
       loading.style.display = 'block';
       content.style.display = 'none';
-      
+
+      const dims = Array.from(selectedDims);
+      const isMulti = dims.length > 1;
       const papers = allReports.filter(r => selectedPapers.includes(r.filename));
+
       const paperData = papers.map(paper => {
-        const dimContent = getDimensionContent(paper.content, selectedDim);
         const fm = paper.frontmatter;
-        return {
+        const base = {
           filename: paper.filename,
           title: fm.title || paper.filename,
           authors: fm.authors || [],
@@ -601,60 +623,65 @@
           issue: fm.issue || fm['期'] || '',
           pages: fm.pages || fm['页码'] || '',
           doi: fm.doi || '',
-          dimension: selectedDim,
-          content: dimContent
         };
-      }).filter(p => p.content && p.content.trim());
-      
+        if (isMulti) {
+          const dimensions = {};
+          for (const dim of dims) {
+            const c = getDimensionContent(paper.content, dim);
+            if (c && c.trim()) dimensions[dim] = c;
+          }
+          return { ...base, dimensions };
+        } else {
+          const c = getDimensionContent(paper.content, dims[0]);
+          return { ...base, dimension: dims[0], content: c };
+        }
+      }).filter(p => isMulti
+        ? Object.keys(p.dimensions || {}).length > 0
+        : (p.content && p.content.trim())
+      );
+
       if (paperData.length === 0) {
         loading.style.display = 'none';
         content.style.display = 'block';
-        content.textContent = '所选文献均未包含该维度的内容，无法生成综述。';
+        content.textContent = '所选文献均未包含所选维度的内容，无法生成综述。';
         return;
       }
-      
+
       try {
         const response = await fetch('/api/compare/analyze_long', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            dimension: selectedDim,
+            dimension: dims[0],
             papers: selectedPapers,
             paperData: paperData,
             api_key: localStorage.getItem('deepseek_api_key') || '',
-            mode: 'single'
+            mode: isMulti ? 'multi' : 'single'
           })
         });
         const result = await response.json();
         loading.style.display = 'none';
         content.style.display = 'block';
         content.textContent = result.synthesis || '生成失败';
-        
-        // Show save button
+
         const actions = document.getElementById('synthesisActions');
         actions.style.display = 'block';
-        
-        // Save handler
+
         document.getElementById('btnDownloadSynthesis').onclick = async () => {
           try {
             const saveRes = await fetch('/api/history/synthesis/', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                dimension: selectedDim,
+                dimension: dims.join('、'),
                 papers: paperData.map(p => p.title || p.filename),
                 content: result.synthesis
               })
             });
             const saveData = await saveRes.json();
-            if (saveData.success) {
-              alert('✓ 已保存到历史记录');
-            } else {
-              alert('保存失败');
-            }
-          } catch (e) {
-            alert('保存失败: ' + e.message);
-          }
+            if (saveData.success) alert('✓ 已保存到历史记录');
+            else alert('保存失败');
+          } catch (e) { alert('保存失败: ' + e.message); }
         };
       } catch (e) {
         loading.style.display = 'none';
