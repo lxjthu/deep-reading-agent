@@ -1,0 +1,45 @@
+"""Database engine and session management."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import AsyncIterator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DB_DIR = PROJECT_ROOT / "db"
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DB_DIR / "app.sqlite"
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"sqlite+aiosqlite:///{DB_PATH.as_posix()}",
+)
+
+if DATABASE_URL.startswith("sqlite+aiosqlite"):
+    SYNC_DATABASE_URL = DATABASE_URL.replace("sqlite+aiosqlite", "sqlite")
+elif DATABASE_URL.startswith("sqlite"):
+    SYNC_DATABASE_URL = DATABASE_URL
+else:
+    SYNC_DATABASE_URL = DATABASE_URL
+
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    future=True,
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+)
+
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+)
+
+
+async def get_db() -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency that yields an AsyncSession and ensures it is closed."""
+    async with AsyncSessionLocal() as session:
+        yield session
