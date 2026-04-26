@@ -19,7 +19,7 @@ router = APIRouter()
 # In-memory task store (replace with Redis in production)
 tasks = {}
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deep_reading_results", "literature_filter")
+RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deep_reading_results", "literature_filter")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
@@ -114,14 +114,14 @@ def run_filter_task(task_id: str, file_path: str, mode: str, topic: str, min_yea
         tasks[task_id]["logs"].append(f"✓ 已导出: {os.path.basename(out_path)}")
         
         # Convert NaN to None for JSON serialization
-        preview_data = df_display.head(20).to_dict('records')
+        preview_data = df_display.to_dict('records')
         for row in preview_data:
             for key in row:
                 if pd.isna(row[key]):
                     row[key] = None
         
         tasks[task_id]["result"] = {
-            "output_path": out_path,
+            "output_path": f"literature_filter/{os.path.basename(out_path)}",
             "row_count": len(df_display),
             "preview": preview_data
         }
