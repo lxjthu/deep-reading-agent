@@ -1,6 +1,6 @@
 # 数据库设计文档
 
-> **版本**: v1.0  
+> **版本**: v1.1  
 > **日期**: 2026-04-26  
 > **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
 
@@ -61,6 +61,7 @@ CREATE TABLE users (
     role            TEXT NOT NULL CHECK (role IN ('admin', 'vip', 'normal')),
     vip_expires_at  DATETIME,           -- 预留字段，目前 VIP 永久；未来可做 VIP 到期
     is_active       INTEGER NOT NULL DEFAULT 1,
+    token_version   INTEGER NOT NULL DEFAULT 0,   -- P1: refresh token 版本号
     created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
     last_login_at   DATETIME
 );
@@ -69,6 +70,14 @@ CREATE INDEX idx_users_role ON users (role);
 ```
 
 **Seed**: `admin` / `XIAojuan@0618wenxian` （`role='admin'`，bcrypt 哈希）
+
+**`token_version` 用途（P1）**：
+- 用于严格实现 logout / refresh token 撤销，但不单独维护 `refresh_tokens` 表。
+- 签发 `refresh_token` 时，把当前 `users.token_version` 写入 JWT claim。
+- 调用 `/api/auth/refresh` 时，除验签和过期校验外，还必须比对 token 内版本号与数据库当前值。
+- 调用 `/api/auth/logout` 时，将 `users.token_version = users.token_version + 1`，使该用户此前签发的所有 refresh token 立即失效。
+- 调用 `/api/auth/change_password` 时，同样递增 `token_version`，强制旧 refresh token 全部失效。
+- 该方案是**用户级撤销**而非**单设备撤销**：一个设备 logout 后，该用户其他设备上的旧 refresh token 也会失效。
 
 ### 3.2 `invite_codes` — VIP 邀请码
 
@@ -479,6 +488,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)
     vip_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     is_active: Mapped[int] = mapped_column(Integer, default=1)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     __table_args__ = (CheckConstraint("role IN ('admin','vip','normal')"),)
@@ -525,9 +535,11 @@ alembic init -t async migrations
 ```
 backend/migrations/versions/
 ├── 001_initial_schema.py        # 创建全部表
-├── 002_seed_admin_user.py       # 写入 admin 账号
+├── 002_add_users_token_version.py  # P1: users.token_version，用于严格 logout
 └── (后续新增字段时追加)
 ```
+
+> 说明：`admin` 账号继续通过 `backend/scripts/seed_admin.py` 初始化，不放入 Alembic 迁移。
 
 ### 8.3 历史数据迁移脚本
 

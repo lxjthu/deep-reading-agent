@@ -12,7 +12,7 @@
 | `DATABASE_SCHEMA.md` 定稿 | ✅ | 9 张业务表 + 1 张 alembic_version |
 | `MULTI_USER_PLAN.md` 定稿 | ✅ | API Key 不入库（保持前端 localStorage） |
 | **P0 — DB schema + Alembic + admin seed** | ✅ | 本地一次性 venv 已跑通，本地代码就绪 |
-| P1 — `/api/auth/*` + JWT 中间件 | ⏳ 下次 | 注册/登录/me/refresh + 邀请码校验 |
+| P1 — `/api/auth/*` + JWT 中间件 | ⏳ 下次 | 注册/登录/me/refresh/logout + 邀请码校验 + `token_version` |
 | P2 — `/api/upload/*` + `files` 表 + 按用户分目录 | ⏳ | |
 | P3 — `/api/filter/*` + `bib_entries` 入库 | ⏳ | |
 | P4 — `/api/reading/*` + `jobs/job_bib_entries/artifacts` | ⏳ | |
@@ -193,24 +193,26 @@ python -m scripts.seed_admin
 └── _uploads/、deep_reading_results/   # 现存无主文件，待 P8 迁移
 ```
 
-### 3.4 后续部署（P1 起每次都跑）
+### 3.4 后续部署（当前策略）
 
-为简化，建议**之后**把"装依赖 + 迁移"两条加到 `deploy.sh` 里。比如：
+当前决定：**暂不**把 `alembic upgrade head` 接入 `deploy.sh`。  
+原因：本地库与服务器库分开使用；现阶段优先保持部署流程简单，涉及 schema 变更时手动执行迁移更稳。
+
+后续统一采用：
 
 ```bash
-# deploy.sh 推荐增量
-echo "[2/4] 安装依赖..."
+# 1. 本地开发、自测、提交、push
+git push origin online
+
+# 2. 若本次包含 Alembic 新迁移，再手动上服务器执行
+ssh root@<服务器>
+cd /root/.openclaw/workspace/deep-reading-agent
 source venv/bin/activate
-pip install -q -r requirements.txt 2>/dev/null || true
-
-echo "[3/4] 数据库迁移..."
-cd backend && alembic upgrade head && cd ..
-
-echo "[4/4] 重启服务..."
-bash start.sh
+cd backend
+alembic upgrade head
 ```
 
-P0 阶段先不改，等 P1 实装好 auth 路由再一并改 `deploy.sh` 落上线。
+纯代码改动可只依赖自动部署；只有涉及数据库迁移时才额外 SSH 执行 `alembic upgrade head`。
 
 ## 4. 下次开工（P1）入口
 
@@ -234,11 +236,12 @@ python -m scripts.seed_admin
 
 ### 4.2 P1 工作清单
 
-> 目标：JWT 鉴权打通；Postman 跑通 注册→登录→`/me`→refresh 全流程
+> 目标：JWT 鉴权打通；Postman 跑通 注册→登录→`/me`→refresh→logout 全流程
 
 - [ ] 新增 `.env` 字段：`JWT_SECRET_KEY`、`JWT_ALGORITHM=HS256`、`ACCESS_TOKEN_EXPIRE_MINUTES=60`、`REFRESH_TOKEN_EXPIRE_DAYS=30`
+- [ ] 新增 Alembic 迁移：给 `users` 表增加 `token_version INTEGER NOT NULL DEFAULT 0`
 - [ ] `backend/auth/` 新模块：
-  - `auth/security.py` — passlib 包装 + JWT encode/decode
+  - `auth/security.py` — passlib 包装 + JWT encode/decode（含 refresh token version 校验）
   - `auth/dependencies.py` — `current_user` / `require_admin` / `require_vip_or_admin`
   - `auth/schemas.py` — Pydantic 请求/响应模型
 - [ ] `backend/routers/auth.py` 新路由：
@@ -247,7 +250,7 @@ python -m scripts.seed_admin
   - `POST /api/auth/refresh`
   - `GET /api/auth/me`
   - `POST /api/auth/change_password`
-  - `POST /api/auth/logout`（撤销 refresh，可选 v1 简化跳过）
+  - `POST /api/auth/logout`（递增 `users.token_version`，严格撤销 refresh）
 - [ ] `main.py` include `auth` router
 - [ ] 单元测试 `backend/tests/test_auth.py`：
   - 注册成功 / 重名失败
@@ -255,6 +258,7 @@ python -m scripts.seed_admin
   - 登录成功 / 错误密码 / 不存在用户
   - JWT 有效 / 篡改 / 过期 → 401
   - me 返回当前用户 + role
+  - logout 后旧 refresh token 再调 `/api/auth/refresh` → 401
 - [ ] Postman/curl 手动跑通 happy path
 
 ### 4.3 P1 验收
@@ -274,6 +278,12 @@ curl -X POST http://localhost:8000/api/auth/login \
 curl http://localhost:8000/api/auth/me \
      -H "Authorization: Bearer <access_token>"
 # 应返回 { "id": 2, "username": "alice", "role": "normal", ... }
+
+# logout（撤销 refresh）
+curl -X POST http://localhost:8000/api/auth/logout \
+     -H "Authorization: Bearer <access_token>"
+
+# 再拿旧 refresh token 调 refresh，应返回 401
 ```
 
 ## 5. 已知问题与待办
@@ -282,7 +292,7 @@ curl http://localhost:8000/api/auth/me \
 |---|---|---|
 | `.gitignore` 之前的 `db/` 误伤 `backend/db/` | 已改成 `/db/` 锚定仓库根 | 已修 |
 | `seed_admin.py` 用 `datetime.utcnow()` 触发弃用警告 | Python 3.12+ 警告，3.13 仍可用 | P1 顺手改成 `datetime.now(UTC)` |
-| `deploy.sh` 没有自动跑 alembic | 首次部署需手动 | P1 上线时一并改 |
+| `deploy.sh` 没有自动跑 alembic | 当前决定继续手动迁移，只有 schema 变更时 SSH 执行 `alembic upgrade head` | 暂按此流程 |
 | 部署服务器还没装新依赖 | 需要按 §3 手动 ssh 装一次 | 首次部署时 |
 
 ## 6. 联系点

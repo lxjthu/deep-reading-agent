@@ -1,6 +1,6 @@
 # 多用户管理 实施计划
 
-> **版本**: v1.0  
+> **版本**: v1.1  
 > **日期**: 2026-04-26  
 > **关联文档**: [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)
 
@@ -41,7 +41,7 @@
 | `/api/auth/login` | POST | 登录，返回 access + refresh token |
 | `/api/auth/refresh` | POST | 用 refresh 换新 access |
 | `/api/auth/me` | GET | 当前用户信息（含 role、warning_msg） |
-| `/api/auth/logout` | POST | 撤销 refresh token |
+| `/api/auth/logout` | POST | 递增 `users.token_version`，撤销该用户现有 refresh token |
 | `/api/auth/change_password` | POST | 修改密码 |
 | `/api/admin/users` | GET | 用户列表 |
 | `/api/admin/users/{id}` | PATCH | 改 role、重置密码、停用 |
@@ -98,6 +98,13 @@ async def require_vip_or_admin(user: User = Depends(current_user)) -> User:
 | access TTL | 1 小时 |
 | refresh TTL | 30 天 |
 | 存放 | access 在前端 memory + localStorage；refresh 也在 localStorage（v1）。后续再改为 HttpOnly cookie |
+
+补充约定（P1）：
+- 严格 logout 采用 `users.token_version` 方案，不单独维护 `refresh_tokens` 表。
+- 签发 refresh token 时，将当前 `token_version` 写入 JWT claim。
+- `/api/auth/refresh` 必须校验 token 内版本号与数据库当前 `users.token_version` 一致。
+- `/api/auth/logout` 和 `/api/auth/change_password` 都递增 `users.token_version`，使旧 refresh token 全部失效。
+- 该方案为用户级撤销：一个设备 logout 后，该用户其他设备上的旧 refresh token 也会失效。
 
 ## 4. 前端改造
 
@@ -178,7 +185,7 @@ API Key 设置面板继续沿用现有"localStorage 保存"逻辑，**服务端�
 | 阶段 | 范围 | 预估工时 | 验收标准 |
 |---|---|:-:|---|
 | **P0** | DB schema + Alembic 初始化 + admin seed | 0.5d | `alembic upgrade head` 成功，`users` 表有 admin |
-| **P1** | `/api/auth/*` + JWT 中间件 | 1d | Postman 跑通注册/登录/me/refresh 全流程 |
+| **P1** | `/api/auth/*` + JWT 中间件 + `users.token_version` | 1d | Postman 跑通注册/登录/me/refresh/logout 全流程 |
 | **P2** | `/api/upload/*` 改造 + `files` 表 + 按用户分目录 | 0.5d | 两个用户分别上传，文件物理隔离 |
 | **P3** | `/api/filter/*` 改造 + `bib_entries` + `bib_filter_links` 写入 | 1d | 上传题录跑筛选后，`bib_entries` 表里看到 100+ 条记录 |
 | **P4** | `/api/reading/*` 改造 + `jobs` + `job_bib_entries` + `artifacts` | 1d | 跑一次精读，产物正确归档到 `deep_reading_results/{uid}/{job_id}/` |
@@ -289,7 +296,7 @@ email-validator>=2.0.0
 
 | 模块 | 覆盖点 |
 |---|---|
-| `auth/` | 注册（含邀请码校验）、登录、JWT 签发/验证、过期处理 |
+| `auth/` | 注册（含邀请码校验）、登录、JWT 签发/验证、过期处理、`token_version` 撤销逻辑 |
 | `db/models.py` | 唯一约束、级联删除、`compute_dedup_key` |
 | `cleanup.py` | mock 时间到 25h，验证清理生效；mock 5h 不动 |
 | `routers/upload.py` | 跨用户上传隔离 |
@@ -312,6 +319,7 @@ email-validator>=2.0.0
 - [ ] 直接拼 URL `/api/download/{file_belonging_to_other}` → 403
 - [ ] SQL 注入：所有 LIKE 查询参数化
 - [ ] JWT 过期/篡改 → 401
+- [ ] logout 后旧 refresh token 再调用 `/api/auth/refresh` → 401
 - [ ] 注册接口防爆破（rate limit）
 - [ ] 密码强度校验（≥8 位，含字母数字）
 - [ ] 邀请码限次防滥用

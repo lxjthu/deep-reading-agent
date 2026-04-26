@@ -18,7 +18,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # Routers
-from routers import upload, filter, reading, prompts, download, history, compare, deploy
+from routers import auth, upload, filter, reading, prompts, download, history, compare, deploy
 
 # Create upload directory
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
@@ -52,6 +52,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
 app.include_router(filter.router, prefix="/api/filter", tags=["Filter"])
 app.include_router(reading.router, prefix="/api/reading", tags=["Reading"])

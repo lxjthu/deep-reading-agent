@@ -15,7 +15,7 @@ import argparse
 import asyncio
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Allow running both as `python -m scripts.seed_admin` (cwd=backend) and
@@ -64,7 +64,7 @@ async def seed(username: str, password: str, reset_password: bool) -> int:
             password_hash=pwd_context.hash(password),
             role="admin",
             is_active=1,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC).replace(tzinfo=None),
         )
         session.add(user)
         await session.commit()

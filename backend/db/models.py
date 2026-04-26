@@ -40,6 +40,12 @@ class User(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)
     vip_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )
