@@ -18,17 +18,9 @@ function App() {
   const [showKeyInput, setShowKeyInput] = useState(false)
   const [tempKey, setTempKey] = useState('')
 
-  // Load key from localStorage on mount, or set default
   useEffect(() => {
     const saved = localStorage.getItem('deepseek_api_key')
-    if (saved) {
-      setApiKey(saved)
-    } else {
-      // Set default key
-      const defaultKey = 'sk-b067838ed9de4569b41f8e98e96ded3c'
-      setApiKey(defaultKey)
-      localStorage.setItem('deepseek_api_key', defaultKey)
-    }
+    if (saved) setApiKey(saved)
   }, [])
 
   const handleSaveKey = () => {

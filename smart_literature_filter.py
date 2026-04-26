@@ -46,7 +46,6 @@ class PromptManager:
 
 class AIEvaluator:
     def __init__(self, model="deepseek-v4-flash", api_key=None):
-    extra_body={"thinking": {"type": "disabled"}},
         self.base_url = "https://api.deepseek.com"
         self.model = model
         
@@ -73,7 +72,8 @@ class AIEvaluator:
                     {"role": "user", "content": user_content}
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                extra_body={"thinking": {"type": "disabled"}}
             )
             
             content = response.choices[0].message.content

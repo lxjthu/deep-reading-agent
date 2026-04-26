@@ -171,7 +171,7 @@ class SocialScienceAnalyzer:
         "core_mechanism": {{
             "type": "{genre} Logic",
             "components": [
-                {{"phase_or_path": "...", "description": "...", "evidence": "..."}
+                {{"phase_or_path": "...", "description": "...", "evidence": "..."}}
             ]
         }},
         "detailed_analysis": "A 500-word detailed narrative of core mechanism/findings in Chinese. Be very specific."

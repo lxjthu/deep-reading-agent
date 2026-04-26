@@ -217,6 +217,66 @@ def build_long_single_prompt(dimension: str, papers: list) -> str:
     return "\n".join(parts)
 
 
+def build_cross_dim_prompt(papers: list) -> str:
+    """
+    Cross-dimension synthesis: questions prefixed with step name.
+    subQuestions keys are like "[第一步] 研究问题" / "[第三步] 数据来源".
+    Groups by step in prompt, writes one section per step.
+    """
+    # Collect all step groups from question keys
+    step_groups: dict = {}
+    for paper in papers:
+        for key in paper.get('subQuestions', {}).keys():
+            if key.startswith('[') and ']' in key:
+                step = key[1:key.index(']')]
+                sub = key[key.index(']') + 1:].strip()
+            else:
+                step = '其他'
+                sub = key
+            step_groups.setdefault(step, set()).add(sub)
+
+    n = len(papers)
+    step_list = "、".join(f"「{s}」" for s in step_groups)
+    parts = [
+        f"以下是{n}篇文献在**多个分析维度**上的精读内容，涉及：{step_list}。",
+        "",
+        "【写作任务】",
+        "请撰写一篇**跨维度结构化文献综述**，格式如下：",
+        "",
+        "① **引言**（1句）：用一句话概括这批文献整体的研究图景与共性关切；",
+        "",
+        f"② **各维度分节**（共{len(step_groups)}节）：",
+        "   - 每节以 `### [维度名称]` 为标题；",
+        "   - 正文1～2段，横向比较各文献在该维度的数据/方法/发现；",
+        "   - 明确指出共识与分歧；",
+        "   - 如该维度下有多个子问题，按子问题自然过渡，不再单独分节；",
+        "",
+        "③ **跨维度结论**（1句）：综合各维度，点出整体研究局限或未来突破方向；",
+        "",
+        "【引用规范】",
+        "- 间注法：（第一作者姓，年份）；",
+        "- 不写参考文献目录（系统自动生成）；",
+        "- 全文学术中文。",
+        "",
+        "【文献内容（按维度·子问题组织）】",
+    ]
+
+    for step, sub_set in step_groups.items():
+        parts.append(f"\n▶ **{step}**")
+        for sub in sub_set:
+            key = f"[{step}] {sub}"
+            parts.append(f"  · {sub}")
+            for paper in papers:
+                sq = paper.get('subQuestions', {})
+                content = sq.get(key, '').strip()
+                if content:
+                    header = build_paper_header(paper)
+                    parts.append(f"    {header}：{content[:1000]}")
+        parts.append("")
+
+    return "\n".join(parts)
+
+
 def build_long_multi_prompt(dimensions: list, papers: list) -> str:
     """Long context multi-dimension: sectioned by dimension."""
     n = len(papers)
@@ -254,7 +314,9 @@ async def analyze_comparison(req: CompareRequest):
 
         mode = req.mode or ("multi" if len(req.subQuestions) > 1 else "single")
 
-        if mode == "multi":
+        if mode == "cross":
+            prompt = build_cross_dim_prompt(req.paperData)
+        elif mode == "multi":
             prompt = build_multi_prompt(req.step, req.subQuestions, req.paperData)
         else:
             prompt = build_single_prompt(req.step, req.paperData)

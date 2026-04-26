@@ -297,6 +297,7 @@
         <select id="stepSelect">
           <option value="">加载中...</option>
         </select>
+        <button id="btnCrossMode" onclick="toggleCrossMode()" title="跨步骤选题写综述" style="padding:6px 14px;border:1.5px solid #6366f1;background:#f5f3ff;color:#6366f1;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;margin-left:8px;transition:all .2s">🔀 跨步骤模式</button>
         <button class="btn-synthesis" id="btnSynthesis" disabled>🤖 生成 AI 综述</button>
       </div>
       <div class="controls-row">
@@ -304,6 +305,11 @@
         <div class="paper-list" id="paperList">
           <span class="loading"><span class="spinner"></span>加载中...</span>
         </div>
+      </div>
+      <!-- 跨步骤选题面板 -->
+      <div id="crossPanel" style="display:none;margin-top:12px;border:1.5px solid #6366f1;border-radius:10px;padding:14px;background:#faf5ff">
+        <div style="font-size:13px;color:#6366f1;font-weight:700;margin-bottom:10px">🔀 跨步骤综述 — 从任意步骤选择子问题</div>
+        <div id="crossAccordion" style="display:flex;flex-direction:column;gap:6px"></div>
       </div>
     </div>
     
@@ -521,7 +527,8 @@
       } else {
         selectedPapers.push(filename);
       }
-      selectedSubQuestions.clear(); // Clear sub-question selection when papers change
+      selectedSubQuestions.clear();
+      if (crossMode) setTimeout(buildCrossAccordion, 0);
       updateUI();
     }
     
@@ -773,6 +780,182 @@
     
     // Initialize
     loadReports();
+
+    // ===== 跨步骤模式 =====
+    let crossMode = false;
+    // Map: "[第X步] 子问题" → true/false
+    let crossSelected = {};
+
+    function toggleCrossMode() {
+      crossMode = !crossMode;
+      const btn = document.getElementById('btnCrossMode');
+      const panel = document.getElementById('crossPanel');
+      const stepRow = document.getElementById('stepSelect').parentElement;
+      if (crossMode) {
+        btn.style.background = '#6366f1'; btn.style.color = '#fff';
+        panel.style.display = 'block';
+        buildCrossAccordion();
+      } else {
+        btn.style.background = '#f5f3ff'; btn.style.color = '#6366f1';
+        panel.style.display = 'none';
+        crossSelected = {};
+      }
+      updateUI();
+    }
+
+    function buildCrossAccordion() {
+      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
+      const accordion = document.getElementById('crossAccordion');
+      if (papers.length === 0) {
+        accordion.innerHTML = '<div style="color:#888;font-size:13px">请先选择文献</div>';
+        return;
+      }
+      // Collect all sub-questions per step across selected papers
+      const stepSubQs = {}; // {stepId: Set<subQ>}
+      for (const step of STEPS) {
+        const allSubQs = new Set();
+        for (const paper of papers) {
+          const parsed = parseStepContent(paper.content, step.id);
+          Object.keys(parsed).forEach(q => allSubQs.add(q));
+        }
+        if (allSubQs.size > 0) stepSubQs[step.id] = allSubQs;
+      }
+
+      accordion.innerHTML = Object.entries(stepSubQs).map(([stepId, subQs]) => {
+        const stepLabel = STEPS.find(s => s.id === stepId)?.label || stepId;
+        const items = [...subQs].map(subQ => {
+          const key = `[${stepId}] ${subQ}`;
+          const checked = crossSelected[key] ? 'checked' : '';
+          return `<label style="display:flex;align-items:flex-start;gap:6px;padding:3px 0;cursor:pointer;font-size:13px">
+            <input type="checkbox" ${checked} onchange="toggleCrossItem('${key.replace(/'/g,"\\'")}', this.checked)" style="margin-top:2px;accent-color:#6366f1">
+            <span>${subQ}</span>
+          </label>`;
+        }).join('');
+        const selectedCount = [...subQs].filter(q => crossSelected[`[${stepId}] ${q}`]).length;
+        return `<details style="border:1px solid #ddd;border-radius:7px;background:#fff;overflow:hidden" ${selectedCount > 0 ? 'open' : ''}>
+          <summary style="padding:8px 12px;cursor:pointer;font-weight:600;font-size:13px;list-style:none;display:flex;justify-content:space-between;align-items:center">
+            <span>${stepLabel}</span>
+            <span id="crossCount_${stepId}" style="background:#ede9fe;color:#6366f1;border-radius:9px;padding:1px 8px;font-size:12px;font-weight:700">${selectedCount > 0 ? selectedCount + ' 已选' : ''}</span>
+          </summary>
+          <div style="padding:6px 16px 10px">${items}</div>
+        </details>`;
+      }).join('');
+    }
+
+    function toggleCrossItem(key, checked) {
+      crossSelected[key] = checked;
+      // Update count badge
+      const match = key.match(/^\[(.+?)\]/);
+      if (match) {
+        const stepId = match[1];
+        const stepSubQs = Object.keys(crossSelected).filter(k => k.startsWith(`[${stepId}]`) && crossSelected[k]);
+        const badge = document.getElementById(`crossCount_${stepId}`);
+        if (badge) badge.textContent = stepSubQs.length > 0 ? stepSubQs.length + ' 已选' : '';
+      }
+      updateUI();
+    }
+
+    function getCrossSelectedCount() {
+      return Object.values(crossSelected).filter(Boolean).length;
+    }
+
+    // Override updateUI to handle cross mode
+    const _origUpdateUI = updateUI;
+    updateUI = function() {
+      if (!crossMode) { _origUpdateUI(); return; }
+      const btn = document.getElementById('btnSynthesis');
+      const count = getCrossSelectedCount();
+      btn.disabled = !(selectedPapers.length >= 2 && count >= 1);
+    };
+
+    // Override synthesis button for cross mode
+    const _origBtnClick = document.getElementById('btnSynthesis').onclick;
+    document.getElementById('btnSynthesis').onclick = async function() {
+      if (!crossMode) { if (_origBtnClick) _origBtnClick.call(this); return; }
+
+      const count = getCrossSelectedCount();
+      if (count === 0) { alert('请至少选择一个子问题'); return; }
+      if (selectedPapers.length < 2) { alert('请至少选择两篇文献'); return; }
+
+      const modal = document.getElementById('modalOverlay');
+      const loading = document.getElementById('synthesisLoading');
+      const content = document.getElementById('synthesisContent');
+      modal.classList.add('active');
+      loading.style.display = 'flex';
+      content.style.display = 'none';
+
+      try {
+        // Build paperData: each paper's subQuestions keyed as "[步骤] 子问题"
+        const papers = allReports.filter(r => selectedPapers.includes(r.filename));
+        const selectedKeys = Object.keys(crossSelected).filter(k => crossSelected[k]);
+        const paperData = papers.map(paper => {
+          const subQuestions = {};
+          for (const key of selectedKeys) {
+            const match = key.match(/^\[(.+?)\]\s*(.+)$/);
+            if (!match) continue;
+            const [, stepId, subQ] = match;
+            const parsed = parseStepContent(paper.content, stepId);
+            const content = parsed[subQ];
+            if (content) subQuestions[key] = content;
+          }
+          const fm = paper.frontmatter;
+          return {
+            filename: paper.filename,
+            title: fm.title || paper.filename,
+            authors: fm.authors || [], year: fm.year,
+            journal: fm.journal || fm.source || fm['期刊'] || '',
+            volume: fm.volume || fm['卷'] || '',
+            issue: fm.issue || fm['期'] || '',
+            pages: fm.pages || fm['页码'] || '',
+            doi: fm.doi || '',
+            subQuestions
+          };
+        }).filter(p => Object.keys(p.subQuestions).length > 0);
+
+        const response = await fetch('/api/compare/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            step: '跨步骤综述',
+            papers: selectedPapers,
+            subQuestions: selectedKeys,
+            paperData,
+            api_key: localStorage.getItem('deepseek_api_key') || '',
+            mode: 'cross'
+          })
+        });
+
+        const result = await response.json();
+        loading.style.display = 'none';
+        content.style.display = 'block';
+        content.innerHTML = result.synthesis
+          ? result.synthesis.replace(/\n/g, '<br>').replace(/### (.+)/g, '<h3>$1</h3>').replace(/## (.+)/g, '<h2>$1</h2>').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          : ('错误: ' + (result.detail || '未知错误'));
+
+        // Save button
+        document.getElementById('btnSaveSynthesis').onclick = async () => {
+          try {
+            await fetch('/api/history/synthesis', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                dimension: '跨步骤综述（' + selectedKeys.length + '个问题）',
+                papers: paperData.map(p => p.title || p.filename),
+                content: result.synthesis
+              })
+            });
+            alert('已保存到历史记录');
+          } catch (e) { alert('保存失败: ' + e.message); }
+        };
+      } catch (e) {
+        loading.style.display = 'none';
+        content.style.display = 'block';
+        content.textContent = '生成失败: ' + e.message;
+      }
+    };
+
+    // Rebuild cross accordion when papers change
+    const _origSelectPaper = typeof selectPaper !== 'undefined' ? selectPaper : null;
   </script>
 </body>
 </html>
