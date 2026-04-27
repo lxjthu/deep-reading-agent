@@ -509,6 +509,131 @@ OK
 - `jobs.id` 与内存 `task_id` 已统一；后续若接 WebSocket/历史页，继续沿用这一映射。
 - 本次实现额外暴露出一个真实依赖缺口：`filter.py` 的 `pandas/openpyxl` 之前未写进 `backend/requirements.txt`，现已补齐。
 
+### 4.7 P4 规划
+
+> 目标：把现有 `/api/reading/*` 从“匿名精读任务 + 平铺输出文件”改造成“有用户归属的精读任务入口”，并在执行过程中把任务、目标文献和产物统一沉淀到 `jobs` / `job_bib_entries` / `artifacts`，同时更新 `bib_entries.reading_status`。
+
+#### P4 要达成的结果
+
+- `POST /api/reading/long/start`、`POST /api/reading/quant/start`、`POST /api/reading/qual/start` 全部接入 `current_user`
+- `GET /api/reading/task/{task_id}/status`、`POST /api/reading/task/{task_id}/cancel` 增加 owner 校验
+- 启动精读时校验：
+  - `file_id` 必须属于当前用户
+  - 文件类型必须可读（首版至少 `pdf/markdown`；若现有实现仅支持 `pdf`，需在文档和接口错误上说清楚）
+  - 若已有 `bib_entries.source_file_id = file_id`，优先复用该文献档案
+  - 若未绑定文献档案，则根据文件元信息创建或匹配新的 `bib_entries`
+- 每次精读创建一条 `jobs`
+  - `job_type` 分别为 `reading_long / reading_quant / reading_qual`
+  - `owner_user_id` = 当前用户
+  - `params_json` 写入分析维度、提取方式、自定义问题等
+  - `progress / current_stage / error_msg` 与运行态同步
+  - `expires_at` 跟随用户角色
+- 每次精读写一条 `job_bib_entries(role='target')`
+  - 目标文献只允许绑定 1 篇 `bib_entry`
+  - 若重复点击同一文献开启新精读，可生成新 job，但同一 job 不应重复插入 target link
+- 精读产物写入 `artifacts`
+  - 长文本报告写 `reading_final`
+  - 七步/四步若有中间步骤文件，可写多条 `reading_step`
+  - 最终报告统一写 `reading_final`
+  - `storage_path` 使用 `deep_reading_results/{uid}/{job_id}/...`
+- `bib_entries.reading_status` 状态流转生效
+  - 启动精读时 `has_pdf -> reading`
+  - 完成时 `reading -> read`
+  - 失败时回退到 `has_pdf`
+
+#### P4 工作清单
+
+- [ ] 改造 `backend/routers/reading.py`
+  - 三个 start 路由接入 `Depends(current_user)`
+  - status / cancel 路由接入 owner 校验
+- [ ] 统一 reading 任务主键
+  - 继续复用现有 `task_id` 作为 `jobs.id`
+  - 内存 `tasks` 保留运行态缓存；数据库中的 `jobs` 作为可追踪记录
+- [ ] 启动任务前校验输入文件
+  - `file_id` 必须存在
+  - 文件必须属于当前用户
+  - 文件类型校验与错误提示明确
+- [ ] 建立或复用目标 `bib_entry`
+  - 先查 `source_file_id == file_id`
+  - 查不到时根据文件名 / 元数据提取结果生成或匹配档案
+  - 创建成功后，将 `source_file_id` 绑定到文献档案
+  - `reading_status` 至少进入 `has_pdf`
+- [ ] 创建 `jobs(type='reading_*')`
+  - 写入 `owner_user_id / params_json / expires_at`
+  - 状态流转覆盖 `pending / running / success / failed / canceled`
+- [ ] 写入 `job_bib_entries`
+  - 每个 job 为目标文献写 1 条 `role='target'`
+  - `sort_order = 0`
+- [ ] 改造产物输出目录
+  - 旧逻辑：`deep_reading_results/{safe_name}_*.md`
+  - 新逻辑：`deep_reading_results/{uid}/{job_id}/...`
+- [ ] 写入 `artifacts`
+  - 最终报告至少 1 条 `reading_final`
+  - 若生成多步骤 markdown，则各步骤写 `reading_step`
+  - `filename / storage_path / size_bytes / expires_at` 正确
+- [ ] 同步 `bib_entries.reading_status`
+  - 有可读文件但未开始时 `has_pdf`
+  - 运行中 `reading`
+  - 成功后 `read`
+  - 失败时回退 `has_pdf`
+- [ ] 增加测试文件 `backend/tests/test_reading.py`
+  - 优先覆盖鉴权、owner 校验、`jobs` 入库、`job_bib_entries`、`artifacts`、`reading_status`
+  - 模型调用与 PDF 提取用 mock，避免依赖外部 API
+
+#### P4 当前测试设计是否需要补充
+
+结论：**需要从 0 补齐**。当前没有 `reading` 相关自动化测试，因此以下高风险点完全无保护：
+- 未登录或跨用户发起精读
+- `jobs(job_type='reading_*')` 是否正确入库
+- `job_bib_entries(role='target')` 是否写入
+- `artifacts` 是否与实际输出文件一致
+- `bib_entries.reading_status` 是否正确流转
+- 失败 / 取消后状态是否回退
+
+#### P4 测试用例规划
+
+- [ ] `test_reading_long_requires_authentication`
+  - 未登录调用 `/api/reading/long/start` 返回 `401`
+- [ ] `test_reading_quant_requires_authentication`
+  - 未登录调用 `/api/reading/quant/start` 返回 `401`
+- [ ] `test_reading_qual_requires_authentication`
+  - 未登录调用 `/api/reading/qual/start` 返回 `401`
+- [ ] `test_reading_rejects_non_owned_file`
+  - 用户 A 不能对用户 B 的 `file_id` 发起精读
+- [ ] `test_reading_rejects_unsupported_file_type`
+  - `bibliography/txt` 不能直接作为 reading 输入
+- [ ] `test_reading_creates_job_and_target_link`
+  - 启动后 `jobs` 写入 `reading_long/quant/qual`
+  - `job_bib_entries(role='target')` 写入成功
+- [ ] `test_reading_reuses_existing_bib_entry_for_source_file`
+  - 同一 `source_file_id` 发起精读时复用已有文献档案
+- [ ] `test_reading_creates_bib_entry_when_source_file_unbound`
+  - 文件未绑定文献档案时，可自动创建或匹配 `bib_entries`
+- [ ] `test_reading_updates_status_to_read_on_success`
+  - 成功后 `bib_entries.reading_status = 'read'`
+- [ ] `test_reading_reverts_status_to_has_pdf_on_failure`
+  - 失败后状态不应停留在 `reading`
+- [ ] `test_reading_writes_final_artifact`
+  - 最终报告写入 `artifacts(reading_final)`
+- [ ] `test_reading_writes_step_artifacts_when_available`
+  - 七步/四步中间结果写入 `artifacts(reading_step)`
+- [ ] `test_reading_status_and_cancel_require_owner`
+  - status / cancel 接口都做 owner 隔离
+- [ ] `test_reading_result_paths_use_uid_jobid_layout`
+  - 产物路径必须采用 `deep_reading_results/{uid}/{job_id}/`
+- [ ] `test_reading_normal_user_records_have_expiry`
+  - normal 用户创建的 job / artifact 带 24h `expires_at`
+- [ ] `test_reading_vip_user_records_do_not_expire`
+  - vip/admin 的 job / artifact 为 `NULL`
+
+#### P4 注意点
+
+- `reading.py` 现在仍是“匿名路由 + 平铺输出文件”的旧模型；P4 要避免出现“文件写盘成功，但 DB 中没有 job/artifact 记录”的双轨状态。
+- `source_file_id` 代表可读正文文件，P4 应优先围绕它把 PDF/MD 与 `bib_entries` 绑定起来，避免后面历史页再倒推。
+- `job_bib_entries.role` 目前只需用 `target`；不要提前把 compare/synthesis 的多文献语义混进来。
+- `artifacts.artifact_type` 已有约束：中间步骤用 `reading_step`，最终报告用 `reading_final`，不要自定义新字符串。
+- 若当前 long/quant/qual 的报告格式不同，P4 可先统一“DB 记录形态”和“输出目录规则”，不必一次性统一所有 markdown 模板。
+
 ## 5. 已知问题与待办
 
 | 问题 | 说明 | 处理时机 |

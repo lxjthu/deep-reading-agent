@@ -1,23 +1,27 @@
-"""
-Reading Router - Long context / Quant / Qual analysis
-"""
+"""Reading Router - authenticated reading jobs with DB persistence."""
 import os
 import sys
 import uuid
 import threading
-import time
 import re
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
 load_dotenv(env_path)
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth.dependencies import current_user
+from db import AsyncSessionLocal, PROJECT_ROOT, get_db
+from db.models import Artifact, BibEntry, File, Job, JobBibEntry, User
+from db.utils import compute_dedup_key
 from backend.routers.metadata_extractor import extract_metadata, build_frontmatter
 from upload_storage import lookup_original_name, lookup_path_by_file_id
 
@@ -25,8 +29,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 router = APIRouter()
 
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deep_reading_results")
-os.makedirs(RESULTS_DIR, exist_ok=True)
+RESULTS_ROOT = PROJECT_ROOT / "deep_reading_results"
+RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 # Prompts directory
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "prompts")
@@ -74,6 +78,273 @@ class LongContextRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class SimpleReadingRequest(BaseModel):
+    file_id: str
+    api_key: Optional[str] = None
+
+
+def utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def compute_expires_at(user: User) -> datetime | None:
+    if user.role == "normal":
+        return utcnow_naive() + timedelta(hours=24)
+    return None
+
+
+def get_results_dir(user_id: int, job_id: str) -> Path:
+    result_dir = RESULTS_ROOT / str(user_id) / job_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+    return result_dir
+
+
+def build_result_storage_path(absolute_path: Path) -> str:
+    try:
+        return absolute_path.relative_to(RESULTS_ROOT).as_posix()
+    except ValueError:
+        return absolute_path.as_posix()
+
+
+def infer_bib_source_db(file_record: File) -> str:
+    return "md_extracted" if file_record.file_type == "markdown" else "pdf_extracted"
+
+
+async def get_file_record(db: AsyncSession, user: User, file_id: str) -> File:
+    record = (
+        await db.execute(select(File).where(File.id == file_id, File.owner_user_id == user.id))
+    ).scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return record
+
+
+def ensure_readable_file_type(file_record: File) -> None:
+    if file_record.file_type not in {"pdf", "markdown"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="精读仅支持 PDF 或 Markdown 文件。",
+        )
+
+
+async def get_or_create_bib_entry(db: AsyncSession, user: User, file_record: File) -> BibEntry:
+    existing = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.owner_user_id == user.id,
+                BibEntry.source_file_id == file_record.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        if existing.reading_status == "none":
+            existing.reading_status = "has_pdf"
+        return existing
+
+    original_name = file_record.original_name or file_record.id
+    title = os.path.splitext(original_name)[0]
+    dedup_key = compute_dedup_key(None, title, [], None)
+
+    existing_by_title = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.owner_user_id == user.id,
+                BibEntry.dedup_key == dedup_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_by_title is not None:
+        if not existing_by_title.source_file_id:
+            existing_by_title.source_file_id = file_record.id
+        if existing_by_title.reading_status == "none":
+            existing_by_title.reading_status = "has_pdf"
+        return existing_by_title
+
+    bib_entry = BibEntry(
+        id=str(uuid.uuid4()),
+        owner_user_id=user.id,
+        title=title or file_record.id,
+        authors_json="[]",
+        year=None,
+        doi=None,
+        journal=None,
+        abstract=None,
+        keywords_json="[]",
+        venue_type=None,
+        citation_count=None,
+        source_db=infer_bib_source_db(file_record),
+        source_filter_job_id=None,
+        source_file_id=file_record.id,
+        user_tags_json="[]",
+        user_note=None,
+        is_pinned=0,
+        reading_status="has_pdf",
+        metadata_completeness="minimal",
+        dedup_key=dedup_key,
+        expires_at=compute_expires_at(user),
+    )
+    db.add(bib_entry)
+    await db.flush()
+    return bib_entry
+
+
+async def create_reading_job(
+    db: AsyncSession,
+    user: User,
+    file_record: File,
+    bib_entry: BibEntry,
+    job_type: str,
+    params: dict,
+) -> str:
+    task_id = str(uuid.uuid4())
+    job = Job(
+        id=task_id,
+        owner_user_id=user.id,
+        job_type=job_type,
+        status="pending",
+        input_file_id=file_record.id,
+        params_json=json.dumps(params, ensure_ascii=False),
+        progress=0,
+        current_stage="等待开始...",
+        expires_at=compute_expires_at(user),
+    )
+    db.add(job)
+    db.add(
+        JobBibEntry(
+            job_id=task_id,
+            bib_entry_id=bib_entry.id,
+            role="target",
+            sort_order=0,
+        )
+    )
+    return task_id
+
+
+def init_task_payload(task_id: str, task_type: str, user_id: int, file_id: str, bib_entry_id: str) -> dict:
+    return {
+        "id": task_id,
+        "owner_user_id": user_id,
+        "input_file_id": file_id,
+        "bib_entry_id": bib_entry_id,
+        "type": task_type,
+        "status": "queued",
+        "progress": 0,
+        "stage": "等待开始...",
+        "logs": [],
+        "result": None,
+        "error": None,
+        "created_at": utcnow_naive(),
+    }
+
+
+async def sync_job_and_bib_start(task_id: str, bib_entry_id: str, *, stage: str, progress: int) -> None:
+    async with AsyncSessionLocal() as db:
+        job = await db.get(Job, task_id)
+        bib_entry = await db.get(BibEntry, bib_entry_id)
+        if job is not None:
+            job.status = "running"
+            job.progress = progress
+            job.current_stage = stage
+            job.error_msg = None
+            job.started_at = utcnow_naive()
+        if bib_entry is not None:
+            bib_entry.reading_status = "reading"
+            bib_entry.updated_at = utcnow_naive()
+        await db.commit()
+
+
+async def finalize_reading_success(
+    task_id: str,
+    bib_entry_id: str,
+    user_id: int,
+    artifact_files: list[dict],
+) -> None:
+    async with AsyncSessionLocal() as db:
+        job = await db.get(Job, task_id)
+        bib_entry = await db.get(BibEntry, bib_entry_id)
+        owner = await db.get(User, user_id)
+        if job is None or bib_entry is None or owner is None:
+            return
+
+        for sort_order, artifact_info in enumerate(artifact_files):
+            absolute_path = Path(artifact_info["absolute_path"])
+            artifact = Artifact(
+                job_id=task_id,
+                owner_user_id=user_id,
+                artifact_type=artifact_info["artifact_type"],
+                filename=absolute_path.name,
+                storage_path=build_result_storage_path(absolute_path),
+                size_bytes=absolute_path.stat().st_size if absolute_path.exists() else None,
+                sort_order=sort_order,
+                expires_at=compute_expires_at(owner),
+            )
+            db.add(artifact)
+
+        job.status = "success"
+        job.progress = 100
+        job.current_stage = "完成"
+        job.error_msg = None
+        job.finished_at = utcnow_naive()
+        bib_entry.reading_status = "read"
+        bib_entry.updated_at = utcnow_naive()
+        await db.commit()
+
+
+async def finalize_reading_failure(task_id: str, bib_entry_id: str, error_message: str, *, canceled: bool = False) -> None:
+    async with AsyncSessionLocal() as db:
+        job = await db.get(Job, task_id)
+        bib_entry = await db.get(BibEntry, bib_entry_id)
+        if job is not None:
+            job.status = "canceled" if canceled else "failed"
+            job.current_stage = "已取消" if canceled else f"错误: {error_message}"
+            job.error_msg = None if canceled else error_message
+            job.finished_at = utcnow_naive()
+        if bib_entry is not None:
+            bib_entry.reading_status = "has_pdf"
+            bib_entry.updated_at = utcnow_naive()
+        await db.commit()
+
+
+async def build_task_status_from_db(task_id: str, user_id: int) -> dict | None:
+    async with AsyncSessionLocal() as db:
+        job = (
+            await db.execute(select(Job).where(Job.id == task_id, Job.owner_user_id == user_id))
+        ).scalar_one_or_none()
+        if job is None:
+            return None
+
+        artifacts = (
+            await db.execute(
+                select(Artifact).where(Artifact.job_id == task_id).order_by(Artifact.sort_order, Artifact.id)
+            )
+        ).scalars().all()
+        final_artifact = next((item for item in artifacts if item.artifact_type == "reading_final"), None)
+
+        return {
+            "id": job.id,
+            "owner_user_id": user_id,
+            "type": job.job_type,
+            "status": "completed" if job.status == "success" else job.status,
+            "progress": job.progress,
+            "stage": job.current_stage or "处理中...",
+            "logs": [],
+            "result": {
+                "output_path": final_artifact.storage_path if final_artifact else None,
+                "artifacts": [
+                    {
+                        "artifact_type": artifact.artifact_type,
+                        "filename": artifact.filename,
+                        "storage_path": artifact.storage_path,
+                    }
+                    for artifact in artifacts
+                ],
+            }
+            if artifacts
+            else None,
+            "error": job.error_msg,
+        }
+
+
 def get_file_path(file_id: str) -> Optional[str]:
     path = lookup_path_by_file_id(file_id)
     return str(path) if path is not None else None
@@ -100,9 +371,21 @@ def sanitize_filename(name: str) -> str:
     return name
 
 
-def run_long_context_task(task_id: str, file_path: str, analysis_dims: list, custom_question: Optional[str], extraction_method: str, api_key: Optional[str] = None):
+def run_long_context_task(
+    task_id: str,
+    user_id: int,
+    bib_entry_id: str,
+    file_path: str,
+    analysis_dims: list,
+    custom_question: Optional[str],
+    extraction_method: str,
+    api_key: Optional[str] = None,
+):
     """Run long context analysis in background thread. api_key is REQUIRED."""
     try:
+        import asyncio
+
+        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取 PDF...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取 PDF..."
@@ -207,7 +490,8 @@ def run_long_context_task(task_id: str, file_path: str, analysis_dims: list, cus
         
         original_name = get_original_filename(file_path)
         safe_name = sanitize_filename(original_name)
-        report_path = os.path.join(RESULTS_DIR, f"{safe_name}_long_context.md")
+        result_dir = get_results_dir(user_id, task_id)
+        report_path = result_dir / f"{safe_name}_long_context.md"
         
         # Extract metadata
         tasks[task_id]["stage"] = "提取论文元数据..."
@@ -241,21 +525,35 @@ def run_long_context_task(task_id: str, file_path: str, analysis_dims: list, cus
         tasks[task_id]["stage"] = "完成"
         tasks[task_id]["logs"].append("✅ 全部完成！")
         tasks[task_id]["result"] = {
-            "output_path": report_path,
+            "output_path": build_result_storage_path(report_path),
             "preview": "\n\n".join(preview_parts[:3]),
             "dimensions": list(results.keys()),
         }
+        asyncio.run(
+            finalize_reading_success(
+                task_id,
+                bib_entry_id,
+                user_id,
+                [{"artifact_type": "reading_final", "absolute_path": report_path}],
+            )
+        )
         
     except Exception as e:
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ {str(e)}")
         tasks[task_id]["error"] = str(e)
+        import asyncio
+
+        asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
 
 
-def run_quant_task(task_id: str, file_path: str, api_key: Optional[str] = None):
+def run_quant_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str, api_key: Optional[str] = None):
     """Run 7-step quantitative analysis. api_key is REQUIRED."""
     try:
+        import asyncio
+
+        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取 PDF...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取 PDF..."
@@ -318,7 +616,8 @@ def run_quant_task(task_id: str, file_path: str, api_key: Optional[str] = None):
         
         original_name = get_original_filename(file_path)
         safe_name = sanitize_filename(original_name)
-        report_path = os.path.join(RESULTS_DIR, f"{safe_name}_7step.md")
+        result_dir = get_results_dir(user_id, task_id)
+        report_path = result_dir / f"{safe_name}_7step.md"
         
         # Extract metadata
         tasks[task_id]["stage"] = "提取论文元数据..."
@@ -342,21 +641,35 @@ def run_quant_task(task_id: str, file_path: str, api_key: Optional[str] = None):
         tasks[task_id]["stage"] = "完成"
         tasks[task_id]["logs"].append("✅ 七步精读全部完成！")
         tasks[task_id]["result"] = {
-            "output_path": report_path,
+            "output_path": build_result_storage_path(report_path),
             "preview": preview,
             "steps": list(results.keys()),
         }
+        asyncio.run(
+            finalize_reading_success(
+                task_id,
+                bib_entry_id,
+                user_id,
+                [{"artifact_type": "reading_final", "absolute_path": report_path}],
+            )
+        )
         
     except Exception as e:
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ {str(e)}")
         tasks[task_id]["error"] = str(e)
+        import asyncio
+
+        asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
 
 
-def run_qual_task(task_id: str, file_path: str, api_key: Optional[str] = None):
+def run_qual_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str, api_key: Optional[str] = None):
     """Run 4-step qualitative analysis. api_key is REQUIRED."""
     try:
+        import asyncio
+
+        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取 PDF...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取 PDF..."
@@ -416,7 +729,8 @@ def run_qual_task(task_id: str, file_path: str, api_key: Optional[str] = None):
         
         original_name = get_original_filename(file_path)
         safe_name = sanitize_filename(original_name)
-        report_path = os.path.join(RESULTS_DIR, f"{safe_name}_4step.md")
+        result_dir = get_results_dir(user_id, task_id)
+        report_path = result_dir / f"{safe_name}_4step.md"
         
         with open(report_path, "w", encoding="utf-8") as f:
             f.write("# 四步精读报告\n\n")
@@ -430,41 +744,60 @@ def run_qual_task(task_id: str, file_path: str, api_key: Optional[str] = None):
         tasks[task_id]["stage"] = "完成"
         tasks[task_id]["logs"].append("✅ 四步精读全部完成！")
         tasks[task_id]["result"] = {
-            "output_path": report_path,
+            "output_path": build_result_storage_path(report_path),
             "preview": preview,
             "steps": list(results.keys()),
         }
+        asyncio.run(
+            finalize_reading_success(
+                task_id,
+                bib_entry_id,
+                user_id,
+                [{"artifact_type": "reading_final", "absolute_path": report_path}],
+            )
+        )
         
     except Exception as e:
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ {str(e)}")
         tasks[task_id]["error"] = str(e)
+        import asyncio
+
+        asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
 
 
 @router.post("/long/start")
-async def start_long_context(request: LongContextRequest):
+async def start_long_context(
+    request: LongContextRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Start long context analysis"""
+    file_record = await get_file_record(db, user, request.file_id)
+    ensure_readable_file_type(file_record)
     file_path = get_file_path(request.file_id)
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
-    
-    task_id = str(uuid.uuid4())
-    tasks[task_id] = {
-        "id": task_id,
-        "type": "long_context",
-        "status": "queued",
-        "progress": 0,
-        "stage": "等待开始...",
-        "logs": [],
-        "result": None,
-        "error": None,
-        "created_at": datetime.now()
-    }
+    bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    task_id = await create_reading_job(
+        db,
+        user,
+        file_record,
+        bib_entry,
+        "reading_long",
+        {
+            "analysis_dims": request.analysis_dims,
+            "custom_question": request.custom_question,
+            "extraction_method": request.extraction_method,
+        },
+    )
+    await db.commit()
+    tasks[task_id] = init_task_payload(task_id, "long_context", user.id, request.file_id, bib_entry.id)
     
     thread = threading.Thread(
         target=run_long_context_task,
-        args=(task_id, file_path, request.analysis_dims, request.custom_question, request.extraction_method, request.api_key),
+        args=(task_id, user.id, bib_entry.id, file_path, request.analysis_dims, request.custom_question, request.extraction_method, request.api_key),
         daemon=True
     )
     thread.start()
@@ -473,30 +806,32 @@ async def start_long_context(request: LongContextRequest):
 
 
 @router.post("/quant/start")
-async def start_quant(request: dict):
+async def start_quant(
+    request: SimpleReadingRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Start quantitative (7-step) analysis"""
-    file_id = request.get("file_id")
-    api_key = request.get("api_key")
-    file_path = get_file_path(file_id)
+    file_record = await get_file_record(db, user, request.file_id)
+    ensure_readable_file_type(file_record)
+    file_path = get_file_path(request.file_id)
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
-    
-    task_id = str(uuid.uuid4())
-    tasks[task_id] = {
-        "id": task_id,
-        "type": "quant",
-        "status": "queued",
-        "progress": 0,
-        "stage": "等待开始...",
-        "logs": [],
-        "result": None,
-        "error": None,
-        "created_at": datetime.now()
-    }
+    bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    task_id = await create_reading_job(
+        db,
+        user,
+        file_record,
+        bib_entry,
+        "reading_quant",
+        {},
+    )
+    await db.commit()
+    tasks[task_id] = init_task_payload(task_id, "quant", user.id, request.file_id, bib_entry.id)
     
     thread = threading.Thread(
         target=run_quant_task,
-        args=(task_id, file_path, api_key),
+        args=(task_id, user.id, bib_entry.id, file_path, request.api_key),
         daemon=True
     )
     thread.start()
@@ -505,30 +840,32 @@ async def start_quant(request: dict):
 
 
 @router.post("/qual/start")
-async def start_qual(request: dict):
+async def start_qual(
+    request: SimpleReadingRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Start qualitative (4-step) analysis"""
-    file_id = request.get("file_id")
-    api_key = request.get("api_key")
-    file_path = get_file_path(file_id)
+    file_record = await get_file_record(db, user, request.file_id)
+    ensure_readable_file_type(file_record)
+    file_path = get_file_path(request.file_id)
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
-    
-    task_id = str(uuid.uuid4())
-    tasks[task_id] = {
-        "id": task_id,
-        "type": "qual",
-        "status": "queued",
-        "progress": 0,
-        "stage": "等待开始...",
-        "logs": [],
-        "result": None,
-        "error": None,
-        "created_at": datetime.now()
-    }
+    bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    task_id = await create_reading_job(
+        db,
+        user,
+        file_record,
+        bib_entry,
+        "reading_qual",
+        {},
+    )
+    await db.commit()
+    tasks[task_id] = init_task_payload(task_id, "qual", user.id, request.file_id, bib_entry.id)
     
     thread = threading.Thread(
         target=run_qual_task,
-        args=(task_id, file_path, api_key),
+        args=(task_id, user.id, bib_entry.id, file_path, request.api_key),
         daemon=True
     )
     thread.start()
@@ -537,16 +874,41 @@ async def start_qual(request: dict):
 
 
 @router.get("/task/{task_id}/status")
-async def get_task_status(task_id: str):
-    if task_id not in tasks:
+async def get_task_status(
+    task_id: str,
+    user: User = Depends(current_user),
+):
+    if task_id in tasks and tasks[task_id].get("owner_user_id") == user.id:
+        return tasks[task_id]
+    payload = await build_task_status_from_db(task_id, user.id)
+    if payload is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    return tasks[task_id]
+    return payload
 
 
 @router.post("/task/{task_id}/cancel")
-async def cancel_task(task_id: str):
-    if task_id not in tasks:
+async def cancel_task(
+    task_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job = (
+        await db.execute(select(Job).where(Job.id == task_id, Job.owner_user_id == user.id))
+    ).scalar_one_or_none()
+    if job is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    tasks[task_id]["status"] = "cancelled"
-    tasks[task_id]["stage"] = "已取消"
+    if task_id in tasks:
+        tasks[task_id]["status"] = "cancelled"
+        tasks[task_id]["stage"] = "已取消"
+    target_link = (
+        await db.execute(
+            select(JobBibEntry).where(JobBibEntry.job_id == task_id, JobBibEntry.role == "target")
+        )
+    ).scalar_one_or_none()
+    await finalize_reading_failure(
+        task_id,
+        target_link.bib_entry_id if target_link is not None else "",
+        "任务已取消",
+        canceled=True,
+    )
     return {"success": True}
