@@ -19,12 +19,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.routers.metadata_extractor import extract_metadata, build_frontmatter
+from upload_storage import lookup_original_name, lookup_path_by_file_id
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 router = APIRouter()
 
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deep_reading_results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -75,22 +75,16 @@ class LongContextRequest(BaseModel):
 
 
 def get_file_path(file_id: str) -> Optional[str]:
-    if not os.path.exists(UPLOAD_DIR):
-        return None
-    for filename in os.listdir(UPLOAD_DIR):
-        if filename.startswith(file_id) and not filename.endswith('.meta'):
-            return os.path.join(UPLOAD_DIR, filename)
-    return None
+    path = lookup_path_by_file_id(file_id)
+    return str(path) if path is not None else None
 
 
 def get_original_filename(file_path: str) -> str:
-    """Get original uploaded filename from .meta file"""
+    """Get original uploaded filename from DB record when available."""
     file_id = os.path.splitext(os.path.basename(file_path))[0]
-    meta_path = os.path.join(UPLOAD_DIR, f"{file_id}.meta")
-    if os.path.exists(meta_path):
-        with open(meta_path, 'r', encoding='utf-8') as f:
-            return f.read().strip()
-    # Fallback: use file path basename
+    original_name = lookup_original_name(file_id)
+    if original_name:
+        return original_name
     return os.path.splitext(os.path.basename(file_path))[0]
 
 

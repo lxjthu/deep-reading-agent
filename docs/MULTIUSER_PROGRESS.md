@@ -1,6 +1,6 @@
 # 多用户系统 实施进度
 
-> **更新时间**：2026-04-26（P1 本地完成）  
+> **更新时间**：2026-04-26（P2 本地完成）  
 > **当前分支**：`online`  
 > **关联文档**：[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)、[MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
 
@@ -13,7 +13,7 @@
 | `MULTI_USER_PLAN.md` 定稿 | ✅ | API Key 不入库（保持前端 localStorage） |
 | **P0 — DB schema + Alembic + admin seed** | ✅ | 本地一次性 venv 已跑通，本地代码就绪 |
 | P1 — `/api/auth/*` + JWT 中间件 | ✅ 本地完成 | 已实现并本地验证：注册/登录/me/refresh/logout + 邀请码校验 + `token_version` |
-| P2 — `/api/upload/*` + `files` 表 + 按用户分目录 | ⏳ | |
+| P2 — `/api/upload/*` + `files` 表 + 按用户分目录 | ✅ 本地完成 | 已实现并本地验证：鉴权上传、`files` 入库、按用户目录落盘、同用户 MD5 去重、`/info` 权限隔离 |
 | P3 — `/api/filter/*` + `bib_entries` 入库 | ⏳ | |
 | P4 — `/api/reading/*` + `jobs/job_bib_entries/artifacts` | ⏳ | |
 | P5 — `/api/compare/*`、`synthesis` 改造 | ⏳ | |
@@ -266,18 +266,16 @@ OK
   - logout 后旧 refresh token 再调 `/api/auth/refresh` → 401
 - [x] 本地自动化测试跑通 happy path
 
-### 4.3 当前 git 状态
+### 4.3 当前本地状态
 
 ```bash
-$ git rev-parse --short HEAD
-476a8e1e
-
-$ git status --short
-# 无输出（working tree clean）
+P1 已本地 commit；P2 已本地实现并验证完成。
+当前仍按约定：先继续本地迭代与提交，暂不 push。
 ```
 
 说明：
 - P1 改动已 **本地 commit**
+- P2 改动会与本轮文档同步一起进入 **本地 commit**
 - 当前按约定 **未 push**
 - 等后续阶段全部完成并再次验证后再统一 push
 
@@ -293,11 +291,11 @@ $ git status --short
 - logout 后旧 refresh token 调 `/api/auth/refresh` 返回 401
 ```
 
-### 4.5 P2 规划
+### 4.5 P2 已交付
 
-> 目标：把现有 `/api/upload/*` 从“匿名平铺上传”改造成“按用户隔离的上传入口”，让文件第一次真正进入多用户数据模型。
+> 目标已达成：现有 `/api/upload/*` 已从“匿名平铺上传”改造成“按用户隔离的上传入口”，文件已正式进入多用户数据模型。
 
-#### P2 要达成的结果
+#### P2 已达成的结果
 
 - 上传接口接入 `current_user`
 - 物理文件落到 `_uploads/{owner_user_id}/`
@@ -310,120 +308,244 @@ $ git status --short
 
 #### P2 工作清单
 
-- [ ] 改造 `backend/routers/upload.py`
+- [x] 改造 `backend/routers/upload.py`
   - `POST /api/upload/` 增加 `Depends(current_user)`
   - 上传后写入 `files` 表而不是只落磁盘
   - 返回值补齐 DB 中的 `id / file_type / storage_path / expires_at`
-- [ ] 上传目录改造
+- [x] 上传目录改造
   - 旧逻辑：根目录 `_uploads/` 平铺文件
   - 新逻辑：`_uploads/{uid}/{file_id}.{ext}`
   - 若用户目录不存在则自动创建
-- [ ] 文件类型映射落库
+- [x] 文件类型映射落库
   - `pdf`
   - `bibliography`
   - `markdown`
   - `docx`
   - `txt`
-- [ ] 计算文件元信息
+- [x] 计算文件元信息
   - `original_name`
   - `size_bytes`
   - `md5`
   - `storage_path`
   - `owner_user_id`
-- [ ] 实现同用户内 MD5 去重
+- [x] 实现同用户内 MD5 去重
   - 命中 `UNIQUE(owner_user_id, md5)` 时，返回已有文件记录
   - 不同用户之间允许同一文件内容各自存在
-- [ ] 实现 `expires_at` 规则
+- [x] 实现 `expires_at` 规则
   - `normal` 用户上传时自动写入 24h 过期时间
   - `vip/admin` 用户为 `NULL`
-- [ ] 改造 `GET /api/upload/{file_id}/info`
+- [x] 改造 `GET /api/upload/{file_id}/info`
   - 查 `files` 表
   - 只允许访问当前用户自己的文件
   - 为后续 admin 特例预留空间，但 P2 暂不开放跨用户查询
-- [ ] 评估是否在 P2 直接接入 metadata 提取
-  - 若实现成本低，可在上传 PDF/MD 后预留调用 metadata_extractor 的挂点
-  - 若耦合过大，可先只写 `files` 表，把自动创建 `bib_entries` 留到 P3 衔接
-- [ ] 增加测试
+- [x] 增加共享存储辅助模块 `backend/upload_storage.py`
+  - 统一上传根目录解析
+  - 统一 `storage_path` 解析
+  - 为 `filter.py` / `reading.py` 提供兼容读取入口
+- [x] 兼容现有 `filter.py` / `reading.py`
+  - 旧流程仍可通过 `file_id` 找到用户子目录中的文件
+  - `reading.py` 读取原始文件名时优先走 `files` 表
+- [x] 评估是否在 P2 直接接入 metadata 提取
+  - 结论：本阶段先不把 PDF/MD 自动建档接进上传路由
+  - 原因：避免 P2 范围膨胀，`bib_entries` 自动创建留到 P3 衔接
+- [x] 增加测试
   - 用户 A / 用户 B 上传后物理路径不同
   - `files` 表记录正确
-  - `normal` / `vip` 的 `expires_at` 不同
+  - `normal` / `vip/admin` 的 `expires_at` 不同
   - 用户 A 无法读取用户 B 的 `/info`
+  - 同用户重复上传同内容返回已有记录
+  - `docx / txt / bibliography` 类型映射可用
 
 #### P2 验收
 
 ```bash
-# 用户 A 上传 PDF
-curl -X POST http://localhost:8000/api/upload/ \
-     -H "Authorization: Bearer <user_a_access_token>" \
-     -F "file=@paper_a.pdf"
+$ venv/Scripts/python -m unittest backend.tests.test_upload -v
+Ran 8 tests in 16.xxs
+OK
 
-# 用户 B 上传同一个 PDF
-curl -X POST http://localhost:8000/api/upload/ \
-     -H "Authorization: Bearer <user_b_access_token>" \
-     -F "file=@paper_a.pdf"
+$ venv/Scripts/python -m unittest backend.tests.test_auth -v
+Ran 6 tests in 9.xxs
+OK
 
-# 期望：
-# 1. 两次返回的 file_id 不同
-# 2. 物理文件分别位于 _uploads/<uid_a>/ 和 _uploads/<uid_b>/
-# 3. files 表中有两条 owner_user_id 不同的记录
-# 4. 若同一用户重复上传同一文件，则返回已有 file 记录而不是重复写入
+$ venv/Scripts/python -c "import sys; sys.path.insert(0, r'D:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend'); import main; print('main import ok')"
+main import ok
 ```
 
-#### P2 测试用例规划
+#### P2 已落地测试
 
-- [ ] `test_upload_creates_file_record_for_normal_user`
-  - normal 用户上传 PDF 成功
-  - `files` 表新增 1 条记录
-  - `owner_user_id` 正确
-  - `expires_at` 非空，且约为创建后 24h
-- [ ] `test_upload_creates_file_record_for_vip_user`
-  - vip 用户上传成功
-  - `files.expires_at` 为 `NULL`
-- [ ] `test_upload_creates_file_record_for_admin_user`
-  - admin 用户上传成功
-  - `files.expires_at` 为 `NULL`
-- [ ] `test_upload_stores_file_under_user_directory`
-  - 用户 A 上传后，`storage_path` 位于 `_uploads/{uid_a}/`
-  - 磁盘上对应文件真实存在
-- [ ] `test_same_user_same_md5_returns_existing_record`
-  - 同一用户重复上传同一文件内容
-  - 返回已有 `file_id`
-  - `files` 表记录数不增加
-- [ ] `test_different_users_same_md5_create_separate_records`
-  - 用户 A / B 上传同一文件内容
-  - 返回不同 `file_id`
-  - `files` 表中保留两条不同 `owner_user_id` 记录
-- [ ] `test_upload_info_only_visible_to_owner`
-  - 用户 A 上传文件后能访问 `/api/upload/{file_id}/info`
-  - 用户 B 访问同一路径返回 `403` 或 `404`
-- [ ] `test_upload_requires_authentication`
+- [x] `test_upload_requires_authentication`
   - 未带 access token 调 `/api/upload/` 返回 `401`
-  - 未带 access token 调 `/api/upload/{file_id}/info` 返回 `401`
-- [ ] `test_upload_rejects_unsupported_extension`
-  - 上传不支持的扩展名时返回 `400`
-  - 磁盘不残留文件
-  - DB 不残留 `files` 记录
-- [ ] `test_upload_rollback_when_db_write_fails`
-  - mock DB commit 失败
-  - 已写入的物理文件被删除
-  - 不留下脏记录
-- [ ] `test_upload_supports_expected_file_types`
-  - 至少覆盖 `pdf / txt / docx`
-  - `file_type` 映射正确
-
-建议：
-- P2 结束时至少保留 1 个自动化测试文件，例如 `backend/tests/test_upload_authz.py`
-- 若时间紧，可优先保证前 8 条；其中“跨用户隔离”“同用户去重”“未登录拒绝访问”是最低优先级之外的必测项
-- 若 P2 暂不接 metadata_extractor，则测试只聚焦 `files` 表与物理路径，不把 `bib_entries` 自动创建混进本阶段
-- 若 P2 顺手接入 metadata_extractor，相关联动测试放到 P3 一并收口，避免 P2 测试范围过宽
+- [x] `test_normal_user_upload_creates_record_with_expiry`
+  - normal 用户上传后 `files` 表有记录，且 `expires_at` 非空
+- [x] `test_vip_and_admin_uploads_do_not_expire`
+  - vip/admin 上传后 `expires_at` 为 `NULL`
+- [x] `test_same_user_same_md5_returns_existing_record`
+  - 同一用户重复上传同内容返回已有 `file_id`
+- [x] `test_different_users_same_md5_create_separate_records`
+  - 不同用户上传同内容时各自保留独立记录
+- [x] `test_upload_info_only_visible_to_owner`
+  - `/api/upload/{file_id}/info` 只对 owner 可见
+- [x] `test_rejects_unsupported_extension`
+  - 不支持的扩展名返回 `400`
+- [x] `test_supports_docx_txt_and_bibliography_detection`
+  - `docx / txt / bibliography` 文件类型映射可用
 
 #### P2 注意点
 
-- 现有 `upload.py` 仍是“落盘 + `.meta` 文件映射”的单用户旧逻辑，P2 要彻底切到 DB 驱动，避免后续 P3/P4 同时维护两套 file_id 语义。
-- 文件落盘与 DB 写入必须保持一致：若 DB commit 失败，要删除已写入的物理文件；若磁盘写入失败，不得残留半条 DB 记录。
-- P2 完成后，`filter` 和 `reading` 仍可能暂时使用旧查文件方式；进入 P3/P4 时要统一改为从 `files` 表取路径。
+- `upload.py` 已切到 DB 驱动；后续若再扩展上传元信息，应以 `files` 表为准，避免重新引入 `.meta` 依赖。
+- 文件落盘与 DB 写入已做基本清理保护：若 DB commit 失败，会删除已写入的目标文件；若磁盘写入失败，不保留 DB 脏记录。
+- `filter.py` 和 `reading.py` 已通过共享 helper 兼容新的用户子目录；进入 P3/P4 时仍建议进一步改为显式从 `files` 表取路径，而不是继续依赖按 `file_id` 查询 helper。
 - 如果 P2 引入新的 Alembic 迁移，继续沿用当前策略：本地验证后先 commit、不 push；最终统一 push 时再手动到服务器执行 `alembic upgrade head`。
-- 若上传接口改动较大，建议在 P2 结束时补一轮最小手工验证：PDF / txt / docx 至少各测一条。
+- 本次 P2 **未**在上传阶段自动创建 `bib_entries`；该衔接点留给 P3，届时再把 metadata 抽取和文献档案落库一起收口。
+
+### 4.6 P3 规划
+
+> 目标：把现有 `/api/filter/*` 从“匿名内存任务 + 仅导出 Excel”改造成“有用户归属的筛选任务入口”，并在筛选过程中把题录正式沉淀到 `bib_entries` / `bib_filter_links` / `jobs`。
+
+#### P3 要达成的结果
+
+- `POST /api/filter/start`、`GET /api/filter/task/{task_id}/status`、`POST /api/filter/task/{task_id}/cancel` 全部接入 `current_user`
+- 启动筛选时校验 `file_id` 属于当前用户，且输入文件类型必须是 `bibliography`（必要时兼容内容嗅探为题录的 `txt`）
+- 每次筛选创建一条 `jobs(job_type='filter')`
+  - `owner_user_id` = 当前用户
+  - `input_file_id` = 题录文件
+  - `params_json` 写入 `mode / topic / min_year / keywords`
+  - `status / progress / current_stage / error_msg` 跟运行态同步
+  - `expires_at` 跟随当前用户角色（normal=24h，vip/admin=NULL）
+- 题录解析结果写入 `bib_entries`
+  - `owner_user_id` = 当前用户
+  - `source_db` 从解析结果映射为 `wos / cnki / other`
+  - `source_filter_job_id` 首次入库时记录本次 filter job
+  - `source_file_id` 在 P3 阶段通常保持 `NULL`（题录不是可读正文文件）
+  - `reading_status` 初始为 `none`
+  - `metadata_completeness` 按 title/authors/year 等字段计算
+  - `expires_at` 跟随 owner
+- 为本次筛选写入 `bib_filter_links`
+  - `filter_job_id` = 本次 job
+  - `bib_entry_id` = 对应文献档案
+  - `passed` 标记是否进入最终筛选结果
+  - `score / reason` 存 LLM 评估结果（如有）
+- 同一用户重复筛选同一篇文献时，复用既有 `bib_entries`
+  - 通过 `compute_dedup_key()` 去重
+  - 只新增新的 `bib_filter_links`
+- 不同用户筛选到同一篇文献时，各自拥有独立 `bib_entries`
+- P3 完成后，应能在 DB 中回答两个问题：
+  - “这次筛选输出了哪些文献？”
+  - “这篇文献被哪几次筛选打过分？”
+
+#### P3 工作清单
+
+- [ ] 改造 `backend/routers/filter.py`
+  - `POST /start` 增加 `Depends(current_user)`
+  - `GET /task/{task_id}/status` 增加 owner 校验
+  - `POST /task/{task_id}/cancel` 增加 owner 校验
+- [ ] 统一筛选任务主键
+  - 继续复用现有 `task_id` 作为 `jobs.id`
+  - 内存 `tasks` 仅保留运行态缓存；数据库中的 `jobs` 作为可追踪记录
+- [ ] 启动任务前校验输入文件
+  - `file_id` 必须存在
+  - 文件必须属于当前用户
+  - 文件类型应为 `bibliography`；若仍是旧数据中的 `txt`，需按内容再次嗅探
+- [ ] 创建 `jobs(type='filter')`
+  - 写入 `owner_user_id / input_file_id / params_json / expires_at`
+  - 初始状态 `pending`
+  - 启动线程后切到 `running`
+  - 成功时更新为 `success`
+  - 失败时更新为 `failed`
+  - 取消时更新为 `canceled`
+- [ ] 解析题录并标准化字段
+  - 标题、作者、年份、DOI、期刊、摘要、关键词
+  - 统一空值处理，避免把 `NaN` / 空字符串直接写库
+- [ ] 计算并应用 `dedup_key`
+  - 优先 DOI
+  - 否则 `first_author + year + normalized_title`
+  - 命中同用户唯一约束时复用已有 `bib_entries`
+- [ ] 写入 `bib_entries`
+  - `source_db` 从解析器来源决定
+  - `source_filter_job_id` 仅首次创建时写入
+  - `metadata_completeness` 与 `reading_status` 正确初始化
+  - `updated_at` 在重复命中时刷新
+- [ ] 写入 `bib_filter_links`
+  - 至少为“进入本次筛选链路的文献”建立链接
+  - 对最终入选结果标记 `passed=1`
+  - 对未通过记录保留 `passed=0`
+  - `score / reason` 与导出结果一致
+- [ ] 评估是否在 P3 同步写 `artifacts(filter_excel)`
+  - 按总 schema，筛选 Excel 最终应归入 `artifacts`
+  - 若本次不做，需在文档中明确为 P3.5/P5 前的补口项，避免历史接口再次出现双轨状态
+- [ ] 增加测试文件 `backend/tests/test_filter.py`
+  - 先覆盖鉴权、owner 校验、`jobs` 入库、`bib_entries` 去重、`bib_filter_links` 写入
+  - AI 调用与解析器输出可用 mock/fixture 固定
+
+#### P3 当前测试设计是否需要补充
+
+结论：**需要明显补充**。当前后端自动化测试只有：
+- `test_auth.py`
+- `test_upload.py`
+
+这意味着与 P3 直接相关的内容目前全部没有自动化保护：
+- `filter` 路由的鉴权与 owner 校验
+- `jobs` 表写入与状态流转
+- `bib_entries` 的去重 / 复用
+- `bib_filter_links` 的 `passed / score / reason`
+- 不同用户之间的文献隔离
+
+因此，P3 开工前应把测试设计从“只有方向”补成明确用例清单。
+
+#### P3 测试用例规划
+
+- [ ] `test_filter_start_requires_authentication`
+  - 未登录调用 `/api/filter/start` 返回 `401`
+- [ ] `test_filter_status_requires_owner`
+  - 用户 A 发起的筛选任务，用户 B 查询 `/task/{task_id}/status` 返回 `404` 或 `403`
+- [ ] `test_filter_cancel_requires_owner`
+  - 用户 B 不可取消用户 A 的筛选任务
+- [ ] `test_filter_rejects_non_owned_file`
+  - 当前用户传入他人 `file_id` 时返回 `404` 或 `403`
+- [ ] `test_filter_rejects_non_bibliography_file`
+  - 拿 `pdf/docx/markdown` 文件调用筛选返回 `400`
+- [ ] `test_filter_creates_job_record`
+  - 启动筛选后 `jobs` 表新增 `job_type='filter'` 记录
+  - `owner_user_id / input_file_id / params_json / expires_at` 正确
+- [ ] `test_filter_job_status_transitions`
+  - `pending -> running -> success`
+  - 异常场景写入 `failed + error_msg`
+- [ ] `test_filter_creates_bib_entries_from_parsed_rows`
+  - 解析出的文献写入 `bib_entries`
+  - `title / authors_json / year / source_db / metadata_completeness` 正确
+- [ ] `test_filter_reuses_existing_bib_entry_for_same_user`
+  - 同一用户第二次筛到同一文献时不新增 `bib_entries`
+  - 只新增新的 `bib_filter_links`
+- [ ] `test_filter_creates_separate_bib_entries_for_different_users`
+  - 不同用户筛到同一文献时，各自产生自己的档案
+- [ ] `test_filter_writes_bib_filter_links_with_passed_and_score`
+  - `passed / score / reason` 正确落库
+- [ ] `test_filter_sets_normal_user_expiry`
+  - normal 用户创建的 `jobs / bib_entries` 带 24h `expires_at`
+- [ ] `test_filter_vip_user_records_do_not_expire`
+  - vip/admin 创建的 `jobs / bib_entries` 为 `NULL`
+- [ ] `test_filter_handles_duplicate_rows_in_single_input`
+  - 同一个题录文件里重复文献不会产生重复 `bib_entries`
+  - 同一 job 下也不会违反 `UNIQUE (bib_entry_id, filter_job_id)`
+- [ ] `test_filter_empty_after_basic_filter_marks_job_failed`
+  - 基础过滤后无记录时，job 状态更新为 `failed`
+  - 不留下半成品 link 记录
+
+建议：
+- `backend/tests/test_filter.py` 采用“mock 解析器 + mock AI evaluator”的方式，避免依赖外部 API。
+- 先把“路由鉴权 / job 入库 / bib 去重 / link 写入 / 用户隔离”作为必测最小集；Excel 内容细节可放到次级测试。
+- 若 P3 顺手把 `filter_excel` 写入 `artifacts`，应再补：
+  - `test_filter_creates_filter_excel_artifact`
+  - `test_filter_artifact_owner_matches_job_owner`
+
+#### P3 注意点
+
+- 当前 `filter.py` 仍是“匿名路由 + 内存 tasks + 导出 Excel”的旧模型；P3 需要避免出现“前端看到成功，但 DB 没有 job / bib / link 记录”的双轨状态。
+- `source_file_id` 在 `bib_entries` 中表示可读正文文件（PDF/MD），不是题录输入文件；P3 不要把 bibliography 文件误绑到 `source_file_id`。
+- `source_filter_job_id` 表示文献第一次进入系统的筛选任务；若命中去重的旧档案，后续筛选不应覆盖这个“首次来源”。
+- `bib_filter_links` 的 `passed` 需要语义固定：建议以“最终导出结果中是否保留”为准，而不是“是否进入 AI 评估阶段”。
+- 目前 `filter.py` 的状态接口按 `task_id` 查内存；P3 实现时最好让 DB `jobs.id` 与内存 `task_id` 保持一致，减少状态映射复杂度。
+- 若 P3 本次不落 `artifacts(filter_excel)`，必须在下一阶段文档中明确补口；否则历史/下载改造时会再次面对“文件在磁盘但 DB 无记录”的问题。
 
 ## 5. 已知问题与待办
 

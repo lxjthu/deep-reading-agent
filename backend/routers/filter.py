@@ -11,6 +11,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from upload_storage import lookup_path_by_file_id
+
 # Add parent directory to path to import existing modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -18,7 +20,6 @@ router = APIRouter()
 
 # In-memory task store (replace with Redis in production)
 tasks = {}
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deep_reading_results", "literature_filter")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -33,13 +34,9 @@ class FilterRequest(BaseModel):
 
 
 def get_file_path(file_id: str) -> Optional[str]:
-    """Find uploaded file by file_id (returns .txt or .pdf, not .meta)"""
-    if not os.path.exists(UPLOAD_DIR):
-        return None
-    for filename in os.listdir(UPLOAD_DIR):
-        if filename.startswith(file_id) and not filename.endswith('.meta'):
-            return os.path.join(UPLOAD_DIR, filename)
-    return None
+    """Resolve uploaded file by file_id across the new user-isolated layout."""
+    path = lookup_path_by_file_id(file_id)
+    return str(path) if path is not None else None
 
 
 def run_filter_task(task_id: str, file_path: str, mode: str, topic: str, min_year: int, keywords: Optional[str], api_key: Optional[str] = None):
