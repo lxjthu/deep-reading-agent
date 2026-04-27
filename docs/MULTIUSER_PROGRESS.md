@@ -1,6 +1,6 @@
 # 多用户系统 实施进度
 
-> **更新时间**：2026-04-26（P2 本地完成）  
+> **更新时间**：2026-04-26（P3 本地完成）  
 > **当前分支**：`online`  
 > **关联文档**：[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)、[MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
 
@@ -14,7 +14,7 @@
 | **P0 — DB schema + Alembic + admin seed** | ✅ | 本地一次性 venv 已跑通，本地代码就绪 |
 | P1 — `/api/auth/*` + JWT 中间件 | ✅ 本地完成 | 已实现并本地验证：注册/登录/me/refresh/logout + 邀请码校验 + `token_version` |
 | P2 — `/api/upload/*` + `files` 表 + 按用户分目录 | ✅ 本地完成 | 已实现并本地验证：鉴权上传、`files` 入库、按用户目录落盘、同用户 MD5 去重、`/info` 权限隔离 |
-| P3 — `/api/filter/*` + `bib_entries` 入库 | ⏳ | |
+| P3 — `/api/filter/*` + `bib_entries` 入库 | ✅ 本地完成 | 已实现并本地验证：筛选鉴权、`jobs` 入库、`bib_entries` 去重入库、`bib_filter_links` 写入、`filter_excel` 产物落 `artifacts` |
 | P4 — `/api/reading/*` + `jobs/job_bib_entries/artifacts` | ⏳ | |
 | P5 — `/api/compare/*`、`synthesis` 改造 | ⏳ | |
 | P6 — `/api/history/*`、`download/*` 加权限校验 | ⏳ | |
@@ -269,13 +269,14 @@ OK
 ### 4.3 当前本地状态
 
 ```bash
-P1 已本地 commit；P2 已本地实现并验证完成。
+P1 / P2 / P3 已本地实现并验证完成。
 当前仍按约定：先继续本地迭代与提交，暂不 push。
 ```
 
 说明：
 - P1 改动已 **本地 commit**
-- P2 改动会与本轮文档同步一起进入 **本地 commit**
+- P2 改动已 **本地 commit**
+- P3 改动会与本轮文档同步一起进入 **本地 commit**
 - 当前按约定 **未 push**
 - 等后续阶段全部完成并再次验证后再统一 push
 
@@ -398,14 +399,14 @@ main import ok
 - 如果 P2 引入新的 Alembic 迁移，继续沿用当前策略：本地验证后先 commit、不 push；最终统一 push 时再手动到服务器执行 `alembic upgrade head`。
 - 本次 P2 **未**在上传阶段自动创建 `bib_entries`；该衔接点留给 P3，届时再把 metadata 抽取和文献档案落库一起收口。
 
-### 4.6 P3 规划
+### 4.6 P3 已交付
 
-> 目标：把现有 `/api/filter/*` 从“匿名内存任务 + 仅导出 Excel”改造成“有用户归属的筛选任务入口”，并在筛选过程中把题录正式沉淀到 `bib_entries` / `bib_filter_links` / `jobs`。
+> 目标已达成：现有 `/api/filter/*` 已从“匿名内存任务 + 仅导出 Excel”改造成“有用户归属的筛选任务入口”，筛选过程会把题录正式沉淀到 `jobs` / `bib_entries` / `bib_filter_links` / `artifacts`。
 
-#### P3 要达成的结果
+#### P3 已达成的结果
 
 - `POST /api/filter/start`、`GET /api/filter/task/{task_id}/status`、`POST /api/filter/task/{task_id}/cancel` 全部接入 `current_user`
-- 启动筛选时校验 `file_id` 属于当前用户，且输入文件类型必须是 `bibliography`（必要时兼容内容嗅探为题录的 `txt`）
+- 启动筛选时校验 `file_id` 属于当前用户，且输入文件类型仅允许 `bibliography/txt`
 - 每次筛选创建一条 `jobs(job_type='filter')`
   - `owner_user_id` = 当前用户
   - `input_file_id` = 题录文件
@@ -429,123 +430,84 @@ main import ok
   - 通过 `compute_dedup_key()` 去重
   - 只新增新的 `bib_filter_links`
 - 不同用户筛选到同一篇文献时，各自拥有独立 `bib_entries`
-- P3 完成后，应能在 DB 中回答两个问题：
-  - “这次筛选输出了哪些文献？”
-  - “这篇文献被哪几次筛选打过分？”
+- 筛选产物 Excel 已落入 `artifacts(filter_excel)`，并写到 `deep_reading_results/{uid}/{job_id}/`
 
 #### P3 工作清单
 
-- [ ] 改造 `backend/routers/filter.py`
+- [x] 改造 `backend/routers/filter.py`
   - `POST /start` 增加 `Depends(current_user)`
   - `GET /task/{task_id}/status` 增加 owner 校验
   - `POST /task/{task_id}/cancel` 增加 owner 校验
-- [ ] 统一筛选任务主键
+- [x] 统一筛选任务主键
   - 继续复用现有 `task_id` 作为 `jobs.id`
-  - 内存 `tasks` 仅保留运行态缓存；数据库中的 `jobs` 作为可追踪记录
-- [ ] 启动任务前校验输入文件
+  - 内存 `tasks` 保留运行态缓存；数据库中的 `jobs` 作为可追踪记录
+- [x] 启动任务前校验输入文件
   - `file_id` 必须存在
   - 文件必须属于当前用户
-  - 文件类型应为 `bibliography`；若仍是旧数据中的 `txt`，需按内容再次嗅探
-- [ ] 创建 `jobs(type='filter')`
+  - 文件类型限制为 `bibliography/txt`
+- [x] 创建 `jobs(type='filter')`
   - 写入 `owner_user_id / input_file_id / params_json / expires_at`
-  - 初始状态 `pending`
-  - 启动线程后切到 `running`
-  - 成功时更新为 `success`
-  - 失败时更新为 `failed`
-  - 取消时更新为 `canceled`
-- [ ] 解析题录并标准化字段
+  - 状态流转覆盖 `pending / running / success / failed / canceled`
+- [x] 解析题录并标准化字段
   - 标题、作者、年份、DOI、期刊、摘要、关键词
   - 统一空值处理，避免把 `NaN` / 空字符串直接写库
-- [ ] 计算并应用 `dedup_key`
+- [x] 计算并应用 `dedup_key`
   - 优先 DOI
   - 否则 `first_author + year + normalized_title`
   - 命中同用户唯一约束时复用已有 `bib_entries`
-- [ ] 写入 `bib_entries`
+- [x] 写入 `bib_entries`
   - `source_db` 从解析器来源决定
   - `source_filter_job_id` 仅首次创建时写入
   - `metadata_completeness` 与 `reading_status` 正确初始化
   - `updated_at` 在重复命中时刷新
-- [ ] 写入 `bib_filter_links`
-  - 至少为“进入本次筛选链路的文献”建立链接
-  - 对最终入选结果标记 `passed=1`
-  - 对未通过记录保留 `passed=0`
-  - `score / reason` 与导出结果一致
-- [ ] 评估是否在 P3 同步写 `artifacts(filter_excel)`
-  - 按总 schema，筛选 Excel 最终应归入 `artifacts`
-  - 若本次不做，需在文档中明确为 P3.5/P5 前的补口项，避免历史接口再次出现双轨状态
-- [ ] 增加测试文件 `backend/tests/test_filter.py`
-  - 先覆盖鉴权、owner 校验、`jobs` 入库、`bib_entries` 去重、`bib_filter_links` 写入
-  - AI 调用与解析器输出可用 mock/fixture 固定
+- [x] 写入 `bib_filter_links`
+  - 同一篇文献在同一 filter job 下仅保留 1 条 link
+  - `score / reason / passed` 与筛选结果同步
+- [x] 写入 `artifacts(filter_excel)`
+  - 产物路径采用 `deep_reading_results/{uid}/{job_id}/{filename}`
+  - `output_path` 与 `/api/download/*` 的相对路径约定保持兼容
+- [x] 增加测试文件 `backend/tests/test_filter.py`
+  - 覆盖鉴权、owner 校验、`jobs` 入库、`bib_entries` 去重、`bib_filter_links` 写入、artifact 落库
 
-#### P3 当前测试设计是否需要补充
+#### P3 验收
 
-结论：**需要明显补充**。当前后端自动化测试只有：
-- `test_auth.py`
-- `test_upload.py`
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_filter -v
+Ran 8 tests in 18.xxs
+OK
 
-这意味着与 P3 直接相关的内容目前全部没有自动化保护：
-- `filter` 路由的鉴权与 owner 校验
-- `jobs` 表写入与状态流转
-- `bib_entries` 的去重 / 复用
-- `bib_filter_links` 的 `passed / score / reason`
-- 不同用户之间的文献隔离
+$ venv/Scripts/python -m unittest backend.tests.test_auth backend.tests.test_upload -v
+Ran 14 tests in 25.xxs
+OK
+```
 
-因此，P3 开工前应把测试设计从“只有方向”补成明确用例清单。
+#### P3 已落地测试
 
-#### P3 测试用例规划
-
-- [ ] `test_filter_start_requires_authentication`
+- [x] `test_filter_start_requires_authentication`
   - 未登录调用 `/api/filter/start` 返回 `401`
-- [ ] `test_filter_status_requires_owner`
-  - 用户 A 发起的筛选任务，用户 B 查询 `/task/{task_id}/status` 返回 `404` 或 `403`
-- [ ] `test_filter_cancel_requires_owner`
-  - 用户 B 不可取消用户 A 的筛选任务
-- [ ] `test_filter_rejects_non_owned_file`
-  - 当前用户传入他人 `file_id` 时返回 `404` 或 `403`
-- [ ] `test_filter_rejects_non_bibliography_file`
-  - 拿 `pdf/docx/markdown` 文件调用筛选返回 `400`
-- [ ] `test_filter_creates_job_record`
-  - 启动筛选后 `jobs` 表新增 `job_type='filter'` 记录
-  - `owner_user_id / input_file_id / params_json / expires_at` 正确
-- [ ] `test_filter_job_status_transitions`
-  - `pending -> running -> success`
-  - 异常场景写入 `failed + error_msg`
-- [ ] `test_filter_creates_bib_entries_from_parsed_rows`
-  - 解析出的文献写入 `bib_entries`
-  - `title / authors_json / year / source_db / metadata_completeness` 正确
-- [ ] `test_filter_reuses_existing_bib_entry_for_same_user`
-  - 同一用户第二次筛到同一文献时不新增 `bib_entries`
-  - 只新增新的 `bib_filter_links`
-- [ ] `test_filter_creates_separate_bib_entries_for_different_users`
-  - 不同用户筛到同一文献时，各自产生自己的档案
-- [ ] `test_filter_writes_bib_filter_links_with_passed_and_score`
-  - `passed / score / reason` 正确落库
-- [ ] `test_filter_sets_normal_user_expiry`
-  - normal 用户创建的 `jobs / bib_entries` 带 24h `expires_at`
-- [ ] `test_filter_vip_user_records_do_not_expire`
-  - vip/admin 创建的 `jobs / bib_entries` 为 `NULL`
-- [ ] `test_filter_handles_duplicate_rows_in_single_input`
-  - 同一个题录文件里重复文献不会产生重复 `bib_entries`
-  - 同一 job 下也不会违反 `UNIQUE (bib_entry_id, filter_job_id)`
-- [ ] `test_filter_empty_after_basic_filter_marks_job_failed`
-  - 基础过滤后无记录时，job 状态更新为 `failed`
-  - 不留下半成品 link 记录
-
-建议：
-- `backend/tests/test_filter.py` 采用“mock 解析器 + mock AI evaluator”的方式，避免依赖外部 API。
-- 先把“路由鉴权 / job 入库 / bib 去重 / link 写入 / 用户隔离”作为必测最小集；Excel 内容细节可放到次级测试。
-- 若 P3 顺手把 `filter_excel` 写入 `artifacts`，应再补：
-  - `test_filter_creates_filter_excel_artifact`
-  - `test_filter_artifact_owner_matches_job_owner`
+- [x] `test_filter_rejects_non_owned_file`
+  - 当前用户不能用他人的 `file_id` 发起筛选
+- [x] `test_filter_rejects_non_bibliography_file`
+  - `pdf` 不能直接作为 filter 输入
+- [x] `test_filter_creates_job_bib_links_and_artifact`
+  - `jobs / bib_entries / bib_filter_links / artifacts` 都正确落库
+- [x] `test_filter_reuses_existing_bib_entry_for_same_user`
+  - 同一用户重复筛选同一文献时复用 `bib_entries`
+- [x] `test_filter_creates_separate_bib_entries_for_different_users`
+  - 不同用户筛到同一文献时，各自产生独立档案
+- [x] `test_filter_status_and_cancel_require_owner`
+  - 任务状态查询和取消都做 owner 隔离
+- [x] `test_filter_empty_after_basic_filter_marks_job_failed`
+  - 过滤后为空时任务置 `failed`，不留下半成品 link/artifact
 
 #### P3 注意点
 
-- 当前 `filter.py` 仍是“匿名路由 + 内存 tasks + 导出 Excel”的旧模型；P3 需要避免出现“前端看到成功，但 DB 没有 job / bib / link 记录”的双轨状态。
+- `filter.py` 已从“匿名路由 + 纯内存任务”改成“运行态内存缓存 + DB 持久记录”；后续不要再回退到只写内存不写库的模式。
 - `source_file_id` 在 `bib_entries` 中表示可读正文文件（PDF/MD），不是题录输入文件；P3 不要把 bibliography 文件误绑到 `source_file_id`。
 - `source_filter_job_id` 表示文献第一次进入系统的筛选任务；若命中去重的旧档案，后续筛选不应覆盖这个“首次来源”。
-- `bib_filter_links` 的 `passed` 需要语义固定：建议以“最终导出结果中是否保留”为准，而不是“是否进入 AI 评估阶段”。
-- 目前 `filter.py` 的状态接口按 `task_id` 查内存；P3 实现时最好让 DB `jobs.id` 与内存 `task_id` 保持一致，减少状态映射复杂度。
-- 若 P3 本次不落 `artifacts(filter_excel)`，必须在下一阶段文档中明确补口；否则历史/下载改造时会再次面对“文件在磁盘但 DB 无记录”的问题。
+- `bib_filter_links.passed` 当前按“最终筛选结果中保留”来记，后续前端/历史页按这个语义读取。
+- `jobs.id` 与内存 `task_id` 已统一；后续若接 WebSocket/历史页，继续沿用这一映射。
+- 本次实现额外暴露出一个真实依赖缺口：`filter.py` 的 `pandas/openpyxl` 之前未写进 `backend/requirements.txt`，现已补齐。
 
 ## 5. 已知问题与待办
 
@@ -555,6 +517,7 @@ main import ok
 | `seed_admin.py` 用 `datetime.utcnow()` 触发弃用警告 | 已在 P1 顺手改成 `datetime.now(UTC)` | 已修 |
 | `deploy.sh` 没有自动跑 alembic | 当前决定继续手动迁移，只有 schema 变更时 SSH 执行 `alembic upgrade head` | 暂按此流程 |
 | `backend/requirements.txt` 原先缺少 `markdown` | 本地导入 `main.py` 时发现 `history.py` 依赖未声明，已补 `markdown>=3.6` | 已修 |
+| `backend/requirements.txt` 原先缺少 `pandas/openpyxl` | P3 跑 `filter` 测试时发现筛选链路和 Excel 导出依赖未声明，已补齐 | 已修 |
 | 部署服务器还没装 P1 新依赖 | 等最终统一 push 后，服务器自动部署会装依赖；若含迁移仍需手动跑 alembic | P1/P2 上线时 |
 
 ## 6. 联系点
