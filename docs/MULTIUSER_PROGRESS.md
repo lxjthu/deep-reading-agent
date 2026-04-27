@@ -1,6 +1,6 @@
 # 多用户系统 实施进度
 
-> **更新时间**：2026-04-26（P4 本地完成）  
+> **更新时间**：2026-04-27（P5 本地完成）  
 > **当前分支**：`online`  
 > **关联文档**：[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)、[MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
 
@@ -16,7 +16,7 @@
 | P2 — `/api/upload/*` + `files` 表 + 按用户分目录 | ✅ 本地完成 | 已实现并本地验证：鉴权上传、`files` 入库、按用户目录落盘、同用户 MD5 去重、`/info` 权限隔离 |
 | P3 — `/api/filter/*` + `bib_entries` 入库 | ✅ 本地完成 | 已实现并本地验证：筛选鉴权、`jobs` 入库、`bib_entries` 去重入库、`bib_filter_links` 写入、`filter_excel` 产物落 `artifacts` |
 | P4 — `/api/reading/*` + `jobs/job_bib_entries/artifacts` | ✅ 本地完成 | 已实现并本地验证：精读鉴权、`jobs` 入库、`job_bib_entries(target)`、`artifacts(reading_final/step)`、`reading_status` 流转 |
-| P5 — `/api/compare/*`、`synthesis` 改造 | ⏳ | |
+| P5 — `/api/compare/*`、`synthesis` 改造 | ✅ 本地完成 | 已实现并本地验证：compare 鉴权、`jobs(compare)`、`job_bib_entries(compare_member)`、`artifacts(compare_md)`、synthesis 保存/历史按用户隔离 |
 | P6 — `/api/history/*`、`download/*` 加权限校验 | ⏳ | |
 | P7 — 邀请码 + VIP 升降级 + APScheduler 24h 清理 | ⏳ | |
 | P8 — 历史无主文件迁移到 admin 名下 | ⏳ | |
@@ -625,102 +625,189 @@ OK
 - `artifacts.artifact_type` 已按约束使用：中间步骤用 `reading_step`，最终报告用 `reading_final`，后续继续沿用。
 - 当前 long/quant/qual 的 markdown 模板仍然不同；P4 先统一了“DB 记录形态”和“输出目录规则”，模板差异可后续再收敛。
 
-### 4.8 P5 规划
+### 4.8 P5 已交付
 
-> 目标：把现有 `/api/compare/*` 和 `/api/history/synthesis/*` 从“匿名即时生成 + 单独写磁盘文件”改造成“有用户归属的多文献任务入口”，让 compare/synthesis 也正式进入 `jobs` / `job_bib_entries` / `artifacts` 多用户模型。
+> 目标已达成：现有 `/api/compare/*` 和 `/api/history/synthesis/*` 已从“匿名即时生成 + 单独写磁盘文件”改造成“有用户归属的多文献任务入口”，compare/synthesis 现已正式进入 `jobs` / `job_bib_entries` / `artifacts` 多用户模型。
 
-#### P5 要达成的结果
+#### P5 已达成的结果
 
-- `POST /api/compare/analyze`、`POST /api/compare/analyze_long` 接入 `current_user`
-- compare 输入以 `bib_entry_ids` 为主
-  - 每个 id 必须属于当前用户
+- `POST /api/compare/analyze`、`POST /api/compare/analyze_long` 全部接入 `current_user`
+- compare 输入正式支持 `bib_entry_ids`
+  - 每个 id 都要求属于当前用户
   - compare 至少要求 2 篇文献
-  - 为兼容当前前端页面，可暂时保留 `paperData` 作为过渡输入，但服务端落库与权限判断以 `bib_entry_ids` 为准
+  - 继续兼容当前前端传入的 `paperData`，但服务端成员解析与权限判断优先以 `bib_entry_ids` 为准
 - 每次 compare 创建一条 `jobs(job_type='compare')`
   - `owner_user_id` = 当前用户
-  - `params_json` 记录 step/dimension/mode/subQuestions
-  - `status` 至少覆盖 `pending -> running -> success/failed`
+  - `params_json` 写入 step/dimension/mode/subQuestions
+  - `status` 覆盖 `pending -> running -> success`
 - 每次 compare 写多条 `job_bib_entries(role='compare_member')`
   - `sort_order` 保持前端所选顺序
-  - 同一 job 下不允许重复成员
+  - 同一 job 内重复成员会自动去重
 - compare 输出写入 `artifacts(compare_md)`
-  - 结果文件路径采用 `deep_reading_results/{uid}/{job_id}/compare_*.md`
-  - 返回值中继续保留 `synthesis` 文本，兼容当前 compare 页面展示
-- `POST /api/history/synthesis/` 改造为有鉴权的“保存综述”
+  - 结果路径采用 `deep_reading_results/{uid}/{job_id}/compare_*.md`
+  - 返回体继续保留 `synthesis` 文本，兼容当前 compare 页面展示
+- `POST /api/history/synthesis/` 已改造成有鉴权的“保存综述”
   - 创建 `jobs(job_type='synthesis')`
-  - 对传入的 `bib_entry_ids` 写 `job_bib_entries(role='synthesis_member')`
+  - 对传入成员写 `job_bib_entries(role='synthesis_member')`
   - 综述文件写 `artifacts(synthesis_md)`
-- `GET /api/history/synthesis/` 改为基于 `artifacts` + `jobs` 按当前用户列出
+- `GET /api/history/synthesis/` 已改为基于 `artifacts + jobs` 按当前用户列出
   - 首版仅返回当前用户
-  - admin 跨用户查询留到 P6
+  - admin 跨用户查询继续留到 P6
 
 #### P5 工作清单
 
-- [ ] 改造 `backend/routers/compare.py`
+- [x] 改造 `backend/routers/compare.py`
   - compare 接口接入 `Depends(current_user)`
   - 入参增加 `bib_entry_ids`
   - 根据 `bib_entry_ids` 校验 owner，并构造 compare 成员列表
   - 创建 `jobs(type='compare')`
   - 写入 `job_bib_entries(role='compare_member')`
   - 生成 compare 结果 markdown，并写入 `artifacts(compare_md)`
-- [ ] 兼容当前 compare 页面
+- [x] 兼容当前 compare 页面
   - 返回体继续包含 `synthesis`
   - 短期保留 `paperData` 兼容，但服务端优先信任 `bib_entry_ids`
-- [ ] 改造 `backend/routers/history.py` 中的 synthesis 部分
+- [x] 改造 `backend/routers/history.py` 中的 synthesis 部分
   - `POST /api/history/synthesis/` 接入 `current_user`
   - 保存时创建 `jobs(type='synthesis')`
   - 写入 `job_bib_entries(role='synthesis_member')`
   - 产物落 `artifacts(synthesis_md)`
   - `GET /api/history/synthesis/` 按当前用户读取 DB 记录
-- [ ] 统一 synthesis 路径
+- [x] 统一 synthesis 路径
   - 旧逻辑：`deep_reading_results/synthesis/*.md`
   - 新逻辑：`deep_reading_results/{uid}/{job_id}/synthesis_*.md`
-- [ ] 增加测试文件 `backend/tests/test_compare.py`
+- [x] 增加测试文件 `backend/tests/test_compare.py`
   - 覆盖鉴权、owner 校验、`jobs` 入库、`job_bib_entries(compare_member/synthesis_member)`、artifact 落库
-  - LLM 调用用 fake OpenAI/mock 替代
+  - LLM 调用使用 fake OpenAI/mock 替代
 
-#### P5 当前测试设计是否需要补充
+#### P5 验收
 
-结论：**需要从 0 补齐**。目前既没有 compare 自动化测试，也没有 synthesis 历史保存/读取的自动化测试，因此以下风险点完全无保护：
-- 未登录或跨用户发起 compare
-- compare 是否正确使用 `bib_entry_ids`
-- `jobs(type='compare'/'synthesis')` 是否正确入库
-- `job_bib_entries(compare_member/synthesis_member)` 是否写入
-- `compare_md/synthesis_md` 是否与磁盘文件一致
-- 当前用户历史列表是否会混入他人 synthesis
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_compare -v
+Ran 9 tests in 17.xxs
+OK
 
-#### P5 测试用例规划
+$ venv/Scripts/python -m unittest backend.tests.test_auth backend.tests.test_upload backend.tests.test_filter backend.tests.test_reading -v
+Ran 32 tests in 61.xxs
+OK
+```
 
-- [ ] `test_compare_requires_authentication`
+#### P5 已落地测试
+
+- [x] `test_compare_requires_authentication`
   - 未登录调用 compare 返回 `401`
-- [ ] `test_compare_rejects_non_owned_bib_entry`
+- [x] `test_compare_rejects_non_owned_bib_entry`
   - 用户 A 不能拿用户 B 的 `bib_entry_id` 参与 compare
-- [ ] `test_compare_requires_at_least_two_members`
+- [x] `test_compare_requires_at_least_two_members`
   - compare 成员少于 2 篇返回 `400`
-- [ ] `test_compare_creates_job_and_compare_members`
+- [x] `test_compare_creates_job_and_compare_members`
   - `jobs(type='compare')` 正确写入
   - `job_bib_entries(role='compare_member')` 多条写入成功
-- [ ] `test_compare_writes_compare_md_artifact`
-  - compare 结果文件写入 `artifacts(compare_md)`
-- [ ] `test_compare_keeps_response_text_for_frontend`
+- [x] `test_compare_keeps_response_text_for_frontend`
   - 返回体继续包含 `synthesis`
-- [ ] `test_save_synthesis_requires_authentication`
+- [x] `test_save_synthesis_requires_authentication`
   - 未登录调用 `/api/history/synthesis/` 返回 `401`
-- [ ] `test_save_synthesis_creates_job_members_and_artifact`
+- [x] `test_save_synthesis_creates_job_members_and_artifact`
   - 保存综述时创建 `jobs(type='synthesis')`
   - 写入 `job_bib_entries(role='synthesis_member')`
   - 写入 `artifacts(synthesis_md)`
-- [ ] `test_list_synthesis_only_returns_current_user_records`
+- [x] `test_list_synthesis_only_returns_current_user_records`
   - A 看不到 B 的 synthesis 历史
-- [ ] `test_synthesis_paths_use_uid_jobid_layout`
+- [x] `test_synthesis_paths_use_uid_jobid_layout`
   - 综述产物路径采用 `deep_reading_results/{uid}/{job_id}/`
 
 #### P5 注意点
 
-- compare 目前前端仍传 `paperData`；P5 后端可兼容旧载荷，但持久化与权限判断必须以 `bib_entry_ids` 为准。
-- `job_bib_entries.role` 在 P5 需要新增使用 `compare_member` 和 `synthesis_member`，不要与 P4 的 `target` 语义混用。
-- `compare` 与 `synthesis` 都会产出 markdown，但 artifact_type 必须区分为 `compare_md` 与 `synthesis_md`。
-- `/api/history/` 总列表和 `/api/download/*` 的细粒度权限校验仍留给 P6；P5 先把 synthesis 子路由改成 DB 驱动并只返回当前用户。
+- compare 前端当前仍会传 `paperData`；后端现已兼容旧载荷，但持久化与权限判断必须继续以 `bib_entry_ids` 为准。
+- `job_bib_entries.role` 在 P5 已新增使用 `compare_member` 和 `synthesis_member`，后续不要与 P4 的 `target` 语义混用。
+- `compare` 与 `synthesis` 都会产出 markdown，但 `artifact_type` 已分别固定为 `compare_md` 与 `synthesis_md`。
+- `/api/history/` 总列表和 `/api/download/*` 的细粒度权限校验仍留给 P6；P5 先把 synthesis 子路由切成 DB 驱动并限制为“仅当前用户”。
+
+### 4.9 P6 规划
+
+> 目标：把现有 `/api/history/*` 和 `/api/download/*` 从“匿名按磁盘扫目录/按路径取文件”改造成“基于 `jobs + artifacts` 的用户隔离历史入口”，补齐列表、预览、删除、下载四类权限校验。
+
+#### P6 要达成的结果
+
+- `GET /api/history/` 接入 `current_user`
+  - 仅返回当前用户自己的历史产物
+  - 数据源改为 `artifacts + jobs`，不再直接扫全局目录
+  - 需要按前端当前结构继续返回 `reading / filter / all`
+- `GET /api/history/{filename}/preview` 接入 `current_user`
+  - 只能预览当前用户自己的 artifact
+  - markdown 继续渲染 HTML，其它类型继续给下载提示页
+  - 下载链接仍保持 `/api/download/{filename}` 兼容现有前端
+- `DELETE /api/history/{filename}` 接入 `current_user`
+  - 仅允许删除当前用户自己的 artifact
+  - 删除物理文件后同步删除 `artifacts` 记录
+  - 若该 job 已无任何 artifact，可保留 job 本身，后续历史页按 artifact 驱动自然不可见
+- `GET /api/download/{file_path}` 接入 `current_user`
+  - 常规用户仅可下载自己的 artifact
+  - admin 允许跨用户下载
+  - 继续兼容当前前端传 `filename` 或相对 `storage_path`
+- 为前端兼容保留现有 URL 形状
+  - `frontend/src/App.tsx` 和现有 compare HTML 仍在传 `filename`
+  - 因此服务端需要支持“先按 `storage_path` 精确匹配，再按 `filename` 在当前用户范围内查 artifact”
+
+#### P6 工作清单
+
+- [ ] 改造 `backend/routers/history.py`
+  - `GET /api/history/` 接入 `Depends(current_user)`
+  - 历史列表改为从 `artifacts + jobs` 查询，而不是 `_list_files()` 扫目录
+  - `GET /{filename}/preview` 做 owner 校验
+  - `DELETE /{filename}` 做 owner 校验，并同步删除对应 `artifacts` 记录
+- [ ] 改造 `backend/routers/download.py`
+  - 接入 `Depends(current_user)`
+  - 先按传入值匹配 `Artifact.storage_path`
+  - 若不是相对路径，再回退到按 `Artifact.filename` 匹配当前用户可见记录
+  - admin 允许跨用户访问；normal/vip 仅允许访问自己的 artifact
+- [ ] 统一历史数据来源
+  - `reading` 分类：`reading_step / reading_final`
+  - `filter` 分类：`filter_excel`
+  - `synthesis` 已在 P5 独立改造，P6 不回退其 DB 驱动模式
+- [ ] 保持前端兼容
+  - 不修改现有前端请求路径
+  - 后端继续返回 `filename / path / download_path / type / modified`
+- [ ] 增加测试文件 `backend/tests/test_history.py`
+  - 覆盖鉴权、owner 校验、admin 例外、列表隔离、预览/下载/删除权限
+
+#### P6 当前测试设计是否需要补充
+
+结论：**需要单独新增一组 history/download 测试**。目前自动化测试覆盖了 upload/filter/reading/compare/synthesis 的 owner 隔离，但还没有锁住以下高风险路径：
+- 未登录直接调 `/api/history/`
+- 用户 A 预览或删除用户 B 的 artifact
+- 用户 A 直接拼 `/api/download/{filename}` 下载用户 B 的文件
+- 历史列表是否会混入他人 `reading_final` / `filter_excel`
+- admin 是否能按设计例外访问跨用户 artifact
+
+#### P6 测试用例规划
+
+- [ ] `test_history_list_requires_authentication`
+  - 未登录调用 `/api/history/` 返回 `401`
+- [ ] `test_history_list_only_returns_current_user_artifacts`
+  - A 的历史列表中不出现 B 的 `reading/filter` 产物
+- [ ] `test_history_preview_requires_owner`
+  - 用户 A 不能预览用户 B 的 markdown artifact
+- [ ] `test_history_delete_requires_owner`
+  - 用户 A 不能删除用户 B 的 artifact
+- [ ] `test_history_delete_removes_artifact_record_and_file`
+  - 删除自己的历史文件时，物理文件与 `artifacts` 记录同时消失
+- [ ] `test_download_requires_authentication`
+  - 未登录调用 `/api/download/*` 返回 `401`
+- [ ] `test_download_rejects_non_owned_artifact`
+  - 用户 A 不能下载用户 B 的 artifact
+- [ ] `test_download_accepts_storage_path_for_owner`
+  - 当前用户可通过 `storage_path` 下载自己的 artifact
+- [ ] `test_download_accepts_filename_for_owner`
+  - 当前用户可继续通过 `filename` 下载自己的 artifact，兼容旧前端
+- [ ] `test_admin_can_download_other_users_artifact`
+  - admin 可以下载其他用户 artifact
+
+#### P6 注意点
+
+- 前端当前并未统一传 `storage_path`，仍大量使用 `filename`；P6 后端必须兼容两种输入，避免先改后端把现有页面打坏。
+- `history.py` 和 `download.py` 在 P6 之后应以 `artifacts` 为唯一可信来源，不再把“磁盘里恰好有文件”视为可直接访问的依据。
+- `DELETE /api/history/{filename}` 的语义是“删除当前用户的一条历史产物”，不是“按文件名全局删除所有同名文件”；实现时必须限定在用户可见范围内匹配。
+- `synthesis` 子路由在 P5 已切到 DB 驱动；P6 只是在总历史和下载链路上把剩余匿名入口补齐，不要回退 P5 的实现。
 
 ## 5. 已知问题与待办
 

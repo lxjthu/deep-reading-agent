@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 import markdown
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -22,6 +22,9 @@ RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__fil
 FILTER_DIR = os.path.join(RESULTS_DIR, "literature_filter")
 SYNTHESIS_DIR = os.path.join(RESULTS_DIR, "synthesis")
 os.makedirs(SYNTHESIS_DIR, exist_ok=True)
+
+READING_ARTIFACT_TYPES = {"reading_step", "reading_final", "reading_extract", "compare_md"}
+FILTER_ARTIFACT_TYPES = {"filter_excel"}
 
 
 class SaveSynthesisRequest(BaseModel):
@@ -54,19 +57,6 @@ def build_storage_path(absolute_path: Path) -> str:
         return absolute_path.as_posix()
 
 
-def _get_file_info(filepath: str) -> Dict:
-    """Get file metadata"""
-    stat = os.stat(filepath)
-    return {
-        "filename": os.path.basename(filepath),
-        "path": filepath,
-        "size": stat.st_size,
-        "size_human": _human_size(stat.st_size),
-        "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-        "type": _detect_type(filepath),
-    }
-
-
 def _human_size(size: int) -> str:
     """Convert bytes to human readable"""
     for unit in ["B", "KB", "MB", "GB"]:
@@ -76,83 +66,140 @@ def _human_size(size: int) -> str:
     return f"{size:.1f}TB"
 
 
-def _detect_type(filepath: str) -> str:
-    """Detect file type from name"""
-    name = os.path.basename(filepath).lower()
-    if "_long_context" in name:
-        return "长文本精读"
-    elif "_7step" in name:
-        return "七步精读"
-    elif "_4step" in name:
-        return "四步精读"
-    elif name.startswith("filtered_"):
+def _history_type(artifact: Artifact, job: Job) -> str:
+    if artifact.artifact_type == "filter_excel":
         return "文献筛选"
+    if artifact.artifact_type == "compare_md":
+        return "对比分析"
+    if artifact.artifact_type == "synthesis_md":
+        return "AI综述"
+    if job.job_type == "reading_long":
+        return "长文本精读"
+    if job.job_type == "reading_quant":
+        return "七步精读"
+    if job.job_type == "reading_qual":
+        return "四步精读"
     return "其他"
 
 
-def _find_file(filename: str) -> Optional[str]:
-    """Find file in results, filter, or synthesis directory"""
-    filepath = os.path.join(RESULTS_DIR, filename)
-    if os.path.exists(filepath) and os.path.isfile(filepath):
-        return filepath
-    filepath = os.path.join(FILTER_DIR, filename)
-    if os.path.exists(filepath) and os.path.isfile(filepath):
-        return filepath
-    filepath = os.path.join(SYNTHESIS_DIR, filename)
-    if os.path.exists(filepath) and os.path.isfile(filepath):
-        return filepath
-    for root, _, files in os.walk(RESULTS_DIR):
-        if filename in files:
-            candidate = os.path.join(root, filename)
-            if os.path.isfile(candidate):
-                return candidate
-    return None
+def _artifact_absolute_path(artifact: Artifact) -> Path:
+    return Path(RESULTS_DIR) / artifact.storage_path
 
 
-def _list_files(directory: str) -> List[Dict]:
-    """List all files in directory"""
-    if not os.path.exists(directory):
-        return []
-    files = []
-    for filename in sorted(os.listdir(directory), key=lambda f: os.path.getmtime(os.path.join(directory, f)), reverse=True):
-        filepath = os.path.join(directory, filename)
-        if os.path.isfile(filepath):
-            files.append(_get_file_info(filepath))
-    return files
-
-
-@router.get("/")
-async def list_history():
-    """List all history files (reading reports + filter results)"""
-    reading_files = _list_files(RESULTS_DIR)
-    filter_files = _list_files(FILTER_DIR)
-    
-    # Combine and sort by modified time (newest first)
-    all_files = reading_files + filter_files
-    all_files.sort(key=lambda x: x["modified"], reverse=True)
-    
+def _artifact_to_file_info(artifact: Artifact, job: Job) -> Dict:
+    absolute_path = _artifact_absolute_path(artifact)
+    size = artifact.size_bytes or (absolute_path.stat().st_size if absolute_path.exists() else 0)
+    modified_dt = artifact.created_at or job.created_at or utcnow_naive()
     return {
-        "reading": reading_files,
-        "filter": filter_files,
-        "all": all_files,
+        "filename": artifact.filename,
+        "path": artifact.storage_path,
+        "download_path": artifact.storage_path,
+        "size": size,
+        "size_human": _human_size(size),
+        "modified": modified_dt.strftime("%Y-%m-%d %H:%M"),
+        "type": _history_type(artifact, job),
+        "job_id": job.id,
     }
 
 
+async def _find_owned_artifact(
+    db: AsyncSession,
+    user: User,
+    identifier: str,
+) -> tuple[Artifact, Job] | None:
+    normalized = identifier.replace("\\", "/").lstrip("/")
+
+    exact_match = (
+        await db.execute(
+            select(Artifact, Job)
+            .join(Job, Job.id == Artifact.job_id)
+            .where(
+                Artifact.owner_user_id == user.id,
+                Artifact.storage_path == normalized,
+            )
+            .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        )
+    ).first()
+    if exact_match is not None:
+        return exact_match
+
+    return (
+        await db.execute(
+            select(Artifact, Job)
+            .join(Job, Job.id == Artifact.job_id)
+            .where(
+                Artifact.owner_user_id == user.id,
+                Artifact.filename == os.path.basename(identifier),
+            )
+            .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        )
+    ).first()
+
+
+@router.get("/")
+async def list_history(
+    owner_user_id: int | None = Query(default=None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List history files visible to the current user."""
+    target_owner_id = user.id
+    if owner_user_id is not None:
+        if user.role != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+        target_owner_id = owner_user_id
+
+    artifacts = (
+        await db.execute(
+            select(Artifact, Job)
+            .join(Job, Job.id == Artifact.job_id)
+            .where(
+                Artifact.owner_user_id == target_owner_id,
+                Artifact.artifact_type != "synthesis_md",
+            )
+            .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        )
+    ).all()
+
+    reading_files: list[dict] = []
+    filter_files: list[dict] = []
+    all_files: list[dict] = []
+    for artifact, job in artifacts:
+        file_info = _artifact_to_file_info(artifact, job)
+        if artifact.artifact_type in FILTER_ARTIFACT_TYPES:
+            filter_files.append(file_info)
+            all_files.append(file_info)
+        elif artifact.artifact_type in READING_ARTIFACT_TYPES:
+            reading_files.append(file_info)
+            all_files.append(file_info)
+
+    return {"reading": reading_files, "filter": filter_files, "all": all_files}
+
+
 @router.get("/{filename}/preview", response_class=HTMLResponse)
-async def preview_file(filename: str):
+async def preview_file(
+    filename: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Preview a file as HTML (Markdown files rendered, Excel shows message)"""
-    filepath = _find_file(filename)
-    if not filepath:
+    artifact_job = await _find_owned_artifact(db, user, filename)
+    if artifact_job is None:
         raise HTTPException(status_code=404, detail="File not found")
-    
+
+    artifact, _job = artifact_job
+    filepath = _artifact_absolute_path(artifact)
+    if not filepath.exists() or not filepath.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
     ext = os.path.splitext(filename)[1].lower()
-    
+
     if ext == '.md':
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
-        
+
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -216,18 +263,23 @@ async def preview_file(filename: str):
 
 
 @router.delete("/{filename}")
-async def delete_file(filename: str):
+async def delete_file(
+    filename: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Delete a history file by filename"""
-    filepath = _find_file(filename)
-    if not filepath:
-        # Also check synthesis directory
-        synth_path = os.path.join(SYNTHESIS_DIR, filename)
-        if os.path.exists(synth_path):
-            os.remove(synth_path)
-            return {"success": True, "message": f"已删除 {filename}"}
+    artifact_job = await _find_owned_artifact(db, user, filename)
+    if artifact_job is None:
         raise HTTPException(status_code=404, detail="File not found")
-    
-    os.remove(filepath)
+
+    artifact, _job = artifact_job
+    filepath = _artifact_absolute_path(artifact)
+    if filepath.exists() and filepath.is_file():
+        filepath.unlink()
+
+    await db.delete(artifact)
+    await db.commit()
     return {"success": True, "message": f"已删除 {filename}"}
 
 

@@ -3,50 +3,72 @@ Download Router - File downloads for analysis results
 """
 import os
 import urllib.parse
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from auth.dependencies import current_user
+from db import get_db
+from db.models import Artifact, Job, User
 
 router = APIRouter()
 
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deep_reading_results")
 
 
+async def _resolve_download_artifact(
+    db: AsyncSession,
+    user: User,
+    identifier: str,
+) -> Artifact | None:
+    normalized = identifier.replace("\\", "/").lstrip("/")
+
+    exact_stmt = (
+        select(Artifact)
+        .join(Job, Job.id == Artifact.job_id)
+        .where(Artifact.storage_path == normalized)
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+    )
+    if user.role != "admin":
+        exact_stmt = exact_stmt.where(Artifact.owner_user_id == user.id)
+    artifact = (await db.execute(exact_stmt)).scalars().first()
+    if artifact is not None:
+        return artifact
+
+    filename_stmt = (
+        select(Artifact)
+        .join(Job, Job.id == Artifact.job_id)
+        .where(Artifact.filename == os.path.basename(identifier))
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+    )
+    if user.role != "admin":
+        filename_stmt = filename_stmt.where(Artifact.owner_user_id == user.id)
+    return (await db.execute(filename_stmt)).scalars().first()
+
+
 @router.get("/{file_path:path}")
-async def download_file(file_path: str):
+async def download_file(
+    file_path: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Download a result file by path.
     Path should be URL-encoded.
     """
-    # URL decode the path
     decoded_path = urllib.parse.unquote(file_path)
-    
-    # Security: ensure the path is within RESULTS_DIR
-    # Handle both absolute and relative paths
-    if os.path.isabs(decoded_path):
-        # If absolute, check it's under RESULTS_DIR
-        real_path = os.path.realpath(decoded_path)
-        real_results_dir = os.path.realpath(RESULTS_DIR)
-        if not real_path.startswith(real_results_dir):
-            raise HTTPException(status_code=403, detail="Access denied")
-        target_path = decoded_path
-    else:
-        # Relative path - resolve against RESULTS_DIR
-        target_path = os.path.join(RESULTS_DIR, decoded_path)
-    
-    if not os.path.exists(target_path):
-        # Also check if it's directly in results dir
-        basename = os.path.basename(decoded_path)
-        alt_path = os.path.join(RESULTS_DIR, basename)
-        if os.path.exists(alt_path):
-            target_path = alt_path
-        else:
-            raise HTTPException(status_code=404, detail="File not found")
-    
-    if not os.path.isfile(target_path):
-        raise HTTPException(status_code=400, detail="Not a file")
-    
-    # Determine MIME type by extension
+
+    artifact = await _resolve_download_artifact(db, user, decoded_path)
+    if artifact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    target_path = Path(RESULTS_DIR) / artifact.storage_path
+    if not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
     ext = os.path.splitext(target_path)[1].lower()
     media_types = {
         '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -60,6 +82,6 @@ async def download_file(file_path: str):
     
     return FileResponse(
         target_path,
-        filename=os.path.basename(target_path),
+        filename=artifact.filename,
         media_type=media_type
     )
