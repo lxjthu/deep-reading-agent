@@ -1,31 +1,46 @@
-"""
-Compare Router - AI synthesis for literature comparison
-"""
+"""Compare Router - authenticated comparison with DB persistence."""
+from __future__ import annotations
+
+import json
 import os
 import sys
+import uuid
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from auth.dependencies import current_user
+from db import PROJECT_ROOT, get_db
+from db.models import Artifact, BibEntry, Job, JobBibEntry, User
+from db.utils import compute_dedup_key
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 router = APIRouter()
+RESULTS_ROOT = PROJECT_ROOT / "deep_reading_results"
+RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 class CompareRequest(BaseModel):
     step: str
-    papers: List[str]
-    subQuestions: List[str]
-    paperData: list
+    papers: List[str] = Field(default_factory=list)
+    subQuestions: List[str] = Field(default_factory=list)
+    paperData: list = Field(default_factory=list)
+    bib_entry_ids: List[str] = Field(default_factory=list)
     api_key: Optional[str] = None
     mode: Optional[str] = "single"
 
 
 class LongCompareRequest(BaseModel):
     dimension: str
-    papers: List[str]
-    paperData: list
+    papers: List[str] = Field(default_factory=list)
+    paperData: list = Field(default_factory=list)
+    bib_entry_ids: List[str] = Field(default_factory=list)
     api_key: Optional[str] = None
     mode: Optional[str] = "single"
 
@@ -34,6 +49,174 @@ def get_api_key(provided_key: Optional[str] = None) -> str:
     if provided_key and provided_key.strip():
         return provided_key.strip()
     return os.environ.get("DEEPSEEK_API_KEY", "")
+
+
+def utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def compute_expires_at(user: User) -> datetime | None:
+    if user.role == "normal":
+        return utcnow_naive() + timedelta(hours=24)
+    return None
+
+
+def get_results_dir(user_id: int, job_id: str) -> Path:
+    result_dir = RESULTS_ROOT / str(user_id) / job_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+    return result_dir
+
+
+def build_storage_path(absolute_path: Path) -> str:
+    try:
+        return absolute_path.relative_to(RESULTS_ROOT).as_posix()
+    except ValueError:
+        return absolute_path.as_posix()
+
+
+def parse_paper_authors(raw_authors) -> list[str]:
+    if raw_authors is None:
+        return []
+    if isinstance(raw_authors, list):
+        return [str(item).strip() for item in raw_authors if str(item).strip()]
+    text = str(raw_authors).strip()
+    if not text:
+        return []
+    normalized = text.replace("；", ";").replace(",", ";").replace(" and ", ";")
+    return [part.strip() for part in normalized.split(";") if part.strip()]
+
+
+def bib_entry_to_paper_data(bib_entry: BibEntry) -> dict:
+    return {
+        "title": bib_entry.title,
+        "authors": json.loads(bib_entry.authors_json or "[]"),
+        "year": bib_entry.year,
+        "journal": bib_entry.journal or "",
+        "doi": bib_entry.doi or "",
+        "subQuestions": {},
+        "dimensions": {},
+        "content": bib_entry.abstract or "",
+    }
+
+
+async def resolve_compare_members(
+    db: AsyncSession,
+    user: User,
+    bib_entry_ids: list[str],
+    paper_data: list[dict],
+) -> list[BibEntry]:
+    members: list[BibEntry] = []
+    seen: set[str] = set()
+
+    if bib_entry_ids:
+        for sort_order, bib_entry_id in enumerate(bib_entry_ids):
+            bib_entry = await db.get(BibEntry, bib_entry_id)
+            if bib_entry is None or bib_entry.owner_user_id != user.id:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bib entry not found")
+            if bib_entry.id in seen:
+                continue
+            seen.add(bib_entry.id)
+            members.append(bib_entry)
+    else:
+        for paper in paper_data:
+            title = str(paper.get("title") or paper.get("filename") or "").strip()
+            authors = parse_paper_authors(paper.get("authors"))
+            year = paper.get("year")
+            doi = str(paper.get("doi") or "").strip() or None
+            dedup_key = compute_dedup_key(doi, title, authors, year)
+            bib_entry = (
+                await db.execute(
+                    select(BibEntry).where(
+                        BibEntry.owner_user_id == user.id,
+                        BibEntry.dedup_key == dedup_key,
+                    )
+                )
+            ).scalar_one_or_none()
+            if bib_entry is None and title:
+                bib_entry = (
+                    await db.execute(
+                        select(BibEntry).where(
+                            BibEntry.owner_user_id == user.id,
+                            BibEntry.title == title,
+                        )
+                    )
+                ).scalar_one_or_none()
+            if bib_entry is None or bib_entry.id in seen:
+                continue
+            seen.add(bib_entry.id)
+            members.append(bib_entry)
+
+    if len(members) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="对比分析至少需要 2 篇文献。")
+    return members
+
+
+async def create_compare_job(
+    db: AsyncSession,
+    user: User,
+    job_type: str,
+    params_json: dict,
+    members: list[BibEntry],
+) -> str:
+    job_id = str(uuid.uuid4())
+    db.add(
+        Job(
+            id=job_id,
+            owner_user_id=user.id,
+            job_type=job_type,
+            status="pending",
+            params_json=json.dumps(params_json, ensure_ascii=False),
+            progress=0,
+            current_stage="等待开始...",
+            expires_at=compute_expires_at(user),
+        )
+    )
+    for sort_order, bib_entry in enumerate(members):
+        db.add(
+            JobBibEntry(
+                job_id=job_id,
+                bib_entry_id=bib_entry.id,
+                role="compare_member",
+                sort_order=sort_order,
+            )
+        )
+    await db.flush()
+    return job_id
+
+
+async def persist_compare_result(
+    db: AsyncSession,
+    user: User,
+    job_id: str,
+    filename: str,
+    content: str,
+) -> str:
+    result_dir = get_results_dir(user.id, job_id)
+    path = result_dir / filename
+    path.write_text(content, encoding="utf-8")
+    storage_path = build_storage_path(path)
+    db.add(
+        Artifact(
+            job_id=job_id,
+            owner_user_id=user.id,
+            artifact_type="compare_md",
+            filename=filename,
+            storage_path=storage_path,
+            size_bytes=path.stat().st_size,
+            expires_at=compute_expires_at(user),
+        )
+    )
+    return storage_path
+
+
+def build_compare_markdown(title: str, synthesis: str) -> str:
+    return f"# {title}\n\n{synthesis}\n"
+
+
+def ensure_paper_data(paper_data: list[dict], members: list[BibEntry]) -> list[dict]:
+    if paper_data:
+        return paper_data
+    return [bib_entry_to_paper_data(member) for member in members]
 
 
 def format_inline_citation(authors: list, year) -> str:
@@ -306,20 +489,44 @@ def build_long_multi_prompt(dimensions: list, papers: list) -> str:
 
 
 @router.post("/analyze")
-async def analyze_comparison(req: CompareRequest):
+async def analyze_comparison(
+    req: CompareRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Generate AI synthesis for 7-step or 4-step comparison."""
     try:
         from openai import OpenAI
+
+        members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
+        paper_data = ensure_paper_data(req.paperData, members)
+        mode = req.mode or ("multi" if len(req.subQuestions) > 1 else "single")
+        job_id = await create_compare_job(
+            db,
+            user,
+            "compare",
+            {
+                "step": req.step,
+                "subQuestions": req.subQuestions,
+                "mode": mode,
+            },
+            members,
+        )
+        job = await db.get(Job, job_id)
+        job.status = "running"
+        job.progress = 20
+        job.current_stage = "生成对比综述..."
+        job.started_at = utcnow_naive()
+        await db.flush()
+
         client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
 
-        mode = req.mode or ("multi" if len(req.subQuestions) > 1 else "single")
-
         if mode == "cross":
-            prompt = build_cross_dim_prompt(req.paperData)
+            prompt = build_cross_dim_prompt(paper_data)
         elif mode == "multi":
-            prompt = build_multi_prompt(req.step, req.subQuestions, req.paperData)
+            prompt = build_multi_prompt(req.step, req.subQuestions, paper_data)
         else:
-            prompt = build_single_prompt(req.step, req.paperData)
+            prompt = build_single_prompt(req.step, paper_data)
 
         response = client.chat.completions.create(
             model="deepseek-v4-flash",
@@ -333,33 +540,70 @@ async def analyze_comparison(req: CompareRequest):
         )
 
         synthesis = response.choices[0].message.content
-        references = build_reference_list(req.paperData)
-        return {"synthesis": synthesis + references}
+        references = build_reference_list(paper_data)
+        final_text = synthesis + references
+        title = f"对比分析：{req.step}"
+        storage_path = await persist_compare_result(
+            db,
+            user,
+            job_id,
+            f"compare_{req.step}_{job_id}.md",
+            build_compare_markdown(title, final_text),
+        )
+        job.status = "success"
+        job.progress = 100
+        job.current_stage = "完成"
+        job.finished_at = utcnow_naive()
+        await db.commit()
+        return {"synthesis": final_text, "job_id": job_id, "output_path": storage_path}
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/analyze_long")
-async def analyze_long_comparison(req: LongCompareRequest):
+async def analyze_long_comparison(
+    req: LongCompareRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Generate AI synthesis for long context comparison."""
     try:
         from openai import OpenAI
+
+        members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
+        paper_data = ensure_paper_data(req.paperData, members)
+        mode = req.mode or "single"
+        job_id = await create_compare_job(
+            db,
+            user,
+            "compare",
+            {
+                "dimension": req.dimension,
+                "mode": mode,
+            },
+            members,
+        )
+        job = await db.get(Job, job_id)
+        job.status = "running"
+        job.progress = 20
+        job.current_stage = "生成长综述..."
+        job.started_at = utcnow_naive()
+        await db.flush()
+
         client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
 
-        mode = req.mode or "single"
-
-        # For multi-dimension long context, paperData items may carry a 'dimensions' dict
         if mode == "multi":
-            # Collect unique dimensions from paperData
             all_dims = []
-            for p in req.paperData:
-                for d in p.get('dimensions', {}).keys():
+            for p in paper_data:
+                for d in p.get("dimensions", {}).keys():
                     if d not in all_dims:
                         all_dims.append(d)
-            prompt = build_long_multi_prompt(all_dims or [req.dimension], req.paperData)
+            prompt = build_long_multi_prompt(all_dims or [req.dimension], paper_data)
         else:
-            prompt = build_long_single_prompt(req.dimension, req.paperData)
+            prompt = build_long_single_prompt(req.dimension, paper_data)
 
         response = client.chat.completions.create(
             model="deepseek-v4-flash",
@@ -373,8 +617,24 @@ async def analyze_long_comparison(req: LongCompareRequest):
         )
 
         synthesis = response.choices[0].message.content
-        references = build_reference_list(req.paperData)
-        return {"synthesis": synthesis + references}
+        references = build_reference_list(paper_data)
+        final_text = synthesis + references
+        title = f"长综述对比：{req.dimension}"
+        storage_path = await persist_compare_result(
+            db,
+            user,
+            job_id,
+            f"compare_long_{job_id}.md",
+            build_compare_markdown(title, final_text),
+        )
+        job.status = "success"
+        job.progress = 100
+        job.current_stage = "完成"
+        job.finished_at = utcnow_naive()
+        await db.commit()
+        return {"synthesis": final_text, "job_id": job_id, "output_path": storage_path}
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

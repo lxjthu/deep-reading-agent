@@ -1,11 +1,20 @@
 import os
-from datetime import datetime
+import json
+import uuid
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import List, Dict, Optional
 
 import markdown
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from auth.dependencies import current_user
+from db import PROJECT_ROOT, get_db
+from db.models import Artifact, BibEntry, Job, JobBibEntry, User
 
 router = APIRouter()
 
@@ -19,6 +28,30 @@ class SaveSynthesisRequest(BaseModel):
     dimension: str
     papers: List[str]
     content: str
+    bib_entry_ids: List[str] = Field(default_factory=list)
+
+
+def utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def compute_expires_at(user: User) -> datetime | None:
+    if user.role == "normal":
+        return utcnow_naive() + timedelta(hours=24)
+    return None
+
+
+def get_results_dir(user_id: int, job_id: str) -> Path:
+    directory = Path(RESULTS_DIR) / str(user_id) / job_id
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def build_storage_path(absolute_path: Path) -> str:
+    try:
+        return absolute_path.relative_to(Path(RESULTS_DIR)).as_posix()
+    except ValueError:
+        return absolute_path.as_posix()
 
 
 def _get_file_info(filepath: str) -> Dict:
@@ -68,6 +101,11 @@ def _find_file(filename: str) -> Optional[str]:
     filepath = os.path.join(SYNTHESIS_DIR, filename)
     if os.path.exists(filepath) and os.path.isfile(filepath):
         return filepath
+    for root, _, files in os.walk(RESULTS_DIR):
+        if filename in files:
+            candidate = os.path.join(root, filename)
+            if os.path.isfile(candidate):
+                return candidate
     return None
 
 
@@ -196,28 +234,116 @@ async def delete_file(filename: str):
 # === Synthesis History ===
 
 @router.get("/synthesis/")
-async def list_synthesis():
-    """List all synthesis files"""
-    files = _list_files(SYNTHESIS_DIR)
-    for f in files:
-        f["type"] = "AI综述"
+async def list_synthesis(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List synthesis history for current user."""
+    artifacts = (
+        await db.execute(
+            select(Artifact, Job)
+            .join(Job, Job.id == Artifact.job_id)
+            .where(
+                Artifact.owner_user_id == user.id,
+                Artifact.artifact_type == "synthesis_md",
+                Job.job_type == "synthesis",
+            )
+            .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        )
+    ).all()
+    files = []
+    for artifact, job in artifacts:
+        absolute_path = Path(RESULTS_DIR) / artifact.storage_path
+        size = artifact.size_bytes or (absolute_path.stat().st_size if absolute_path.exists() else 0)
+        modified_dt = artifact.created_at or job.created_at or utcnow_naive()
+        modified = modified_dt.strftime("%Y-%m-%d %H:%M")
+        files.append(
+            {
+                "filename": artifact.filename,
+                "path": artifact.storage_path,
+                "download_path": artifact.storage_path,
+                "size": size,
+                "size_human": _human_size(size),
+                "modified": modified,
+                "type": "AI综述",
+                "job_id": job.id,
+            }
+        )
     return {"synthesis": files, "all": files}
 
 
 @router.post("/synthesis/")
-async def save_synthesis(req: SaveSynthesisRequest):
-    """Save a synthesis result"""
-    # Generate filename
+async def save_synthesis(
+    req: SaveSynthesisRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save a synthesis result as job + artifact."""
+    members: list[BibEntry] = []
+    seen: set[str] = set()
+
+    if req.bib_entry_ids:
+        for bib_entry_id in req.bib_entry_ids:
+            bib_entry = await db.get(BibEntry, bib_entry_id)
+            if bib_entry is None or bib_entry.owner_user_id != user.id:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bib entry not found")
+            if bib_entry.id in seen:
+                continue
+            seen.add(bib_entry.id)
+            members.append(bib_entry)
+    else:
+        for paper_title in req.papers:
+            bib_entry = (
+                await db.execute(
+                    select(BibEntry).where(
+                        BibEntry.owner_user_id == user.id,
+                        BibEntry.title == paper_title,
+                    )
+                )
+            ).scalar_one_or_none()
+            if bib_entry is None or bib_entry.id in seen:
+                continue
+            seen.add(bib_entry.id)
+            members.append(bib_entry)
+
+    if not members:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="保存综述至少需要 1 篇文献。")
+
+    job_id = str(uuid.uuid4())
+    db.add(
+        Job(
+            id=job_id,
+            owner_user_id=user.id,
+            job_type="synthesis",
+            status="success",
+            params_json=json.dumps({"dimension": req.dimension, "papers": req.papers}, ensure_ascii=False),
+            progress=100,
+            current_stage="完成",
+            created_at=utcnow_naive(),
+            started_at=utcnow_naive(),
+            finished_at=utcnow_naive(),
+            expires_at=compute_expires_at(user),
+        )
+    )
+    for sort_order, bib_entry in enumerate(members):
+        db.add(
+            JobBibEntry(
+                job_id=job_id,
+                bib_entry_id=bib_entry.id,
+                role="synthesis_member",
+                sort_order=sort_order,
+            )
+        )
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dim_safe = req.dimension.replace("/", "_").replace("\\", "_")[:30]
     filename = f"synthesis_{dim_safe}_{timestamp}.md"
-    filepath = os.path.join(SYNTHESIS_DIR, filename)
-    
-    # Build content with metadata
+    filepath = get_results_dir(user.id, job_id) / filename
+
     papers_str = ", ".join(req.papers[:3])
     if len(req.papers) > 3:
         papers_str += f" 等{len(req.papers)}篇"
-    
+
     content = f"""# AI文献综述：{req.dimension}
 
 **生成时间**：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}  
@@ -228,8 +354,20 @@ async def save_synthesis(req: SaveSynthesisRequest):
 
 {req.content}
 """
-    
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.write(content)
-    
-    return {"success": True, "filename": filename, "path": filepath}
+
+    filepath.write_text(content, encoding="utf-8")
+    storage_path = build_storage_path(filepath)
+    db.add(
+        Artifact(
+            job_id=job_id,
+            owner_user_id=user.id,
+            artifact_type="synthesis_md",
+            filename=filename,
+            storage_path=storage_path,
+            size_bytes=filepath.stat().st_size,
+            expires_at=compute_expires_at(user),
+        )
+    )
+    await db.commit()
+
+    return {"success": True, "filename": filename, "path": storage_path, "job_id": job_id}

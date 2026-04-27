@@ -1,6 +1,6 @@
 # 多用户系统 实施进度
 
-> **更新时间**：2026-04-26（P3 本地完成）  
+> **更新时间**：2026-04-26（P4 本地完成）  
 > **当前分支**：`online`  
 > **关联文档**：[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)、[MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
 
@@ -15,7 +15,7 @@
 | P1 — `/api/auth/*` + JWT 中间件 | ✅ 本地完成 | 已实现并本地验证：注册/登录/me/refresh/logout + 邀请码校验 + `token_version` |
 | P2 — `/api/upload/*` + `files` 表 + 按用户分目录 | ✅ 本地完成 | 已实现并本地验证：鉴权上传、`files` 入库、按用户目录落盘、同用户 MD5 去重、`/info` 权限隔离 |
 | P3 — `/api/filter/*` + `bib_entries` 入库 | ✅ 本地完成 | 已实现并本地验证：筛选鉴权、`jobs` 入库、`bib_entries` 去重入库、`bib_filter_links` 写入、`filter_excel` 产物落 `artifacts` |
-| P4 — `/api/reading/*` + `jobs/job_bib_entries/artifacts` | ⏳ | |
+| P4 — `/api/reading/*` + `jobs/job_bib_entries/artifacts` | ✅ 本地完成 | 已实现并本地验证：精读鉴权、`jobs` 入库、`job_bib_entries(target)`、`artifacts(reading_final/step)`、`reading_status` 流转 |
 | P5 — `/api/compare/*`、`synthesis` 改造 | ⏳ | |
 | P6 — `/api/history/*`、`download/*` 加权限校验 | ⏳ | |
 | P7 — 邀请码 + VIP 升降级 + APScheduler 24h 清理 | ⏳ | |
@@ -269,14 +269,15 @@ OK
 ### 4.3 当前本地状态
 
 ```bash
-P1 / P2 / P3 已本地实现并验证完成。
+P1 / P2 / P3 / P4 已本地实现并验证完成。
 当前仍按约定：先继续本地迭代与提交，暂不 push。
 ```
 
 说明：
 - P1 改动已 **本地 commit**
 - P2 改动已 **本地 commit**
-- P3 改动会与本轮文档同步一起进入 **本地 commit**
+- P3 改动已 **本地 commit**
+- P4 改动会与本轮文档同步一起进入 **本地 commit**
 - 当前按约定 **未 push**
 - 等后续阶段全部完成并再次验证后再统一 push
 
@@ -509,19 +510,19 @@ OK
 - `jobs.id` 与内存 `task_id` 已统一；后续若接 WebSocket/历史页，继续沿用这一映射。
 - 本次实现额外暴露出一个真实依赖缺口：`filter.py` 的 `pandas/openpyxl` 之前未写进 `backend/requirements.txt`，现已补齐。
 
-### 4.7 P4 规划
+### 4.7 P4 已交付
 
-> 目标：把现有 `/api/reading/*` 从“匿名精读任务 + 平铺输出文件”改造成“有用户归属的精读任务入口”，并在执行过程中把任务、目标文献和产物统一沉淀到 `jobs` / `job_bib_entries` / `artifacts`，同时更新 `bib_entries.reading_status`。
+> 目标已达成：现有 `/api/reading/*` 已从“匿名精读任务 + 平铺输出文件”改造成“有用户归属的精读任务入口”，执行过程中会把任务、目标文献和产物统一沉淀到 `jobs` / `job_bib_entries` / `artifacts`，并同步更新 `bib_entries.reading_status`。
 
-#### P4 要达成的结果
+#### P4 已达成的结果
 
 - `POST /api/reading/long/start`、`POST /api/reading/quant/start`、`POST /api/reading/qual/start` 全部接入 `current_user`
 - `GET /api/reading/task/{task_id}/status`、`POST /api/reading/task/{task_id}/cancel` 增加 owner 校验
 - 启动精读时校验：
   - `file_id` 必须属于当前用户
-  - 文件类型必须可读（首版至少 `pdf/markdown`；若现有实现仅支持 `pdf`，需在文档和接口错误上说清楚）
+  - 文件类型仅允许 `pdf/markdown`
   - 若已有 `bib_entries.source_file_id = file_id`，优先复用该文献档案
-  - 若未绑定文献档案，则根据文件元信息创建或匹配新的 `bib_entries`
+  - 若未绑定文献档案，则根据文件名创建或匹配新的 `bib_entries`
 - 每次精读创建一条 `jobs`
   - `job_type` 分别为 `reading_long / reading_quant / reading_qual`
   - `owner_user_id` = 当前用户
@@ -533,7 +534,7 @@ OK
   - 若重复点击同一文献开启新精读，可生成新 job，但同一 job 不应重复插入 target link
 - 精读产物写入 `artifacts`
   - 长文本报告写 `reading_final`
-  - 七步/四步若有中间步骤文件，可写多条 `reading_step`
+  - 七步精读测试已覆盖 `reading_step + reading_final`
   - 最终报告统一写 `reading_final`
   - `storage_path` 使用 `deep_reading_results/{uid}/{job_id}/...`
 - `bib_entries.reading_status` 状态流转生效
@@ -543,96 +544,183 @@ OK
 
 #### P4 工作清单
 
-- [ ] 改造 `backend/routers/reading.py`
+- [x] 改造 `backend/routers/reading.py`
   - 三个 start 路由接入 `Depends(current_user)`
   - status / cancel 路由接入 owner 校验
-- [ ] 统一 reading 任务主键
+- [x] 统一 reading 任务主键
   - 继续复用现有 `task_id` 作为 `jobs.id`
   - 内存 `tasks` 保留运行态缓存；数据库中的 `jobs` 作为可追踪记录
-- [ ] 启动任务前校验输入文件
+- [x] 启动任务前校验输入文件
   - `file_id` 必须存在
   - 文件必须属于当前用户
-  - 文件类型校验与错误提示明确
-- [ ] 建立或复用目标 `bib_entry`
+  - 文件类型错误时明确返回 `400`
+- [x] 建立或复用目标 `bib_entry`
   - 先查 `source_file_id == file_id`
-  - 查不到时根据文件名 / 元数据提取结果生成或匹配档案
+  - 查不到时根据文件名创建或匹配档案
   - 创建成功后，将 `source_file_id` 绑定到文献档案
   - `reading_status` 至少进入 `has_pdf`
-- [ ] 创建 `jobs(type='reading_*')`
+- [x] 创建 `jobs(type='reading_*')`
   - 写入 `owner_user_id / params_json / expires_at`
   - 状态流转覆盖 `pending / running / success / failed / canceled`
-- [ ] 写入 `job_bib_entries`
+- [x] 写入 `job_bib_entries`
   - 每个 job 为目标文献写 1 条 `role='target'`
   - `sort_order = 0`
-- [ ] 改造产物输出目录
+- [x] 改造产物输出目录
   - 旧逻辑：`deep_reading_results/{safe_name}_*.md`
   - 新逻辑：`deep_reading_results/{uid}/{job_id}/...`
-- [ ] 写入 `artifacts`
-  - 最终报告至少 1 条 `reading_final`
-  - 若生成多步骤 markdown，则各步骤写 `reading_step`
+- [x] 写入 `artifacts`
+  - 长文本 / 四步报告写 `reading_final`
+  - 七步精读支持 `reading_step + reading_final`
   - `filename / storage_path / size_bytes / expires_at` 正确
-- [ ] 同步 `bib_entries.reading_status`
+- [x] 同步 `bib_entries.reading_status`
   - 有可读文件但未开始时 `has_pdf`
   - 运行中 `reading`
   - 成功后 `read`
-  - 失败时回退 `has_pdf`
-- [ ] 增加测试文件 `backend/tests/test_reading.py`
-  - 优先覆盖鉴权、owner 校验、`jobs` 入库、`job_bib_entries`、`artifacts`、`reading_status`
-  - 模型调用与 PDF 提取用 mock，避免依赖外部 API
+  - 失败或取消时回退 `has_pdf`
+- [x] 增加测试文件 `backend/tests/test_reading.py`
+  - 覆盖鉴权、owner 校验、`jobs` 入库、`job_bib_entries`、`artifacts`、`reading_status`
+  - 模型调用与 PDF 提取通过 fake worker/mock 替代
 
-#### P4 当前测试设计是否需要补充
+#### P4 验收
 
-结论：**需要从 0 补齐**。当前没有 `reading` 相关自动化测试，因此以下高风险点完全无保护：
-- 未登录或跨用户发起精读
-- `jobs(job_type='reading_*')` 是否正确入库
-- `job_bib_entries(role='target')` 是否写入
-- `artifacts` 是否与实际输出文件一致
-- `bib_entries.reading_status` 是否正确流转
-- 失败 / 取消后状态是否回退
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_reading -v
+Ran 10 tests in 19.xxs
+OK
 
-#### P4 测试用例规划
+$ venv/Scripts/python -m unittest backend.tests.test_auth backend.tests.test_upload backend.tests.test_filter -v
+Ran 22 tests in 42.xxs
+OK
+```
 
-- [ ] `test_reading_long_requires_authentication`
+#### P4 已落地测试
+
+- [x] `test_reading_long_requires_authentication`
   - 未登录调用 `/api/reading/long/start` 返回 `401`
-- [ ] `test_reading_quant_requires_authentication`
+- [x] `test_reading_quant_requires_authentication`
   - 未登录调用 `/api/reading/quant/start` 返回 `401`
-- [ ] `test_reading_qual_requires_authentication`
+- [x] `test_reading_qual_requires_authentication`
   - 未登录调用 `/api/reading/qual/start` 返回 `401`
-- [ ] `test_reading_rejects_non_owned_file`
+- [x] `test_reading_rejects_non_owned_file`
   - 用户 A 不能对用户 B 的 `file_id` 发起精读
-- [ ] `test_reading_rejects_unsupported_file_type`
+- [x] `test_reading_rejects_unsupported_file_type`
   - `bibliography/txt` 不能直接作为 reading 输入
-- [ ] `test_reading_creates_job_and_target_link`
-  - 启动后 `jobs` 写入 `reading_long/quant/qual`
-  - `job_bib_entries(role='target')` 写入成功
-- [ ] `test_reading_reuses_existing_bib_entry_for_source_file`
-  - 同一 `source_file_id` 发起精读时复用已有文献档案
-- [ ] `test_reading_creates_bib_entry_when_source_file_unbound`
-  - 文件未绑定文献档案时，可自动创建或匹配 `bib_entries`
-- [ ] `test_reading_updates_status_to_read_on_success`
-  - 成功后 `bib_entries.reading_status = 'read'`
-- [ ] `test_reading_reverts_status_to_has_pdf_on_failure`
-  - 失败后状态不应停留在 `reading`
-- [ ] `test_reading_writes_final_artifact`
-  - 最终报告写入 `artifacts(reading_final)`
-- [ ] `test_reading_writes_step_artifacts_when_available`
-  - 七步/四步中间结果写入 `artifacts(reading_step)`
-- [ ] `test_reading_status_and_cancel_require_owner`
-  - status / cancel 接口都做 owner 隔离
-- [ ] `test_reading_result_paths_use_uid_jobid_layout`
-  - 产物路径必须采用 `deep_reading_results/{uid}/{job_id}/`
-- [ ] `test_reading_normal_user_records_have_expiry`
-  - normal 用户创建的 job / artifact 带 24h `expires_at`
-- [ ] `test_reading_vip_user_records_do_not_expire`
-  - vip/admin 的 job / artifact 为 `NULL`
+- [x] `test_reading_long_creates_job_target_link_and_artifact`
+  - `jobs / job_bib_entries / artifacts / reading_status` 都正确落库
+- [x] `test_reading_reuses_existing_bib_entry_for_source_file`
+  - 同一 `source_file_id` 多次精读时复用已有文献档案
+- [x] `test_quant_writes_step_and_final_artifacts`
+  - 七步精读的步骤产物与最终报告都能入 `artifacts`
+- [x] `test_reading_status_and_cancel_require_owner`
+  - status / cancel 接口做 owner 隔离
+- [x] `test_reading_status_endpoint_replays_db_result`
+  - 运行态缓存缺失时，仍能从 DB 重建任务结果
 
 #### P4 注意点
 
 - `reading.py` 现在仍是“匿名路由 + 平铺输出文件”的旧模型；P4 要避免出现“文件写盘成功，但 DB 中没有 job/artifact 记录”的双轨状态。
-- `source_file_id` 代表可读正文文件，P4 应优先围绕它把 PDF/MD 与 `bib_entries` 绑定起来，避免后面历史页再倒推。
+- `reading.py` 已切到“运行态内存缓存 + DB 持久记录”的模式；后续不要再回退到只写磁盘、不写 job/artifact 的实现。
+- `source_file_id` 代表可读正文文件，P4 已优先围绕它把 PDF/MD 与 `bib_entries` 绑定起来，避免后面历史页再倒推。
 - `job_bib_entries.role` 目前只需用 `target`；不要提前把 compare/synthesis 的多文献语义混进来。
-- `artifacts.artifact_type` 已有约束：中间步骤用 `reading_step`，最终报告用 `reading_final`，不要自定义新字符串。
-- 若当前 long/quant/qual 的报告格式不同，P4 可先统一“DB 记录形态”和“输出目录规则”，不必一次性统一所有 markdown 模板。
+- `artifacts.artifact_type` 已按约束使用：中间步骤用 `reading_step`，最终报告用 `reading_final`，后续继续沿用。
+- 当前 long/quant/qual 的 markdown 模板仍然不同；P4 先统一了“DB 记录形态”和“输出目录规则”，模板差异可后续再收敛。
+
+### 4.8 P5 规划
+
+> 目标：把现有 `/api/compare/*` 和 `/api/history/synthesis/*` 从“匿名即时生成 + 单独写磁盘文件”改造成“有用户归属的多文献任务入口”，让 compare/synthesis 也正式进入 `jobs` / `job_bib_entries` / `artifacts` 多用户模型。
+
+#### P5 要达成的结果
+
+- `POST /api/compare/analyze`、`POST /api/compare/analyze_long` 接入 `current_user`
+- compare 输入以 `bib_entry_ids` 为主
+  - 每个 id 必须属于当前用户
+  - compare 至少要求 2 篇文献
+  - 为兼容当前前端页面，可暂时保留 `paperData` 作为过渡输入，但服务端落库与权限判断以 `bib_entry_ids` 为准
+- 每次 compare 创建一条 `jobs(job_type='compare')`
+  - `owner_user_id` = 当前用户
+  - `params_json` 记录 step/dimension/mode/subQuestions
+  - `status` 至少覆盖 `pending -> running -> success/failed`
+- 每次 compare 写多条 `job_bib_entries(role='compare_member')`
+  - `sort_order` 保持前端所选顺序
+  - 同一 job 下不允许重复成员
+- compare 输出写入 `artifacts(compare_md)`
+  - 结果文件路径采用 `deep_reading_results/{uid}/{job_id}/compare_*.md`
+  - 返回值中继续保留 `synthesis` 文本，兼容当前 compare 页面展示
+- `POST /api/history/synthesis/` 改造为有鉴权的“保存综述”
+  - 创建 `jobs(job_type='synthesis')`
+  - 对传入的 `bib_entry_ids` 写 `job_bib_entries(role='synthesis_member')`
+  - 综述文件写 `artifacts(synthesis_md)`
+- `GET /api/history/synthesis/` 改为基于 `artifacts` + `jobs` 按当前用户列出
+  - 首版仅返回当前用户
+  - admin 跨用户查询留到 P6
+
+#### P5 工作清单
+
+- [ ] 改造 `backend/routers/compare.py`
+  - compare 接口接入 `Depends(current_user)`
+  - 入参增加 `bib_entry_ids`
+  - 根据 `bib_entry_ids` 校验 owner，并构造 compare 成员列表
+  - 创建 `jobs(type='compare')`
+  - 写入 `job_bib_entries(role='compare_member')`
+  - 生成 compare 结果 markdown，并写入 `artifacts(compare_md)`
+- [ ] 兼容当前 compare 页面
+  - 返回体继续包含 `synthesis`
+  - 短期保留 `paperData` 兼容，但服务端优先信任 `bib_entry_ids`
+- [ ] 改造 `backend/routers/history.py` 中的 synthesis 部分
+  - `POST /api/history/synthesis/` 接入 `current_user`
+  - 保存时创建 `jobs(type='synthesis')`
+  - 写入 `job_bib_entries(role='synthesis_member')`
+  - 产物落 `artifacts(synthesis_md)`
+  - `GET /api/history/synthesis/` 按当前用户读取 DB 记录
+- [ ] 统一 synthesis 路径
+  - 旧逻辑：`deep_reading_results/synthesis/*.md`
+  - 新逻辑：`deep_reading_results/{uid}/{job_id}/synthesis_*.md`
+- [ ] 增加测试文件 `backend/tests/test_compare.py`
+  - 覆盖鉴权、owner 校验、`jobs` 入库、`job_bib_entries(compare_member/synthesis_member)`、artifact 落库
+  - LLM 调用用 fake OpenAI/mock 替代
+
+#### P5 当前测试设计是否需要补充
+
+结论：**需要从 0 补齐**。目前既没有 compare 自动化测试，也没有 synthesis 历史保存/读取的自动化测试，因此以下风险点完全无保护：
+- 未登录或跨用户发起 compare
+- compare 是否正确使用 `bib_entry_ids`
+- `jobs(type='compare'/'synthesis')` 是否正确入库
+- `job_bib_entries(compare_member/synthesis_member)` 是否写入
+- `compare_md/synthesis_md` 是否与磁盘文件一致
+- 当前用户历史列表是否会混入他人 synthesis
+
+#### P5 测试用例规划
+
+- [ ] `test_compare_requires_authentication`
+  - 未登录调用 compare 返回 `401`
+- [ ] `test_compare_rejects_non_owned_bib_entry`
+  - 用户 A 不能拿用户 B 的 `bib_entry_id` 参与 compare
+- [ ] `test_compare_requires_at_least_two_members`
+  - compare 成员少于 2 篇返回 `400`
+- [ ] `test_compare_creates_job_and_compare_members`
+  - `jobs(type='compare')` 正确写入
+  - `job_bib_entries(role='compare_member')` 多条写入成功
+- [ ] `test_compare_writes_compare_md_artifact`
+  - compare 结果文件写入 `artifacts(compare_md)`
+- [ ] `test_compare_keeps_response_text_for_frontend`
+  - 返回体继续包含 `synthesis`
+- [ ] `test_save_synthesis_requires_authentication`
+  - 未登录调用 `/api/history/synthesis/` 返回 `401`
+- [ ] `test_save_synthesis_creates_job_members_and_artifact`
+  - 保存综述时创建 `jobs(type='synthesis')`
+  - 写入 `job_bib_entries(role='synthesis_member')`
+  - 写入 `artifacts(synthesis_md)`
+- [ ] `test_list_synthesis_only_returns_current_user_records`
+  - A 看不到 B 的 synthesis 历史
+- [ ] `test_synthesis_paths_use_uid_jobid_layout`
+  - 综述产物路径采用 `deep_reading_results/{uid}/{job_id}/`
+
+#### P5 注意点
+
+- compare 目前前端仍传 `paperData`；P5 后端可兼容旧载荷，但持久化与权限判断必须以 `bib_entry_ids` 为准。
+- `job_bib_entries.role` 在 P5 需要新增使用 `compare_member` 和 `synthesis_member`，不要与 P4 的 `target` 语义混用。
+- `compare` 与 `synthesis` 都会产出 markdown，但 artifact_type 必须区分为 `compare_md` 与 `synthesis_md`。
+- `/api/history/` 总列表和 `/api/download/*` 的细粒度权限校验仍留给 P6；P5 先把 synthesis 子路由改成 DB 驱动并只返回当前用户。
 
 ## 5. 已知问题与待办
 
