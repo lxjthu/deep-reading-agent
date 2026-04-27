@@ -1,6 +1,6 @@
 # 多用户系统 实施进度
 
-> **更新时间**：2026-04-27（P5 本地完成）  
+> **更新时间**：2026-04-27（P6 本地完成）  
 > **当前分支**：`online`  
 > **关联文档**：[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)、[MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
 
@@ -17,7 +17,7 @@
 | P3 — `/api/filter/*` + `bib_entries` 入库 | ✅ 本地完成 | 已实现并本地验证：筛选鉴权、`jobs` 入库、`bib_entries` 去重入库、`bib_filter_links` 写入、`filter_excel` 产物落 `artifacts` |
 | P4 — `/api/reading/*` + `jobs/job_bib_entries/artifacts` | ✅ 本地完成 | 已实现并本地验证：精读鉴权、`jobs` 入库、`job_bib_entries(target)`、`artifacts(reading_final/step)`、`reading_status` 流转 |
 | P5 — `/api/compare/*`、`synthesis` 改造 | ✅ 本地完成 | 已实现并本地验证：compare 鉴权、`jobs(compare)`、`job_bib_entries(compare_member)`、`artifacts(compare_md)`、synthesis 保存/历史按用户隔离 |
-| P6 — `/api/history/*`、`download/*` 加权限校验 | ⏳ | |
+| P6 — `/api/history/*`、`download/*` 加权限校验 | ✅ 本地完成 | 已实现并本地验证：history 列表/预览/删除按 owner 隔离，download 按 artifact owner 校验，admin 支持跨用户查看指定 owner 历史与下载 |
 | P7 — 邀请码 + VIP 升降级 + APScheduler 24h 清理 | ⏳ | |
 | P8 — 历史无主文件迁移到 admin 名下 | ⏳ | |
 | P9 — 前端 react-router + 登录/注册页 | ⏳ | |
@@ -722,92 +722,185 @@ OK
 - `compare` 与 `synthesis` 都会产出 markdown，但 `artifact_type` 已分别固定为 `compare_md` 与 `synthesis_md`。
 - `/api/history/` 总列表和 `/api/download/*` 的细粒度权限校验仍留给 P6；P5 先把 synthesis 子路由切成 DB 驱动并限制为“仅当前用户”。
 
-### 4.9 P6 规划
+### 4.9 P6 已交付
 
-> 目标：把现有 `/api/history/*` 和 `/api/download/*` 从“匿名按磁盘扫目录/按路径取文件”改造成“基于 `jobs + artifacts` 的用户隔离历史入口”，补齐列表、预览、删除、下载四类权限校验。
+> 目标已达成：现有 `/api/history/*` 和 `/api/download/*` 已从“匿名按磁盘扫目录/按路径取文件”改造成“基于 `jobs + artifacts` 的用户隔离历史入口”，列表、预览、删除、下载四类权限校验已补齐。
 
-#### P6 要达成的结果
+#### P6 已达成的结果
 
-- `GET /api/history/` 接入 `current_user`
-  - 仅返回当前用户自己的历史产物
+- `GET /api/history/` 已接入 `current_user`
+  - 默认仅返回当前用户自己的历史产物
   - 数据源改为 `artifacts + jobs`，不再直接扫全局目录
-  - 需要按前端当前结构继续返回 `reading / filter / all`
-- `GET /api/history/{filename}/preview` 接入 `current_user`
-  - 只能预览当前用户自己的 artifact
-  - markdown 继续渲染 HTML，其它类型继续给下载提示页
-  - 下载链接仍保持 `/api/download/{filename}` 兼容现有前端
-- `DELETE /api/history/{filename}` 接入 `current_user`
+  - 继续按前端当前结构返回 `reading / filter / all`
+  - admin 已支持通过 `?owner_user_id=` 查看指定用户历史
+- `GET /api/history/{filename}/preview` 已接入 `current_user`
+  - 仅允许预览当前用户自己的 artifact
+  - markdown 继续渲染 HTML，其它类型继续返回下载提示页
+  - 下载链接仍保持 `/api/download/{filename}`，兼容现有前端
+- `DELETE /api/history/{filename}` 已接入 `current_user`
   - 仅允许删除当前用户自己的 artifact
   - 删除物理文件后同步删除 `artifacts` 记录
-  - 若该 job 已无任何 artifact，可保留 job 本身，后续历史页按 artifact 驱动自然不可见
-- `GET /api/download/{file_path}` 接入 `current_user`
-  - 常规用户仅可下载自己的 artifact
-  - admin 允许跨用户下载
-  - 继续兼容当前前端传 `filename` 或相对 `storage_path`
-- 为前端兼容保留现有 URL 形状
+  - 若 job 已无 artifact，当前阶段保留 job 本身，历史页按 artifact 驱动自然不可见
+- `GET /api/download/{file_path}` 已接入 `current_user`
+  - normal/vip 仅可下载自己的 artifact
+  - admin 可跨用户下载 artifact
+  - 兼容当前前端传 `filename` 或相对 `storage_path`
+- 现有前端路径契约保持不变
   - `frontend/src/App.tsx` 和现有 compare HTML 仍在传 `filename`
-  - 因此服务端需要支持“先按 `storage_path` 精确匹配，再按 `filename` 在当前用户范围内查 artifact”
+  - 后端已支持“先按 `storage_path` 精确匹配，再按 `filename` 在可见范围内回退匹配”
 
 #### P6 工作清单
 
-- [ ] 改造 `backend/routers/history.py`
+- [x] 改造 `backend/routers/history.py`
   - `GET /api/history/` 接入 `Depends(current_user)`
   - 历史列表改为从 `artifacts + jobs` 查询，而不是 `_list_files()` 扫目录
   - `GET /{filename}/preview` 做 owner 校验
   - `DELETE /{filename}` 做 owner 校验，并同步删除对应 `artifacts` 记录
-- [ ] 改造 `backend/routers/download.py`
+- [x] 改造 `backend/routers/download.py`
   - 接入 `Depends(current_user)`
   - 先按传入值匹配 `Artifact.storage_path`
   - 若不是相对路径，再回退到按 `Artifact.filename` 匹配当前用户可见记录
   - admin 允许跨用户访问；normal/vip 仅允许访问自己的 artifact
-- [ ] 统一历史数据来源
-  - `reading` 分类：`reading_step / reading_final`
+- [x] 统一历史数据来源
+  - `reading` 分类：`reading_step / reading_final / compare_md`
   - `filter` 分类：`filter_excel`
-  - `synthesis` 已在 P5 独立改造，P6 不回退其 DB 驱动模式
-- [ ] 保持前端兼容
+  - `synthesis` 继续保持 P5 的独立 DB 驱动子路由
+- [x] 保持前端兼容
   - 不修改现有前端请求路径
   - 后端继续返回 `filename / path / download_path / type / modified`
-- [ ] 增加测试文件 `backend/tests/test_history.py`
+- [x] 增加测试文件 `backend/tests/test_history.py`
   - 覆盖鉴权、owner 校验、admin 例外、列表隔离、预览/下载/删除权限
 
-#### P6 当前测试设计是否需要补充
+#### P6 验收
 
-结论：**需要单独新增一组 history/download 测试**。目前自动化测试覆盖了 upload/filter/reading/compare/synthesis 的 owner 隔离，但还没有锁住以下高风险路径：
-- 未登录直接调 `/api/history/`
-- 用户 A 预览或删除用户 B 的 artifact
-- 用户 A 直接拼 `/api/download/{filename}` 下载用户 B 的文件
-- 历史列表是否会混入他人 `reading_final` / `filter_excel`
-- admin 是否能按设计例外访问跨用户 artifact
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_history -v
+Ran 11 tests in 22.xxs
+OK
 
-#### P6 测试用例规划
+$ venv/Scripts/python -m unittest backend.tests.test_auth backend.tests.test_upload backend.tests.test_filter backend.tests.test_reading backend.tests.test_compare backend.tests.test_history -v
+Ran 52 tests in 101.xxs
+OK
+```
 
-- [ ] `test_history_list_requires_authentication`
+#### P6 已落地测试
+
+- [x] `test_history_list_requires_authentication`
   - 未登录调用 `/api/history/` 返回 `401`
-- [ ] `test_history_list_only_returns_current_user_artifacts`
+- [x] `test_history_list_only_returns_current_user_artifacts`
   - A 的历史列表中不出现 B 的 `reading/filter` 产物
-- [ ] `test_history_preview_requires_owner`
+- [x] `test_admin_history_list_can_target_owner_user_id`
+  - admin 可通过 `owner_user_id` 查看指定用户历史
+- [x] `test_history_preview_requires_owner`
   - 用户 A 不能预览用户 B 的 markdown artifact
-- [ ] `test_history_delete_requires_owner`
+- [x] `test_history_delete_requires_owner`
   - 用户 A 不能删除用户 B 的 artifact
-- [ ] `test_history_delete_removes_artifact_record_and_file`
+- [x] `test_history_delete_removes_artifact_record_and_file`
   - 删除自己的历史文件时，物理文件与 `artifacts` 记录同时消失
-- [ ] `test_download_requires_authentication`
+- [x] `test_download_requires_authentication`
   - 未登录调用 `/api/download/*` 返回 `401`
-- [ ] `test_download_rejects_non_owned_artifact`
+- [x] `test_download_rejects_non_owned_artifact`
   - 用户 A 不能下载用户 B 的 artifact
-- [ ] `test_download_accepts_storage_path_for_owner`
+- [x] `test_download_accepts_storage_path_for_owner`
   - 当前用户可通过 `storage_path` 下载自己的 artifact
-- [ ] `test_download_accepts_filename_for_owner`
+- [x] `test_download_accepts_filename_for_owner`
   - 当前用户可继续通过 `filename` 下载自己的 artifact，兼容旧前端
-- [ ] `test_admin_can_download_other_users_artifact`
+- [x] `test_admin_can_download_other_users_artifact`
   - admin 可以下载其他用户 artifact
 
 #### P6 注意点
 
 - 前端当前并未统一传 `storage_path`，仍大量使用 `filename`；P6 后端必须兼容两种输入，避免先改后端把现有页面打坏。
 - `history.py` 和 `download.py` 在 P6 之后应以 `artifacts` 为唯一可信来源，不再把“磁盘里恰好有文件”视为可直接访问的依据。
-- `DELETE /api/history/{filename}` 的语义是“删除当前用户的一条历史产物”，不是“按文件名全局删除所有同名文件”；实现时必须限定在用户可见范围内匹配。
-- `synthesis` 子路由在 P5 已切到 DB 驱动；P6 只是在总历史和下载链路上把剩余匿名入口补齐，不要回退 P5 的实现。
+- `DELETE /api/history/{filename}` 的语义是“删除当前用户的一条历史产物”，不是“按文件名全局删除所有同名文件”；当前实现按用户可见范围内“最新匹配的一条 artifact”处理，后续若前端改传 `storage_path`，可进一步消除同名歧义。
+- `synthesis` 子路由在 P5 已切到 DB 驱动；P6 只是在总历史和下载链路上把剩余匿名入口补齐，不回退 P5 的实现。
+
+### 4.10 P7 规划
+
+> 目标：把“邀请码、VIP 升降级、24h 自动清理”从当前只有零散字段/注册校验的半成品状态，补成可由管理员操作、可自动执行、可被测试锁住的后端闭环。
+
+#### P7 要达成的结果
+
+- 新增 `backend/routers/admin.py`
+  - `GET /api/admin/users`：管理员查看用户列表
+  - `PATCH /api/admin/users/{id}`：管理员修改用户角色、重置密码、停用/启用
+  - `GET /api/admin/invite_codes`：管理员查看邀请码列表
+  - `POST /api/admin/invite_codes`：管理员创建邀请码
+  - `DELETE /api/admin/invite_codes/{id}`：管理员撤销邀请码
+- 管理员调整用户角色时，服务端同步处理该用户现有数据的 `expires_at`
+  - `normal -> vip/admin`：`files / bib_entries / jobs / artifacts / upload_batches` 的 `expires_at` 批量置空
+  - `vip/admin -> normal`：以上数据按“当前时间 + 24h”批量重算
+  - `users.vip_expires_at` 本阶段继续仅作预留字段，不启用到期逻辑
+- 新增 `backend/cleanup.py`
+  - 提供 `cleanup_expired()` 入口
+  - 删除已过期的 `artifacts / jobs / bib_entries / files / upload_batches`
+  - 同步删除物理文件与空目录
+  - 提供 `CLEANUP_DRY_RUN` 选项，dry-run 只记录日志不删除
+  - 写清理日志到 `db/cleanup.log`
+- `main.py` 在 `lifespan` 中挂载 `APScheduler`
+  - 按 `CLEANUP_INTERVAL_MINUTES` 启动定时任务
+  - 应用关闭时正确停止 scheduler
+
+#### P7 工作清单
+
+- [ ] 新增 `backend/routers/admin.py`
+  - 使用 `Depends(require_admin)`
+  - 实现用户列表、角色修改、密码重置、停用/启用
+  - 实现邀请码列表、创建、撤销
+- [ ] 抽出 `expires_at` 批量重算逻辑
+  - 供 admin 升降级和 cleanup 共用
+  - 避免每个路由各自散落实现
+- [ ] 新增 `backend/cleanup.py`
+  - 扫描并清理过期 DB 记录
+  - 级联删除对应物理文件
+  - 清理空目录与日志记录
+  - 支持 dry-run
+- [ ] 改造 `backend/main.py`
+  - include `admin` router
+  - 在 `lifespan` 中启动/关闭 scheduler
+- [ ] 增加测试
+  - 新增 `backend/tests/test_admin.py`
+  - 新增 `backend/tests/test_cleanup.py`
+
+#### P7 当前测试设计是否需要补充
+
+结论：**需要新增两组测试**。现在已有的自动化测试只覆盖“注册时邀请码有效/无效”和“normal/vip/admin 的 `expires_at` 差异”，但还没有覆盖以下关键风险点：
+- 非 admin 调用 admin 路由是否会被拒绝
+- admin 改角色后，历史 `expires_at` 是否真的批量更新
+- admin 重置密码/停用用户后，认证链路是否受影响
+- 邀请码创建/撤销/次数限制是否正确
+- cleanup 在 dry-run 与真实删除两种模式下是否行为正确
+- cleanup 是否会误删 vip/admin 数据或漏删物理文件
+
+#### P7 测试用例规划
+
+- [ ] `test_admin_routes_require_admin_role`
+  - 普通用户访问 `/api/admin/*` 返回 `403`
+- [ ] `test_admin_can_list_users_and_invite_codes`
+  - admin 可查看用户与邀请码列表
+- [ ] `test_admin_can_create_and_revoke_invite_code`
+  - 创建邀请码成功，撤销后不可再用于注册
+- [ ] `test_admin_role_upgrade_clears_existing_expires_at`
+  - normal 用户升级为 vip/admin 后，现有业务数据 `expires_at` 全部清空
+- [ ] `test_admin_role_downgrade_sets_expires_at_for_existing_data`
+  - vip/admin 降级为 normal 后，现有业务数据统一获得 24h 过期时间
+- [ ] `test_admin_can_reset_password_and_toggle_active`
+  - 重置密码后旧密码失效；停用后登录/鉴权失败；重新启用后恢复
+- [ ] `test_cleanup_dry_run_keeps_db_and_files`
+  - dry-run 只记日志，不删除 DB 记录和物理文件
+- [ ] `test_cleanup_removes_expired_normal_user_data`
+  - 过期 normal 数据与对应物理文件都被删除
+- [ ] `test_cleanup_keeps_non_expired_and_vip_admin_data`
+  - 未过期数据与 vip/admin 数据保留
+- [ ] `test_cleanup_removes_empty_user_directories`
+  - 清理完成后空的 `_uploads/{uid}` 和 `deep_reading_results/{uid}` 被移除
+
+#### P7 注意点
+
+- 本阶段先做后端闭环，不实现前端管理员后台页面；前端接入放到 P12。
+- 角色变更引起的 `expires_at` 重算属于高风险操作，必须统一走一个 helper，避免只改到某几张表。
+- cleanup 需要同时处理 DB 和磁盘，顺序上必须保证“即便部分文件缺失，也不会因为 `FileNotFoundError` 中断整轮清理”。
+- `CLEANUP_DRY_RUN` 在本地测试和服务器首轮上线都很重要；P7 应把它当正式能力而不是临时调试开关。
 
 ## 5. 已知问题与待办
 

@@ -6,6 +6,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 # Load .env from project root (parent of backend/)
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
@@ -18,7 +19,8 @@ from pydantic import BaseModel
 import uvicorn
 
 # Routers
-from routers import auth, upload, filter, reading, prompts, download, history, compare, deploy
+from cleanup import cleanup_expired, get_cleanup_interval_minutes
+from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy
 
 # Create upload directory
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
@@ -31,7 +33,18 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     print("🚀 Deep Reading Agent API starting...")
+    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler.add_job(
+        cleanup_expired,
+        "interval",
+        minutes=get_cleanup_interval_minutes(),
+        id="cleanup-expired-data",
+        replace_existing=True,
+    )
+    scheduler.start()
+    app.state.cleanup_scheduler = scheduler
     yield
+    scheduler.shutdown(wait=False)
     print("👋 Deep Reading Agent API shutting down...")
 
 
@@ -53,6 +66,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
 app.include_router(filter.router, prefix="/api/filter", tags=["Filter"])
 app.include_router(reading.router, prefix="/api/reading", tags=["Reading"])
