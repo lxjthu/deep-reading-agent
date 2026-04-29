@@ -309,7 +309,7 @@ export default function LibraryTab() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="w-full space-y-4">
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -402,7 +402,7 @@ export default function LibraryTab() {
         {listError && <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{listError}</div>}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
+      <div className="grid gap-4 2xl:grid-cols-[minmax(380px,0.95fr)_minmax(0,1.05fr)]">
         <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
             <div>
@@ -411,7 +411,7 @@ export default function LibraryTab() {
             </div>
           </div>
 
-          <div className="max-h-[72vh] overflow-y-auto">
+          <div className="max-h-[70vh] overflow-y-auto 2xl:max-h-[74vh]">
             {entries.length === 0 && !listLoading ? (
               <div className="px-5 py-12 text-center text-sm text-gray-400">当前筛选条件下没有文献记录。</div>
             ) : (
@@ -484,7 +484,7 @@ export default function LibraryTab() {
             )}
           </div>
 
-          <div className="max-h-[72vh] overflow-y-auto px-5 py-4">
+          <div className="max-h-[70vh] overflow-y-auto px-5 py-4 2xl:max-h-[74vh]">
             {detailLoading ? (
               <div className="py-10 text-sm text-gray-400">详情加载中...</div>
             ) : detailError ? (

@@ -9,10 +9,10 @@ import { useAuthStore } from './store/auth'
 const TABS = [
   { id: 'filter', label: '文献筛选', icon: '□' },
   { id: 'long', label: '长文本精读', icon: '➤' },
-  { id: 'quant', label: '七步精读', icon: '△' },
-  { id: 'qual', label: '四步精读', icon: '◉' },
   { id: 'compare-long', label: '长文本对比', icon: '⇄' },
+  { id: 'quant', label: '七步精读', icon: '△' },
   { id: 'compare-7step', label: '七步对比', icon: '⇄' },
+  { id: 'qual', label: '四步精读', icon: '◉' },
   { id: 'compare-4step', label: '四步对比', icon: '⇄' },
   { id: 'library', label: '我的文献库', icon: '📚' },
   { id: 'prompts', label: '提示词管理', icon: '⚙' },
@@ -105,20 +105,24 @@ function App() {
   const isCompareTab =
     activeTab === 'compare-long' || activeTab === 'compare-7step' || activeTab === 'compare-4step'
 
+  const shellInnerClass = isCompareTab
+    ? 'flex h-full w-full min-h-0 flex-1'
+    : 'mx-auto min-w-0 w-full max-w-[1800px] flex-1 px-3 py-4 sm:px-4 sm:py-5 lg:px-6 lg:py-6 xl:px-8'
+
   return (
-    <div className={`${isCompareTab ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-white text-gray-900 flex flex-col`}>
+    <div className={`${isCompareTab ? 'h-screen overflow-hidden' : 'min-h-screen'} flex flex-col bg-white text-gray-900`}>
       {/* Header */}
       <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">❤️‍🔥</span>
+        <div className="mx-auto flex w-full max-w-[1800px] items-start justify-between gap-3 px-3 py-3 sm:px-4 sm:py-4 lg:px-6 xl:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="shrink-0 text-2xl">❤️‍🔥</span>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">Deep Reading Agent</h1>
-              <p className="text-sm text-gray-500">学术论文深度精读系统</p>
+              <h1 className="text-lg font-bold text-gray-900 sm:text-xl">Deep Reading Agent</h1>
+              <p className="text-xs text-gray-500 sm:text-sm">学术论文深度精读系统</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="hidden rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700 sm:inline-flex">
               DeepSeek ✓
             </span>
             <div className="relative">
@@ -191,8 +195,8 @@ function App() {
 
       {showKeyInput && (
         <div className="border-b border-emerald-100 bg-emerald-50/70">
-          <div className="mx-auto max-w-7xl px-4 py-4">
-            <div className="max-w-md rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
+          <div className="mx-auto w-full max-w-[1800px] px-3 py-3 sm:px-4 sm:py-4 lg:px-6 xl:px-8">
+            <div className="max-w-xl rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-700 mb-2">DeepSeek API Key</h3>
               <input
                 type="password"
@@ -232,7 +236,7 @@ function App() {
 
       {user?.warning_msg && (
         <div className="border-b border-red-200 bg-red-50">
-          <div className="mx-auto max-w-7xl px-4 py-3 text-sm text-red-700">
+          <div className="mx-auto w-full max-w-[1800px] px-3 py-3 text-sm text-red-700 sm:px-4 lg:px-6 xl:px-8">
             <span className="font-semibold">⚠ 试用提醒：</span>
             <span>{user.warning_msg}</span>
           </div>
@@ -241,13 +245,13 @@ function App() {
 
       {/* Tab Navigation */}
       <nav className="border-b border-gray-200 bg-white sticky top-0 z-10">
-        <div className="mx-auto max-w-7xl px-4">
-          <div className="flex gap-1 overflow-x-auto">
+        <div className="mx-auto w-full max-w-[1800px] px-2 sm:px-3 lg:px-6 xl:px-8">
+          <div className="no-scrollbar flex gap-1 overflow-x-auto py-1">
             {TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
-                className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                className={`whitespace-nowrap rounded-t-xl px-3 py-3 text-sm font-medium border-b-2 transition-colors sm:px-4 ${
                   activeTab === tab.id
                     ? 'border-emerald-500 text-emerald-700'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -262,17 +266,19 @@ function App() {
       </nav>
 
       {/* Main Content */}
-      <main className={isCompareTab ? 'flex flex-1 min-h-0 overflow-hidden' : 'mx-auto max-w-7xl flex-1 px-4 py-6'}>
-        {activeTab === 'filter' && <FilterTab apiKey={apiKey} />}
-        {activeTab === 'long' && <LongTab apiKey={apiKey} />}
-        {activeTab === 'quant' && <QuantTab apiKey={apiKey} />}
-        {activeTab === 'qual' && <QualTab apiKey={apiKey} />}
-        {activeTab === 'compare-long' && <CompareTab title="长文本精读对比分析" src="/compare_long.html" />}
-        {activeTab === 'compare-7step' && <CompareTab title="七步法对比分析" src="/compare_7step.html" />}
-        {activeTab === 'compare-4step' && <CompareTab title="四步法对比分析" src="/compare_4step.html" />}
-        {activeTab === 'library' && <LibraryTab />}
-        {activeTab === 'prompts' && <PromptsTab />}
-        {activeTab === 'history' && <HistoryTab />}
+      <main className={isCompareTab ? 'flex flex-1 min-h-0 overflow-hidden' : 'flex flex-1 min-h-0'}>
+        <div className={shellInnerClass}>
+          {activeTab === 'filter' && <FilterTab apiKey={apiKey} />}
+          {activeTab === 'long' && <LongTab apiKey={apiKey} />}
+          {activeTab === 'quant' && <QuantTab apiKey={apiKey} />}
+          {activeTab === 'qual' && <QualTab apiKey={apiKey} />}
+          {activeTab === 'compare-long' && <CompareTab title="长文本精读对比分析" src="/compare_long.html" />}
+          {activeTab === 'compare-7step' && <CompareTab title="七步法对比分析" src="/compare_7step.html" />}
+          {activeTab === 'compare-4step' && <CompareTab title="四步法对比分析" src="/compare_4step.html" />}
+          {activeTab === 'library' && <LibraryTab />}
+          {activeTab === 'prompts' && <PromptsTab />}
+          {activeTab === 'history' && <HistoryTab />}
+        </div>
       </main>
     </div>
   )
@@ -586,7 +592,7 @@ function FilterTab({ apiKey }: { apiKey: string }) {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:gap-6">
       {/* Left Sidebar */}
       <div className="space-y-4">
         {/* Upload */}
@@ -693,7 +699,7 @@ function FilterTab({ apiKey }: { apiKey: string }) {
       </div>
 
       {/* Right Content */}
-      <div className="lg:col-span-2 space-y-4">
+      <div className="space-y-4 min-w-0">
         {/* Progress */}
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
@@ -867,7 +873,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
   const addLog = (msg: string) => setLogs(prev => [...prev, msg])
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:gap-6">
       <div className="space-y-4">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">↗ 上传论文</h3>
@@ -912,7 +918,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
         </div>
       </div>
 
-      <div className="lg:col-span-2 space-y-4">
+      <div className="space-y-4 min-w-0">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">■ 处理进度</h3>
           <div className="mb-2 flex items-center justify-between">
@@ -1028,7 +1034,7 @@ function QuantTab({ apiKey }: { apiKey: string }) {
   const addLog = (msg: string) => setLogs(prev => [...prev, msg])
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:gap-6">
       <div className="space-y-4">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">↗ 上传论文</h3>
@@ -1061,10 +1067,11 @@ function QuantTab({ apiKey }: { apiKey: string }) {
           </button>
         </div>
       </div>
-      <div className="lg:col-span-2 space-y-4">
+      <div className="space-y-4 min-w-0">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">△ 七步进度</h3>
-          <div className="flex items-center gap-1 mb-4">
+          <div className="mb-4 overflow-x-auto">
+            <div className="flex min-w-max items-center gap-1">
             {STEPS.map((s, i) => (
               <div key={s.num} className="flex items-center">
                 <div className={`flex flex-col items-center ${i < currentStep ? 'text-emerald-600' : i === currentStep && isRunning ? 'text-emerald-500 animate-pulse' : 'text-gray-300'}`}>
@@ -1076,6 +1083,7 @@ function QuantTab({ apiKey }: { apiKey: string }) {
                 {i < STEPS.length - 1 && <div className={`w-6 h-0.5 mx-1 ${i < currentStep ? 'bg-emerald-400' : 'bg-gray-200'}`} />}
               </div>
             ))}
+            </div>
           </div>
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm text-gray-600">{stage}</span>
@@ -1163,7 +1171,7 @@ function QualTab({ apiKey }: { apiKey: string }) {
   const addLog = (msg: string) => setLogs(prev => [...prev, msg])
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:gap-6">
       <div className="space-y-4">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">↗ 上传论文</h3>
@@ -1196,10 +1204,11 @@ function QualTab({ apiKey }: { apiKey: string }) {
           </button>
         </div>
       </div>
-      <div className="lg:col-span-2 space-y-4">
+      <div className="space-y-4 min-w-0">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">◉ 四步进度</h3>
-          <div className="flex items-center gap-1 mb-4">
+          <div className="mb-4 overflow-x-auto">
+            <div className="flex min-w-max items-center gap-1">
             {STEPS.map((s, i) => (
               <div key={s.num} className="flex items-center">
                 <div className={`flex flex-col items-center ${i < currentStep ? 'text-emerald-600' : i === currentStep && isRunning ? 'text-emerald-500 animate-pulse' : 'text-gray-300'}`}>
@@ -1211,6 +1220,7 @@ function QualTab({ apiKey }: { apiKey: string }) {
                 {i < STEPS.length - 1 && <div className={`w-6 h-0.5 mx-1 ${i < currentStep ? 'bg-emerald-400' : 'bg-gray-200'}`} />}
               </div>
             ))}
+            </div>
           </div>
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm text-gray-600">{stage}</span>
@@ -1443,50 +1453,52 @@ function PromptsTab() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4">
+    <div className="w-full space-y-4">
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
-          <label className="block text-xs font-medium text-gray-600 mb-1.5">类型</label>
-          <select
-            value={promptType}
-            onChange={(e) => {
-              const nextType = e.target.value
-              setPromptType(nextType)
-              const nextCatalogType =
-                catalog.find((item) => item.type === nextType) ||
-                TYPES.find((item) => item.id === nextType)
-              const nextKey =
-                nextCatalogType?.items?.[0]?.key ||
-                nextCatalogType?.steps?.[0]?.key
-              if (nextKey) setCurrentKey(nextKey)
-            }}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-          >
-            {TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1.5">步骤</label>
-          <select
-            value={currentKey}
-            onChange={(e) => setCurrentKey(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-          >
-            {(currentType.items || currentType.steps || []).map((item: any) => (
-              <option key={item.key || item.id} value={item.key || item.id}>
-                {item.title || item.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-end justify-end">
-          <button
-            onClick={() => void refreshAll(promptType, currentKey)}
-            disabled={isLoading}
-            className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 transition-colors"
-          >
-            刷新
-          </button>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-gray-600">类型</span>
+            <select
+              value={promptType}
+              onChange={(e) => {
+                const nextType = e.target.value
+                setPromptType(nextType)
+                const nextCatalogType =
+                  catalog.find((item) => item.type === nextType) ||
+                  TYPES.find((item) => item.id === nextType)
+                const nextKey =
+                  nextCatalogType?.items?.[0]?.key ||
+                  nextCatalogType?.steps?.[0]?.key
+                if (nextKey) setCurrentKey(nextKey)
+              }}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            >
+              {TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-gray-600">步骤</span>
+            <select
+              value={currentKey}
+              onChange={(e) => setCurrentKey(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            >
+              {(currentType.items || currentType.steps || []).map((item: any) => (
+                <option key={item.key || item.id} value={item.key || item.id}>
+                  {item.title || item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-end">
+            <button
+              onClick={() => void refreshAll(promptType, currentKey)}
+              disabled={isLoading}
+              className="w-full rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 transition-colors lg:w-auto"
+            >
+              刷新
+            </button>
+          </div>
         </div>
       </div>
       <div className="rounded-xl border border-gray-200 bg-white p-5">
@@ -1506,7 +1518,7 @@ function PromptsTab() {
         </p>
       </div>
       {message && <div className={`text-sm ${message.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>{message}</div>}
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 2xl:grid-cols-2">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <div className="mb-3 text-sm font-medium text-gray-700">当前生效内容</div>
           <textarea
@@ -1519,7 +1531,7 @@ function PromptsTab() {
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <div className="mb-3 flex items-center justify-between">
             <div className="text-sm font-medium text-gray-700">我的覆盖</div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={saveMyPrompt}
                 disabled={isLoading}
@@ -1547,7 +1559,7 @@ function PromptsTab() {
       </div>
       {user?.role === 'admin' && (
         <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-5">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-sm font-semibold text-violet-800">系统默认提示词</div>
               <div className="mt-1 text-xs text-violet-700">仅管理员可编辑；普通用户未设置覆盖时将使用这里的内容。</div>
@@ -1697,7 +1709,7 @@ function HistoryTab() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6">
+    <div className="flex h-full min-h-0 w-full flex-col">
       <h2 className="text-lg font-semibold text-gray-800 mb-4">📁 历史记录</h2>
       
       {/* Sub tabs */}
@@ -1741,12 +1753,12 @@ function HistoryTab() {
 function CompareTab({ title, src }: { title: string; src: string }) {
   return (
     <div className="flex flex-1 min-h-0 flex-col bg-gray-100">
-      <div className="shrink-0 border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
+      <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-3 shadow-sm sm:px-6 sm:py-4">
         <h3 className="text-base font-semibold text-gray-900">{title}</h3>
         <p className="mt-1 text-sm text-gray-500">当前标签直接进入对应对比页面，内容区域按整个工作区展开。</p>
       </div>
 
-      <div className="flex flex-1 min-h-0 bg-white p-2">
+      <div className="flex flex-1 min-h-0 bg-white p-1 sm:p-2">
         <iframe
           src={src}
           className="block flex-1 min-h-0 w-full rounded-xl border border-gray-200 bg-white"

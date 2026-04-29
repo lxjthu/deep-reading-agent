@@ -1,6 +1,6 @@
 # 多用户系统 实施进度
 
-> **更新时间**：2026-04-27（结构化精读结果入库已本地完成）  
+> **更新时间**：2026-04-29（提示词管理数据库化已本地完成）  
 > **当前分支**：`online`  
 > **关联文档**：[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)、[MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
 
@@ -24,6 +24,7 @@
 | P10 — 前端顶栏 + 24h 警告横幅 | ✅ 本地完成 | 已实现并本地构建验证：用户身份顶栏、role badge、账户菜单、normal 用户 warning banner |
 | P11 — 前端"我的文献库"页面 | ✅ 本地完成 | 已实现并本地验证：`/workspace/library`、搜索/筛选、详情编辑、时间线与 artifact 下载 |
 | P12 — 前端管理员后台 | ✅ 本地完成 | 已实现并本地构建验证：`/admin`、用户角色调整、启停账号、密码重置、邀请码管理 |
+| P12.5 — 提示词管理数据库化 + 用户覆盖 | ✅ 本地完成 | 已实现并本地验证：`prompt_templates`、系统默认 + 用户覆盖、统一 PromptService、提示词中心页面 |
 | P13 — Playwright E2E + 部署验收 | ⏳ | |
 
 ## 2. P0 已交付
@@ -1268,7 +1269,78 @@ vite build 成功，前端产物生成
 - 当前“系统统计”先使用现有 `/api/admin/users` 和 `/api/admin/invite_codes` 的聚合结果展示，不额外引入新的后端统计接口。
 - 密码重置 v1 先使用浏览器 `prompt` 收集新密码，后续若需要更稳妥的交互，再改成弹窗表单。
 
-### 4.16 P13 规划
+### 4.16 P12.5 已交付
+
+> 目标已达成：提示词管理已从“直接读写 `prompts/` 目录文件”的全局共享模式，升级为“数据库中的系统默认提示词 + 用户个人覆盖”模型，并已统一接入筛选、精读、长文本和提示词管理页。
+
+#### P12.5 已达成的结果
+
+- 新增 `prompt_templates` 表与 Alembic 迁移 `004_add_prompt_templates.py`
+  - 支持 `scope='system'` 系统默认提示词
+  - 支持 `scope='user'` 用户个人覆盖
+- 新增 `backend/prompt_registry.py` 与 `backend/prompt_service.py`
+  - 固定管理 `quant / qual / long / filter` 槽位
+  - 统一运行时解析优先级：`用户覆盖 → 系统默认 → 文件兜底 → 代码兜底`
+  - 首次访问或启动时可从现有 `prompts/` 目录幂等补齐系统默认提示词
+- 重写 `/api/prompts/*`
+  - 已登录用户可查看目录与当前生效提示词
+  - 普通用户可保存自己的覆盖并恢复默认
+  - admin 可编辑系统默认提示词
+  - 保留旧 `/api/prompts/?type=&step=` / `PUT /api/prompts/` 兼容入口
+- 运行链路已统一接入 PromptService
+  - `filter` 启动时解析当前用户的筛选提示词
+  - `reading_quant / reading_qual` 启动时解析当前用户对应步骤提示词
+  - `long` 启动时把当前用户的维度提示词注入 `ConversationEngine`
+  - `ConversationEngine` 已支持 prompt overrides，并修正了 `prompts/long` 的路径计算
+- 前端 `PromptsTab` 已升级为提示词中心
+  - 自动加载当前槽位
+  - 展示当前生效来源
+  - 提供“我的覆盖 / 恢复默认”
+  - admin 额外可编辑系统默认提示词
+
+#### P12.5 验收
+
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_prompts -v
+Ran 4 tests in 12.9xxs
+OK
+
+$ venv/Scripts/python -m unittest backend.tests.test_filter -v
+Ran 8 tests in 49.3xxs
+OK
+
+$ venv/Scripts/python -m unittest backend.tests.test_reading -v
+Ran 14 tests in 75.1xxs
+OK
+
+$ cd backend
+$ ../venv/Scripts/python -m alembic upgrade head
+INFO  Running upgrade 003_add_reading_items -> 004_add_prompt_templates, add prompt_templates for prompt center
+
+$ cd frontend
+$ npm run build
+vite build 成功，前端产物生成
+```
+
+#### P12.5 已落地验证
+
+- [x] 后端：缺失系统默认提示词时可从现有文件幂等补齐
+- [x] 后端：未设置个人覆盖时，返回系统默认提示词
+- [x] 后端：设置个人覆盖后，优先返回个人提示词
+- [x] 后端：删除个人覆盖后，恢复返回系统默认提示词
+- [x] 后端：不同用户的个人覆盖互不影响
+- [x] 后端：普通用户不能修改系统默认提示词
+- [x] 后端：admin 可以修改系统默认提示词
+- [x] 后端：`reading_quant / reading_qual / filter / long` 运行时命中统一解析后的提示词
+- [x] 前端：提示词中心通过 `npm run build`
+
+#### P12.5 注意点
+
+- 当前阶段继续保持固定槽位模型，不开放任意自定义 `prompt_type/prompt_key`。
+- 系统默认提示词仍以数据库为主，文件仅作为初始化与兜底来源。
+- 提示词版本历史、变更审计和 diff 展示暂未做，若后续需要可在此基础上继续补。
+
+### 4.17 P13 规划
 
 > 目标：在最终 push / 部署前，补齐从登录到多用户核心链路的 E2E 与手工验收清单，确保 P0-P12 串起来后没有明显断层。
 
