@@ -1,6 +1,6 @@
 # 多用户系统 实施进度
 
-> **更新时间**：2026-04-27（P6 本地完成）  
+> **更新时间**：2026-04-27（结构化精读结果入库已本地完成）  
 > **当前分支**：`online`  
 > **关联文档**：[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)、[MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
 
@@ -9,7 +9,7 @@
 | 阶段 | 状态 | 备注 |
 |---|:-:|---|
 | 需求 & 数据库设计讨论 | ✅ | 三层模型 + `bib_entries` 枢纽方案确定 |
-| `DATABASE_SCHEMA.md` 定稿 | ✅ | 9 张业务表 + 1 张 alembic_version |
+| `DATABASE_SCHEMA.md` 定稿 | ✅ | 10 张业务表 + 1 张 alembic_version |
 | `MULTI_USER_PLAN.md` 定稿 | ✅ | API Key 不入库（保持前端 localStorage） |
 | **P0 — DB schema + Alembic + admin seed** | ✅ | 本地一次性 venv 已跑通，本地代码就绪 |
 | P1 — `/api/auth/*` + JWT 中间件 | ✅ 本地完成 | 已实现并本地验证：注册/登录/me/refresh/logout + 邀请码校验 + `token_version` |
@@ -18,12 +18,12 @@
 | P4 — `/api/reading/*` + `jobs/job_bib_entries/artifacts` | ✅ 本地完成 | 已实现并本地验证：精读鉴权、`jobs` 入库、`job_bib_entries(target)`、`artifacts(reading_final/step)`、`reading_status` 流转 |
 | P5 — `/api/compare/*`、`synthesis` 改造 | ✅ 本地完成 | 已实现并本地验证：compare 鉴权、`jobs(compare)`、`job_bib_entries(compare_member)`、`artifacts(compare_md)`、synthesis 保存/历史按用户隔离 |
 | P6 — `/api/history/*`、`download/*` 加权限校验 | ✅ 本地完成 | 已实现并本地验证：history 列表/预览/删除按 owner 隔离，download 按 artifact owner 校验，admin 支持跨用户查看指定 owner 历史与下载 |
-| P7 — 邀请码 + VIP 升降级 + APScheduler 24h 清理 | ⏳ | |
-| P8 — 历史无主文件迁移到 admin 名下 | ⏳ | |
-| P9 — 前端 react-router + 登录/注册页 | ⏳ | |
-| P10 — 前端顶栏 + 24h 警告横幅 | ⏳ | |
-| P11 — 前端"我的文献库"页面 | ⏳ | |
-| P12 — 前端管理员后台 | ⏳ | |
+| P7 — 邀请码 + VIP 升降级 + APScheduler 24h 清理 | ✅ 本地完成 | 已实现并本地验证：admin 用户/邀请码管理、角色变更批量重算 `expires_at`、`cleanup_expired()` 与 APScheduler 定时清理 |
+| P8 — 历史无主文件迁移到 admin 名下 | ✅ 本地完成 | 已实现并本地验证：`migrate_legacy_data.py` 支持 dry-run，旧 `_uploads/` 与 `deep_reading_results/` 可迁到 admin 名下并落库 |
+| P9 — 前端 react-router 接入 + 登录/注册页 | ✅ 本地完成 | 已实现并本地构建验证：`react-router` 路由入口、登录/注册页、JWT 本地存储、工作台路由守卫、compare iframe 认证桥接 |
+| P10 — 前端顶栏 + 24h 警告横幅 | ✅ 本地完成 | 已实现并本地构建验证：用户身份顶栏、role badge、账户菜单、normal 用户 warning banner |
+| P11 — 前端"我的文献库"页面 | ✅ 本地完成 | 已实现并本地验证：`/workspace/library`、搜索/筛选、详情编辑、时间线与 artifact 下载 |
+| P12 — 前端管理员后台 | ✅ 本地完成 | 已实现并本地构建验证：`/admin`、用户角色调整、启停账号、密码重置、邀请码管理 |
 | P13 — Playwright E2E + 部署验收 | ⏳ | |
 
 ## 2. P0 已交付
@@ -57,7 +57,7 @@ backend/
 .gitignore                      # 加了 /db/（用前导 / 锚定仓库根）
 ```
 
-### 2.2 9 张业务表
+### 2.2 10 张业务表
 
 | 表 | 角色 |
 |---|---|
@@ -70,6 +70,7 @@ backend/
 | `bib_filter_links` | 文献 ↔ 筛选任务 多对多 |
 | `jobs` | 任务（filter/reading_*/compare/synthesis） |
 | `job_bib_entries` | 任务 ↔ 文献 多对多 |
+| `reading_items` | 精读结构化结果（维度/步骤/子问题） |
 | `artifacts` | 任务产物文件 |
 
 ### 2.3 本地验收记录
@@ -512,7 +513,7 @@ OK
 
 ### 4.7 P4 已交付
 
-> 目标已达成：现有 `/api/reading/*` 已从“匿名精读任务 + 平铺输出文件”改造成“有用户归属的精读任务入口”，执行过程中会把任务、目标文献和产物统一沉淀到 `jobs` / `job_bib_entries` / `artifacts`，并同步更新 `bib_entries.reading_status`。
+> 目标已达成：现有 `/api/reading/*` 已从“匿名精读任务 + 平铺输出文件”改造成“有用户归属的精读任务入口”，执行过程中会把任务、目标文献、结构化精读结果和产物统一沉淀到 `jobs` / `job_bib_entries` / `reading_items` / `artifacts`，并同步更新 `bib_entries.reading_status`。
 
 #### P4 已达成的结果
 
@@ -537,6 +538,15 @@ OK
   - 七步精读测试已覆盖 `reading_step + reading_final`
   - 最终报告统一写 `reading_final`
   - `storage_path` 使用 `deep_reading_results/{uid}/{job_id}/...`
+- 精读结构化结果写入 `reading_items`
+  - 长文本按 12 个分析维度 + 自定义问题拆成独立记录
+  - 七步法按“步骤 -> 编号子问题”两层入库
+  - 四步法按“步骤 -> 编号子问题”两层入库
+  - compare / library 后续优先消费 `reading_items`，不再依赖前端下载 Markdown 后硬解析
+- 已新增历史回填脚本 `backend/scripts/backfill_reading_items.py`
+  - 可把旧的 `reading_final` Markdown 解析后补进 `reading_items`
+  - 支持 `--dry-run`
+  - 已有结构化结果的 job 会自动跳过，保持幂等
 - `bib_entries.reading_status` 状态流转生效
   - 启动精读时 `has_pdf -> reading`
   - 完成时 `reading -> read`
@@ -572,6 +582,10 @@ OK
   - 长文本 / 四步报告写 `reading_final`
   - 七步精读支持 `reading_step + reading_final`
   - `filename / storage_path / size_bytes / expires_at` 正确
+- [x] 写入 `reading_items`
+  - 长文本维度与自定义问题拆成结构化记录
+  - 七步法与四步法按“步骤 / 子问题”拆条入库
+  - `item_key / item_label / parent_key / sort_order` 保持稳定，供 compare 直接读取
 - [x] 同步 `bib_entries.reading_status`
   - 有可读文件但未开始时 `has_pdf`
   - 运行中 `reading`
@@ -585,8 +599,43 @@ OK
 
 ```bash
 $ venv/Scripts/python -m unittest backend.tests.test_reading -v
-Ran 10 tests in 19.xxs
+Ran 14 tests in 53.xxs
 OK
+
+$ venv/Scripts/python -m unittest backend.tests.test_backfill_reading_items -v
+Ran 3 tests in 7.xxs
+OK
+
+$ cd backend
+$ ..\venv\Scripts\python -m scripts.backfill_reading_items --dry-run
+{
+  "scanned_jobs": 4,
+  "created_items": 42,
+  "skipped_existing": 0,
+  "skipped_missing_report": 2,
+  "skipped_missing_target": 0,
+  "failed_parse": 0
+}
+
+$ ..\venv\Scripts\python -m scripts.backfill_reading_items
+{
+  "scanned_jobs": 4,
+  "created_items": 42,
+  "skipped_existing": 0,
+  "skipped_missing_report": 2,
+  "skipped_missing_target": 0,
+  "failed_parse": 0
+}
+
+$ ..\venv\Scripts\python -m scripts.backfill_reading_items --dry-run
+{
+  "scanned_jobs": 4,
+  "created_items": 0,
+  "skipped_existing": 2,
+  "skipped_missing_report": 2,
+  "skipped_missing_target": 0,
+  "failed_parse": 0
+}
 
 $ venv/Scripts/python -m unittest backend.tests.test_auth backend.tests.test_upload backend.tests.test_filter -v
 Ran 22 tests in 42.xxs
@@ -611,6 +660,12 @@ OK
   - 同一 `source_file_id` 多次精读时复用已有文献档案
 - [x] `test_quant_writes_step_and_final_artifacts`
   - 七步精读的步骤产物与最终报告都能入 `artifacts`
+- [x] `test_long_writes_structured_reading_items`
+  - 长文本精读结果会按分析维度写入 `reading_items`
+- [x] `test_quant_writes_step_and_subquestion_reading_items`
+  - 七步法会同时写步骤记录和编号子问题记录
+- [x] `test_qual_writes_step_and_subquestion_reading_items`
+  - 四步法会同时写步骤记录和编号子问题记录
 - [x] `test_reading_status_and_cancel_require_owner`
   - status / cancel 接口做 owner 隔离
 - [x] `test_reading_status_endpoint_replays_db_result`
@@ -623,11 +678,11 @@ OK
 - `source_file_id` 代表可读正文文件，P4 已优先围绕它把 PDF/MD 与 `bib_entries` 绑定起来，避免后面历史页再倒推。
 - `job_bib_entries.role` 目前只需用 `target`；不要提前把 compare/synthesis 的多文献语义混进来。
 - `artifacts.artifact_type` 已按约束使用：中间步骤用 `reading_step`，最终报告用 `reading_final`，后续继续沿用。
-- 当前 long/quant/qual 的 markdown 模板仍然不同；P4 先统一了“DB 记录形态”和“输出目录规则”，模板差异可后续再收敛。
+- 当前 long/quant/qual 的 markdown 模板仍然不同；本轮已统一结构化入库形态，但不同模板的子问题切分仍依赖现有标题格式，后续若 prompt 改版需同步检查 `reading_items` 解析规则。
 
 ### 4.8 P5 已交付
 
-> 目标已达成：现有 `/api/compare/*` 和 `/api/history/synthesis/*` 已从“匿名即时生成 + 单独写磁盘文件”改造成“有用户归属的多文献任务入口”，compare/synthesis 现已正式进入 `jobs` / `job_bib_entries` / `artifacts` 多用户模型。
+> 目标已达成：现有 `/api/compare/*` 和 `/api/history/synthesis/*` 已从“匿名即时生成 + 单独写磁盘文件”改造成“有用户归属的多文献任务入口”，compare/synthesis 现已正式进入 `jobs` / `job_bib_entries` / `artifacts` 多用户模型；其中 compare 已开始优先消费 `reading_items` 结构化精读结果。
 
 #### P5 已达成的结果
 
@@ -636,6 +691,7 @@ OK
   - 每个 id 都要求属于当前用户
   - compare 至少要求 2 篇文献
   - 继续兼容当前前端传入的 `paperData`，但服务端成员解析与权限判断优先以 `bib_entry_ids` 为准
+  - 若目标文献已存在 `reading_items`，后端会优先从结构化精读结果拼装 compare 输入
 - 每次 compare 创建一条 `jobs(job_type='compare')`
   - `owner_user_id` = 当前用户
   - `params_json` 写入 step/dimension/mode/subQuestions
@@ -666,6 +722,7 @@ OK
 - [x] 兼容当前 compare 页面
   - 返回体继续包含 `synthesis`
   - 短期保留 `paperData` 兼容，但服务端优先信任 `bib_entry_ids`
+  - 当 `bib_entry_ids` 已可用时，compare 后端优先从 `reading_items` 聚合 `paperData`
 - [x] 改造 `backend/routers/history.py` 中的 synthesis 部分
   - `POST /api/history/synthesis/` 接入 `current_user`
   - 保存时创建 `jobs(type='synthesis')`
@@ -683,7 +740,7 @@ OK
 
 ```bash
 $ venv/Scripts/python -m unittest backend.tests.test_compare -v
-Ran 9 tests in 17.xxs
+Ran 10 tests in 31.xxs
 OK
 
 $ venv/Scripts/python -m unittest backend.tests.test_auth backend.tests.test_upload backend.tests.test_filter backend.tests.test_reading -v
@@ -704,6 +761,8 @@ OK
   - `job_bib_entries(role='compare_member')` 多条写入成功
 - [x] `test_compare_keeps_response_text_for_frontend`
   - 返回体继续包含 `synthesis`
+- [x] `test_compare_can_build_prompt_from_structured_reading_items`
+  - 只传 `bib_entry_ids` 也能从 `reading_items` 组装对比输入
 - [x] `test_save_synthesis_requires_authentication`
   - 未登录调用 `/api/history/synthesis/` 返回 `401`
 - [x] `test_save_synthesis_creates_job_members_and_artifact`
@@ -717,7 +776,7 @@ OK
 
 #### P5 注意点
 
-- compare 前端当前仍会传 `paperData`；后端现已兼容旧载荷，但持久化与权限判断必须继续以 `bib_entry_ids` 为准。
+- compare 前端当前仍会传 `paperData`；后端现已兼容旧载荷，但权限判断必须继续以 `bib_entry_ids` 为准，且在有结构化结果时优先读 `reading_items`。
 - `job_bib_entries.role` 在 P5 已新增使用 `compare_member` 和 `synthesis_member`，后续不要与 P4 的 `target` 语义混用。
 - `compare` 与 `synthesis` 都会产出 markdown，但 `artifact_type` 已分别固定为 `compare_md` 与 `synthesis_md`。
 - `/api/history/` 总列表和 `/api/download/*` 的细粒度权限校验仍留给 P6；P5 先把 synthesis 子路由切成 DB 驱动并限制为“仅当前用户”。
@@ -815,11 +874,11 @@ OK
 - `DELETE /api/history/{filename}` 的语义是“删除当前用户的一条历史产物”，不是“按文件名全局删除所有同名文件”；当前实现按用户可见范围内“最新匹配的一条 artifact”处理，后续若前端改传 `storage_path`，可进一步消除同名歧义。
 - `synthesis` 子路由在 P5 已切到 DB 驱动；P6 只是在总历史和下载链路上把剩余匿名入口补齐，不回退 P5 的实现。
 
-### 4.10 P7 规划
+### 4.10 P7 已交付
 
-> 目标：把“邀请码、VIP 升降级、24h 自动清理”从当前只有零散字段/注册校验的半成品状态，补成可由管理员操作、可自动执行、可被测试锁住的后端闭环。
+> 目标已达成：邀请码、VIP 升降级和 24h 自动清理已从“零散字段 + 注册时半截校验”补成可由管理员操作、可定时执行、可被自动化测试锁住的后端闭环。
 
-#### P7 要达成的结果
+#### P7 已达成的结果
 
 - 新增 `backend/routers/admin.py`
   - `GET /api/admin/users`：管理员查看用户列表
@@ -827,80 +886,424 @@ OK
   - `GET /api/admin/invite_codes`：管理员查看邀请码列表
   - `POST /api/admin/invite_codes`：管理员创建邀请码
   - `DELETE /api/admin/invite_codes/{id}`：管理员撤销邀请码
-- 管理员调整用户角色时，服务端同步处理该用户现有数据的 `expires_at`
+- 管理员调整用户角色时，服务端会同步处理该用户现有数据的 `expires_at`
   - `normal -> vip/admin`：`files / bib_entries / jobs / artifacts / upload_batches` 的 `expires_at` 批量置空
   - `vip/admin -> normal`：以上数据按“当前时间 + 24h”批量重算
-  - `users.vip_expires_at` 本阶段继续仅作预留字段，不启用到期逻辑
+  - `users.vip_expires_at` 继续保持预留字段，本阶段未启用到期降级逻辑
 - 新增 `backend/cleanup.py`
   - 提供 `cleanup_expired()` 入口
   - 删除已过期的 `artifacts / jobs / bib_entries / files / upload_batches`
   - 同步删除物理文件与空目录
-  - 提供 `CLEANUP_DRY_RUN` 选项，dry-run 只记录日志不删除
+  - 支持 `CLEANUP_DRY_RUN`
   - 写清理日志到 `db/cleanup.log`
-- `main.py` 在 `lifespan` 中挂载 `APScheduler`
+- `backend/main.py` 已在 `lifespan` 中挂载 `APScheduler`
   - 按 `CLEANUP_INTERVAL_MINUTES` 启动定时任务
   - 应用关闭时正确停止 scheduler
 
 #### P7 工作清单
 
-- [ ] 新增 `backend/routers/admin.py`
+- [x] 新增 `backend/routers/admin.py`
   - 使用 `Depends(require_admin)`
   - 实现用户列表、角色修改、密码重置、停用/启用
   - 实现邀请码列表、创建、撤销
-- [ ] 抽出 `expires_at` 批量重算逻辑
+- [x] 抽出 `expires_at` 批量重算逻辑
   - 供 admin 升降级和 cleanup 共用
   - 避免每个路由各自散落实现
-- [ ] 新增 `backend/cleanup.py`
+- [x] 新增 `backend/cleanup.py`
   - 扫描并清理过期 DB 记录
   - 级联删除对应物理文件
   - 清理空目录与日志记录
   - 支持 dry-run
-- [ ] 改造 `backend/main.py`
+- [x] 改造 `backend/main.py`
   - include `admin` router
   - 在 `lifespan` 中启动/关闭 scheduler
-- [ ] 增加测试
+- [x] 增加测试
   - 新增 `backend/tests/test_admin.py`
   - 新增 `backend/tests/test_cleanup.py`
 
-#### P7 当前测试设计是否需要补充
+#### P7 验收
 
-结论：**需要新增两组测试**。现在已有的自动化测试只覆盖“注册时邀请码有效/无效”和“normal/vip/admin 的 `expires_at` 差异”，但还没有覆盖以下关键风险点：
-- 非 admin 调用 admin 路由是否会被拒绝
-- admin 改角色后，历史 `expires_at` 是否真的批量更新
-- admin 重置密码/停用用户后，认证链路是否受影响
-- 邀请码创建/撤销/次数限制是否正确
-- cleanup 在 dry-run 与真实删除两种模式下是否行为正确
-- cleanup 是否会误删 vip/admin 数据或漏删物理文件
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_admin backend.tests.test_cleanup -v
+Ran 10 tests in 19.xxs
+OK
 
-#### P7 测试用例规划
+$ venv/Scripts/python -m unittest backend.tests.test_auth backend.tests.test_upload backend.tests.test_filter backend.tests.test_reading backend.tests.test_compare backend.tests.test_history backend.tests.test_admin backend.tests.test_cleanup -v
+Ran 62 tests in 119.xxs
+OK
+```
 
-- [ ] `test_admin_routes_require_admin_role`
+#### P7 已落地测试
+
+- [x] `test_admin_routes_require_admin_role`
   - 普通用户访问 `/api/admin/*` 返回 `403`
-- [ ] `test_admin_can_list_users_and_invite_codes`
+- [x] `test_admin_can_list_users_and_invite_codes`
   - admin 可查看用户与邀请码列表
-- [ ] `test_admin_can_create_and_revoke_invite_code`
+- [x] `test_admin_can_create_and_revoke_invite_code`
   - 创建邀请码成功，撤销后不可再用于注册
-- [ ] `test_admin_role_upgrade_clears_existing_expires_at`
+- [x] `test_admin_role_upgrade_clears_existing_expires_at`
   - normal 用户升级为 vip/admin 后，现有业务数据 `expires_at` 全部清空
-- [ ] `test_admin_role_downgrade_sets_expires_at_for_existing_data`
+- [x] `test_admin_role_downgrade_sets_expires_at_for_existing_data`
   - vip/admin 降级为 normal 后，现有业务数据统一获得 24h 过期时间
-- [ ] `test_admin_can_reset_password_and_toggle_active`
-  - 重置密码后旧密码失效；停用后登录/鉴权失败；重新启用后恢复
-- [ ] `test_cleanup_dry_run_keeps_db_and_files`
+- [x] `test_admin_can_reset_password_and_toggle_active`
+  - 重置密码后旧密码失效；停用后登录失败；重新启用后恢复
+- [x] `test_cleanup_dry_run_keeps_db_and_files`
   - dry-run 只记日志，不删除 DB 记录和物理文件
-- [ ] `test_cleanup_removes_expired_normal_user_data`
+- [x] `test_cleanup_removes_expired_normal_user_data`
   - 过期 normal 数据与对应物理文件都被删除
-- [ ] `test_cleanup_keeps_non_expired_and_vip_admin_data`
+- [x] `test_cleanup_keeps_non_expired_and_vip_admin_data`
   - 未过期数据与 vip/admin 数据保留
-- [ ] `test_cleanup_removes_empty_user_directories`
+- [x] `test_cleanup_removes_empty_user_directories`
   - 清理完成后空的 `_uploads/{uid}` 和 `deep_reading_results/{uid}` 被移除
 
 #### P7 注意点
 
 - 本阶段先做后端闭环，不实现前端管理员后台页面；前端接入放到 P12。
-- 角色变更引起的 `expires_at` 重算属于高风险操作，必须统一走一个 helper，避免只改到某几张表。
-- cleanup 需要同时处理 DB 和磁盘，顺序上必须保证“即便部分文件缺失，也不会因为 `FileNotFoundError` 中断整轮清理”。
-- `CLEANUP_DRY_RUN` 在本地测试和服务器首轮上线都很重要；P7 应把它当正式能力而不是临时调试开关。
+- 角色变更引起的 `expires_at` 重算已统一收口到一个 helper，后续不要在各个路由里分散手写。
+- cleanup 同时处理 DB 和磁盘；实现上已经容忍“物理文件缺失”的情况，避免单个 `FileNotFoundError` 中断整轮清理。
+- `CLEANUP_DRY_RUN` 已作为正式能力保留，既可用于本地测试，也可用于服务器首次上线观察。
+- `cleanup.py` 的结果目录解析已改成运行时读取环境变量，避免测试环境和实际环境共享错误的静态路径缓存。
+
+### 4.11 P8 已交付
+
+> 目标已达成：历史无主文件迁移脚本已补齐，多用户改造前遗留在 `_uploads/` 和 `deep_reading_results/` 下的旧文件现在可以统一归到 admin 名下，并在 DB 中建立最小可用记录。
+
+#### P8 已达成的结果
+
+- 新增 `backend/scripts/migrate_legacy_data.py`
+  - 扫描 `_uploads/` 下不符合新结构的旧文件
+  - 扫描 `deep_reading_results/` 下旧布局产物
+  - admin 不存在时会自动补一条 admin 记录
+- 旧上传文件可迁移到 admin 名下
+  - 物理路径改为 `_uploads/1/{file_id}.{ext}`
+  - 写入 `files` 记录
+  - PDF/Markdown 会尽力补一条 `metadata_completeness='minimal'` 的 `bib_entries`
+- 旧结果文件可迁移到 admin 名下
+  - 物理路径改为 `deep_reading_results/1/{job_id}/{filename}`
+  - 写入 `jobs` 与 `artifacts`
+  - 旧筛选结果映射为 `job_type='filter' + artifact_type='filter_excel'`
+  - 旧综述结果映射为 `job_type='synthesis' + artifact_type='synthesis_md'`
+  - 旧精读目录尽力映射为 `reading_long/reading_quant` 与 `reading_final/reading_step`
+- 支持 dry-run
+  - dry-run 只输出计划，不修改 DB 和磁盘
+
+#### P8 工作清单
+
+- [x] 新增 `backend/scripts/migrate_legacy_data.py`
+  - 提供可直接执行的 CLI 入口
+  - 支持 `--dry-run`
+  - 支持环境变量覆盖上传/结果根目录，便于本地测试
+- [x] 迁移 `_uploads/` 旧文件
+  - 跳过已经是 `_uploads/{uid}/...` 的新结构
+  - 根据扩展名识别 `file_type`
+  - 建立 `files` 记录
+  - 对 `pdf/markdown` 尽力建立 `bib_entries`
+- [x] 迁移 `deep_reading_results/` 旧产物
+  - 兼容 `literature_filter/*.xlsx`
+  - 兼容 `synthesis/*.md`
+  - 兼容 `legacy_name/*.md`
+  - 建立 `jobs` / `artifacts`
+- [x] 增加测试文件 `backend/tests/test_migrate_legacy_data.py`
+  - 覆盖 dry-run、上传迁移、结果迁移、幂等/跳过新结构
+
+#### P8 验收
+
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_migrate_legacy_data -v
+Ran 5 tests in 8.xxs
+OK
+
+$ venv/Scripts/python -m unittest backend.tests.test_auth backend.tests.test_upload backend.tests.test_filter backend.tests.test_reading backend.tests.test_compare backend.tests.test_history backend.tests.test_admin backend.tests.test_cleanup backend.tests.test_migrate_legacy_data -v
+Ran 67 tests in 129.xxs
+OK
+```
+
+#### P8 已落地测试
+
+- [x] `test_migrate_legacy_upload_file_into_admin_storage`
+  - 旧 `_uploads/yaojiaquan.pdf` 迁移到 `_uploads/1/{uuid}.pdf`
+  - `files` 表新增 admin 记录
+- [x] `test_migrate_legacy_results_into_jobs_and_artifacts`
+  - 旧筛选/综述/精读结果迁移到 `deep_reading_results/1/{job_id}/`
+  - `jobs/artifacts` 正确落库
+- [x] `test_migrate_legacy_pdf_creates_minimal_bib_entry`
+  - 历史 PDF 至少建立一条 `metadata_completeness='minimal'` 的 `bib_entries`
+- [x] `test_migrate_legacy_dry_run_keeps_files_and_db_unchanged`
+  - dry-run 不改磁盘，不写 DB
+- [x] `test_migrate_skips_already_structured_paths`
+  - 已在 `_uploads/{uid}` 或 `deep_reading_results/{uid}/{job_id}` 下的文件不重复迁移
+
+#### P8 注意点
+
+- 迁移脚本是“尽力而为修复旧资产”，不是精确复原旧任务的全部业务语义；缺失元数据时优先保证文件可见、可下载、可追踪。
+- 新结构与旧结构已严格区分，避免把已经迁好的多用户数据再次迁移一遍。
+- 迁移脚本支持重复执行；对同一路径重复跑时会优先安全跳过。
+
+### 4.12 P9 已交付
+
+> 目标已达成：当前前端已从“匿名单页 + 本地 tab 切换”升级成“有登录态的路由应用”，用户现在先登录再进入工作台，且现有上传/筛选/精读/历史请求都能自动携带 JWT。
+
+#### P9 已达成的结果
+
+- 前端已引入 `react-router-dom`
+  - `/`：按登录态重定向到 `/workspace` 或 `/login`
+  - `/login`：登录页
+  - `/register`：注册页（含邀请码输入框）
+  - `/workspace`：现有主工作台
+  - `/admin`：先挂上受保护占位页，P12 再补完整后台
+- 前端已引入统一认证状态
+  - 本地保存 `access_token / refresh_token`
+  - 刷新页面后可恢复登录态
+  - 请求自动带 `Authorization: Bearer ...`
+  - access token 过期时自动尝试 refresh
+- 工作台已受路由守卫保护
+  - 未登录访问 `/workspace*` 自动跳 `/login`
+  - 登录成功后跳回工作台
+- 现有主工作台保持可用
+  - 上传、筛选、精读、提示词、历史记录继续复用原 `App.tsx`
+  - 通过全局认证 `fetch` 自动带 JWT
+  - compare iframe 页面也已能读取 `localStorage` token 并带上认证头
+- 兼容旧 tab 链接
+  - 工作台会把当前 tab 同步到 `?tab=...`
+  - 旧入口可逐步过渡到 `/workspace?tab=...`
+
+#### P9 工作清单
+
+- [x] 更新 `frontend/package.json`
+  - 增加 `react-router-dom`
+  - 增加 `zustand`
+  - 增加 `axios`
+- [x] 新增前端认证层
+  - `auth store` 保存 user/token
+  - 全局认证 `fetch` 自动注入 Authorization header
+  - 401 时尝试 refresh，失败则回登录页
+- [x] 新增登录/注册页
+  - 登录表单：用户名、密码
+  - 注册表单：用户名、邮箱、密码、邀请码
+  - 登录/注册成功后写入状态并跳工作台
+- [x] 改造前端入口路由
+  - 根路由按登录态重定向
+  - `/workspace` 包裹工作台
+  - 保留原工作台 tab 逻辑，避免 P9 范围膨胀
+- [x] 兼容 compare HTML
+  - `public/compare_*.html` 里的请求也已带 JWT
+
+#### P9 验收
+
+```bash
+$ cd frontend
+$ npm run build
+vite build 成功，前端产物生成
+```
+
+#### P9 已落地验证
+
+- [x] `npm run build`
+  - 路由、认证 store、类型定义通过编译
+- [x] 路由守卫实现
+  - 未登录访问 `/workspace*` 会跳 `/login`
+- [x] 注册后自动登录实现
+  - 注册成功后会自动登录并进入 `/workspace`
+- [x] 登录态恢复实现
+  - 刷新页面后从 `localStorage` 恢复 token 和 user
+- [x] 工作台认证请求实现
+  - 上传/历史页等请求不再缺少 Authorization
+- [x] compare iframe 认证桥接实现
+  - iframe 内请求可复用当前登录态
+
+#### P9 注意点
+
+- `API Key` 仍保留在浏览器 `localStorage`，P9 不把它迁到服务端。
+- 现有 `App.tsx` 仍然较大；P9 先把它包进路由和认证层，不强行一次性完全拆组件。
+- compare 仍通过 `public/*.html` iframe 承载；这些页面没有 React 上下文，因此已通过 `auth-client.js` 自行读取 token。
+
+### 4.13 P10 已交付
+
+> 目标已达成：工作台顶栏已从“匿名产品头”升级成“带登录态与账户操作的头部”，normal 用户的 24h 数据保留提醒也已固定展示。
+
+#### P10 已达成的结果
+
+- `frontend/src/App.tsx` 顶栏已接入 `auth store`
+  - 显示当前用户名
+  - 显示角色徽章：admin=紫、vip=金、normal=灰
+  - 顶栏用户菜单支持 API Key 管理、切换账号、退出登录
+- normal 用户显示 warning banner
+  - 文案直接使用后端 `/api/auth/me` 返回的 `warning_msg`
+  - vip/admin 不显示
+- compare 全屏布局继续保持可用
+  - `compare` tab 仍使用 `overflow-hidden + min-h-0`
+  - banner 和顶栏没有把 iframe 布局挤坏
+- 为后续 P12 铺路
+  - admin 用户菜单里已增加“管理员后台”入口
+
+#### P10 验收
+
+```bash
+$ cd frontend
+$ npm run build
+vite build 成功，前端产物生成
+```
+
+#### P10 已落地验证
+
+- [x] 顶栏身份展示
+  - 用户名与 role badge 已接入登录态
+- [x] 账户菜单
+  - 已支持 API Key 管理、切换账号、退出登录
+- [x] normal 用户 warning banner
+  - 直接复用后端返回的 `warning_msg`
+- [x] compare 布局兼容
+  - `compare` tab 继续使用全屏 iframe 布局
+- [x] `npm run build`
+  - 顶栏与横幅改动通过构建
+
+#### P10 注意点
+
+- 警告横幅文案继续优先使用后端返回的 `warning_msg`，不要在前端复制一套静态文本。
+- API Key 仍保存在浏览器 `localStorage`；P10 只调整入口位置，不改存储策略。
+
+### 4.14 P11 已交付
+
+> 目标已达成：文献库已从“后端 API 规划”落成“前后端都可用的页面”，用户现在可以围绕 `bib_entries` 浏览文献、补齐元数据、查看任务时间线和下载关联产物。
+
+#### P11 已达成的结果
+
+- 后端文献库 API 已完成并挂载
+  - `GET /api/library/entries`
+  - `GET /api/library/entries/{id}`
+  - `PATCH /api/library/entries/{id}`
+- 前端新增 `frontend/src/LibraryTab.tsx`
+  - 支持 `/workspace/library`
+  - 支持工作台 tab 入口“我的文献库”
+  - 支持标题/DOI/期刊搜索
+  - 支持 `reading_status` 筛选和“只看置顶”
+- 文献详情面板已可编辑
+  - 可修改标题、作者、年份、DOI、期刊
+  - 可修改摘要、关键词、tags、note、pin
+  - 保存后会回写到 `bib_entries`
+- 时间线已可查看与下载
+  - 展示关联的 `filter / reading / compare / synthesis` job
+  - 展示关联 artifact
+  - artifact 下载直接走 `/api/download/{storage_path}`
+- 元数据补全提示已可见
+  - `metadata_completeness != 'full'` 时显示提示条
+
+#### P11 验收
+
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_library -v
+Ran 5 tests in 7.xxs
+OK
+
+$ cd frontend
+$ npm run build
+vite build 成功，前端产物生成
+```
+
+#### P11 已落地验证
+
+- [x] `test_library_list_requires_authentication`
+- [x] `test_library_list_only_returns_current_user_entries`
+- [x] `test_library_detail_includes_timeline_and_artifacts`
+- [x] `test_library_update_allows_editing_metadata_fields`
+- [x] `test_library_update_rejects_non_owner`
+- [x] `/workspace/library` 页面接线完成
+  - 既可直接访问路由，也可从工作台 tab 进入
+- [x] `npm run build`
+  - library 页面、路由和详情编辑逻辑通过构建
+
+#### P11 注意点
+
+- `P11` 不做自动补全元数据的 AI 流程；当前范围仅限“看见缺失字段 + 允许手工补录”。
+- 时间线继续以 `jobs + artifacts + job_bib_entries` 为唯一可信来源，不新增额外状态表。
+
+### 4.15 P12 已交付
+
+> 目标已达成：管理员后台前端已从占位页升级为可操作页面，admin 现在可以直接在浏览器里管理用户与邀请码。
+
+#### P12 已达成的结果
+
+- 新增 `frontend/src/AdminPage.tsx`
+  - `GET /api/admin/users` 驱动用户列表
+  - `GET /api/admin/invite_codes` 驱动邀请码列表
+  - 页面顶部显示用户/角色/邀请码统计汇总
+- 用户管理已可操作
+  - 可调整 `admin / vip / normal`
+  - 可停用/启用账号
+  - 可通过 prompt 触发密码重置
+- 邀请码管理已可操作
+  - 支持自定义 code 或自动生成
+  - 支持 `max_uses`
+  - 支持 `expires_at`
+  - 支持备注与删除
+- `frontend/src/RootApp.tsx` 已将 `/admin` 接到真实后台页面
+- `frontend/src/App.tsx` 的账户菜单已为 admin 增加后台入口
+
+#### P12 验收
+
+```bash
+$ venv/Scripts/python -m unittest backend.tests.test_admin -v
+Ran 6 tests in 11.xxs
+OK
+
+$ cd frontend
+$ npm run build
+vite build 成功，前端产物生成
+```
+
+#### P12 已落地验证
+
+- [x] admin 路由守卫仍有效
+  - 非 admin 访问 `/admin` 继续返回前端 403 页面
+- [x] 用户列表已接上真实 API
+  - 可查看 username / email / role / active 状态
+- [x] 用户角色调整与停用/启用已接上真实 PATCH
+- [x] 密码重置已接上真实 PATCH
+- [x] 邀请码列表 / 创建 / 删除已接上真实 API
+- [x] `npm run build`
+  - 管理员后台页面通过构建
+
+#### P12 注意点
+
+- 当前“系统统计”先使用现有 `/api/admin/users` 和 `/api/admin/invite_codes` 的聚合结果展示，不额外引入新的后端统计接口。
+- 密码重置 v1 先使用浏览器 `prompt` 收集新密码，后续若需要更稳妥的交互，再改成弹窗表单。
+
+### 4.16 P13 规划
+
+> 目标：在最终 push / 部署前，补齐从登录到多用户核心链路的 E2E 与手工验收清单，确保 P0-P12 串起来后没有明显断层。
+
+#### P13 要达成的结果
+
+- 增加 E2E 覆盖主链路
+  - 注册 / 登录
+  - 上传 / 筛选
+  - 精读 / 历史
+  - 文献库查看与编辑
+  - 管理员后台的用户与邀请码管理
+- 补齐手工验收清单
+  - normal/vip/admin 三种角色
+  - compare iframe 认证桥接
+  - 24h warning banner
+  - `/workspace/library` 与 `/admin` 页面可用性
+- 部署前准备
+  - 确认是否有新的 Alembic 迁移需要手动上服务器执行
+  - 确认最终 push / 部署前先征求用户确认
+
+#### P13 测试用例规划
+
+- [ ] E2E：普通用户注册并自动进入工作台
+- [ ] E2E：登录后上传题录并启动筛选
+- [ ] E2E：登录后上传 PDF 并启动精读
+- [ ] E2E：文献库搜索、查看详情并保存 metadata
+- [ ] E2E：admin 登录后台，创建邀请码、修改用户角色
+- [ ] 手工验收：normal 用户 warning banner 与 compare 布局
+- [ ] 手工验收：compare iframe 自动携带 JWT
+- [ ] 手工验收：退出登录后受保护页面跳回 `/login`
+
+#### P13 注意点
+
+- P13 做完前，继续保持“本地开发、自测、文档同步、可本地 commit，但不 push”的节奏。
+- 最终提交、push 或部署前，必须先征求用户确认。
 
 ## 5. 已知问题与待办
 

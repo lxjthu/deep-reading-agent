@@ -20,8 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import AsyncSessionLocal, PROJECT_ROOT, get_db
-from db.models import Artifact, BibEntry, File, Job, JobBibEntry, User
-from db.utils import compute_dedup_key
+from db.models import Artifact, BibEntry, File, Job, JobBibEntry, ReadingItem, User
+from db.utils import compute_dedup_key, title_match_score
 from backend.routers.metadata_extractor import extract_metadata, build_frontmatter
 from upload_storage import lookup_original_name, lookup_path_by_file_id
 
@@ -52,6 +52,39 @@ QUAL_PROMPT_FILES = {
     "第四步：价值与启示": "qual_analysis/L4_Value_Prompt.md",
 }
 
+LONG_DIMENSION_KEYS = {
+    "研究问题": "long.research_question",
+    "理论框架": "long.theory_framework",
+    "识别策略": "long.identification_strategy",
+    "数据来源": "long.data_source",
+    "变量度量": "long.variable_measurement",
+    "识别假设": "long.identification_assumptions",
+    "统计结果": "long.statistical_results",
+    "机制分析": "long.mechanism_analysis",
+    "稳健性检验": "long.robustness_checks",
+    "外部有效性": "long.external_validity",
+    "贡献与局限": "long.contributions_limitations",
+    "写作质量": "long.writing_quality",
+    "自定义问题": "long.custom_question",
+}
+
+QUANT_STEP_KEYS = {
+    "第一步：核心贡献识别": "quant.step1",
+    "第二步：理论框架评估": "quant.step2",
+    "第三步：方法论批判": "quant.step3",
+    "第四步：实证结果解读": "quant.step4",
+    "第五步：局限性分析": "quant.step5",
+    "第六步：实践意义": "quant.step6",
+    "第七步：未来方向": "quant.step7",
+}
+
+QUAL_STEP_KEYS = {
+    "第一步：背景与问题": "qual.step1",
+    "第二步：理论视角": "qual.step2",
+    "第三步：逻辑与证据": "qual.step3",
+    "第四步：价值与启示": "qual.step4",
+}
+
 def load_prompt_file(relative_path: str) -> str:
     """Load a prompt file from prompts directory and append no-greeting instruction"""
     path = os.path.join(PROMPTS_DIR, relative_path)
@@ -64,6 +97,106 @@ def load_prompt_file(relative_path: str) -> str:
         return content
     # Fallback: return a simple prompt
     return "请分析这个维度。直接输出分析内容，不要客套开场白。"
+
+
+def slugify_key_fragment(value: str) -> str:
+    text = re.sub(r"\s+", "_", value.strip().lower())
+    text = re.sub(r"[^a-z0-9_\u4e00-\u9fff]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text or "item"
+
+
+def parse_markdown_numbered_sections(content: str, level: int) -> list[dict]:
+    if not content.strip():
+        return []
+
+    if level == 3:
+        pattern = re.compile(r"^###\s*\*\*(\d+)\.\s*(.+?)\*\*\s*$", re.MULTILINE)
+    else:
+        pattern = re.compile(r"^##\s*(\d+)\.\s*(.+?)\s*$", re.MULTILINE)
+
+    matches = list(pattern.finditer(content))
+    if not matches:
+        return []
+
+    sections: list[dict] = []
+    for index, match in enumerate(matches):
+        section_start = match.end()
+        section_end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        body = content[section_start:section_end].strip()
+        title = match.group(2).strip()
+        number = int(match.group(1))
+        sections.append(
+            {
+                "number": number,
+                "title": title,
+                "content": body,
+            }
+        )
+    return sections
+
+
+def build_long_reading_items(results: dict[str, str], custom_question: Optional[str] = None) -> list[dict]:
+    items: list[dict] = []
+    sort_order = 0
+    for label, content in results.items():
+        section_type = "custom" if label == "自定义问题" else "dimension"
+        item_key = LONG_DIMENSION_KEYS.get(label)
+        if item_key is None:
+            item_key = f"long.{slugify_key_fragment(label)}"
+        item_label = label if label != "自定义问题" or not custom_question else f"自定义问题：{custom_question.strip()}"
+        items.append(
+            {
+                "mode": "long",
+                "section_type": section_type,
+                "parent_key": None,
+                "item_key": item_key,
+                "item_label": item_label,
+                "sort_order": sort_order,
+                "content": str(content).strip(),
+            }
+        )
+        sort_order += 1
+    return items
+
+
+def build_step_reading_items(results: dict[str, str], *, mode: str) -> list[dict]:
+    items: list[dict] = []
+    step_keys = QUANT_STEP_KEYS if mode == "quant" else QUAL_STEP_KEYS
+    heading_level = 3 if mode == "quant" else 2
+
+    for step_index, (step_label, content) in enumerate(results.items(), start=1):
+        step_key = step_keys.get(step_label, f"{mode}.step{step_index}")
+        text = str(content).strip()
+        items.append(
+            {
+                "mode": mode,
+                "section_type": "step",
+                "parent_key": None,
+                "item_key": step_key,
+                "item_label": step_label,
+                "sort_order": step_index * 100,
+                "content": text,
+            }
+        )
+
+        for section_index, section in enumerate(parse_markdown_numbered_sections(text, heading_level), start=1):
+            number = section["number"]
+            title = section["title"]
+            section_key = f"{step_key}.q{number}"
+            items.append(
+                {
+                    "mode": mode,
+                    "section_type": "subquestion",
+                    "parent_key": step_key,
+                    "item_key": section_key,
+                    "item_label": f"{number}. {title}",
+                    "sort_order": step_index * 100 + section_index,
+                    "content": section["content"] or text,
+                }
+            )
+
+    return items
 
 
 # In-memory task store
@@ -145,14 +278,26 @@ async def get_or_create_bib_entry(db: AsyncSession, user: User, file_record: Fil
     title = os.path.splitext(original_name)[0]
     dedup_key = compute_dedup_key(None, title, [], None)
 
-    existing_by_title = (
+    candidates = (
         await db.execute(
-            select(BibEntry).where(
-                BibEntry.owner_user_id == user.id,
-                BibEntry.dedup_key == dedup_key,
-            )
+            select(BibEntry).where(BibEntry.owner_user_id == user.id).order_by(BibEntry.updated_at.desc(), BibEntry.created_at.desc())
         )
-    ).scalar_one_or_none()
+    ).scalars().all()
+
+    existing_by_title = (
+        next((candidate for candidate in candidates if candidate.dedup_key == dedup_key), None)
+    )
+    if existing_by_title is None:
+        best_score = 0.0
+        best_entry: BibEntry | None = None
+        for candidate in candidates:
+            score = title_match_score(title, candidate.title or "")
+            if score > best_score:
+                best_score = score
+                best_entry = candidate
+        if best_entry is not None and best_score >= 0.72:
+            existing_by_title = best_entry
+
     if existing_by_title is not None:
         if not existing_by_title.source_file_id:
             existing_by_title.source_file_id = file_record.id
@@ -258,6 +403,7 @@ async def finalize_reading_success(
     bib_entry_id: str,
     user_id: int,
     artifact_files: list[dict],
+    reading_items: Optional[list[dict]] = None,
 ) -> None:
     async with AsyncSessionLocal() as db:
         job = await db.get(Job, task_id)
@@ -279,6 +425,22 @@ async def finalize_reading_success(
                 expires_at=compute_expires_at(owner),
             )
             db.add(artifact)
+
+        for item in reading_items or []:
+            db.add(
+                ReadingItem(
+                    owner_user_id=user_id,
+                    bib_entry_id=bib_entry_id,
+                    job_id=task_id,
+                    mode=item["mode"],
+                    section_type=item["section_type"],
+                    parent_key=item.get("parent_key"),
+                    item_key=item["item_key"],
+                    item_label=item["item_label"],
+                    sort_order=item.get("sort_order", 0),
+                    content=item["content"],
+                )
+            )
 
         job.status = "success"
         job.progress = 100
@@ -529,12 +691,14 @@ def run_long_context_task(
             "preview": "\n\n".join(preview_parts[:3]),
             "dimensions": list(results.keys()),
         }
+        reading_items = build_long_reading_items(results, custom_question)
         asyncio.run(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
                 user_id,
                 [{"artifact_type": "reading_final", "absolute_path": report_path}],
+                reading_items=reading_items,
             )
         )
         
@@ -645,12 +809,14 @@ def run_quant_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str
             "preview": preview,
             "steps": list(results.keys()),
         }
+        reading_items = build_step_reading_items(results, mode="quant")
         asyncio.run(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
                 user_id,
                 [{"artifact_type": "reading_final", "absolute_path": report_path}],
+                reading_items=reading_items,
             )
         )
         
@@ -748,12 +914,14 @@ def run_qual_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str,
             "preview": preview,
             "steps": list(results.keys()),
         }
+        reading_items = build_step_reading_items(results, mode="qual")
         asyncio.run(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
                 user_id,
                 [{"artifact_type": "reading_final", "absolute_path": report_path}],
+                reading_items=reading_items,
             )
         )
         

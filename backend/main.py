@@ -20,7 +20,7 @@ import uvicorn
 
 # Routers
 from cleanup import cleanup_expired, get_cleanup_interval_minutes
-from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy
+from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library
 
 # Create upload directory
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
@@ -74,6 +74,7 @@ app.include_router(prompts.router, prefix="/api/prompts", tags=["Prompts"])
 app.include_router(download.router, prefix="/api/download", tags=["Download"])
 app.include_router(history.router, prefix="/api/history", tags=["History"])
 app.include_router(compare.router, prefix="/api/compare", tags=["Compare"])
+app.include_router(library.router, prefix="/api/library", tags=["Library"])
 app.include_router(deploy.router, prefix="/api/deploy", tags=["Deploy"])
 
 

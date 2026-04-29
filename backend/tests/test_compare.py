@@ -36,7 +36,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from db import Base, SYNC_DATABASE_URL, engine as async_engine  # noqa: E402
-from db.models import Artifact, BibEntry, Job, JobBibEntry, User  # noqa: E402
+from db.models import Artifact, BibEntry, Job, JobBibEntry, ReadingItem, User  # noqa: E402
 from routers import auth as auth_router  # noqa: E402
 from routers import compare as compare_router  # noqa: E402
 from routers import history as history_router  # noqa: E402
@@ -141,6 +141,37 @@ class CompareRouterTests(unittest.TestCase):
             session.commit()
             return bib.id
 
+    def seed_reading_item(
+        self,
+        owner_user_id: int,
+        bib_entry_id: str,
+        *,
+        mode: str,
+        section_type: str,
+        item_key: str,
+        item_label: str,
+        content: str,
+        parent_key: str | None = None,
+        sort_order: int = 0,
+        job_id: str | None = None,
+    ) -> None:
+        with Session(self.sync_engine) as session:
+            session.add(
+                ReadingItem(
+                    owner_user_id=owner_user_id,
+                    bib_entry_id=bib_entry_id,
+                    job_id=job_id or f"job-{bib_entry_id}-{item_key}",
+                    mode=mode,
+                    section_type=section_type,
+                    parent_key=parent_key,
+                    item_key=item_key,
+                    item_label=item_label,
+                    sort_order=sort_order,
+                    content=content,
+                )
+            )
+            session.commit()
+
     def compare_payload(self, bib_entry_ids: list[str]) -> dict:
         return {
             "step": "第一步：研究问题",
@@ -242,6 +273,92 @@ class CompareRouterTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("比较综述正文", response.json()["synthesis"])
+
+    def test_compare_can_build_prompt_from_structured_reading_items(self) -> None:
+        alice_id = self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        bib_a = self.create_bib_entry(alice_id, "Paper A", doi="10.1000/a")
+        bib_b = self.create_bib_entry(alice_id, "Paper B", doi="10.1000/b")
+        self.seed_reading_item(
+            alice_id,
+            bib_a,
+            mode="quant",
+            section_type="subquestion",
+            item_key="quant.step1.q1",
+            item_label="研究问题",
+            content="A 文献认为生态治理依赖制度协同。",
+        )
+        self.seed_reading_item(
+            alice_id,
+            bib_b,
+            mode="quant",
+            section_type="subquestion",
+            item_key="quant.step1.q1",
+            item_label="研究问题",
+            content="B 文献强调地方试点与激励设计。",
+        )
+
+        payload = self.compare_payload([bib_a, bib_b])
+        payload["paperData"] = []
+        response = self.client.post("/api/compare/analyze", headers=headers, json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("比较综述正文", response.json()["synthesis"])
+
+    def test_structured_reading_endpoint_groups_qual_step_subquestions(self) -> None:
+        alice_id = self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        bib_id = self.create_bib_entry(alice_id, "生态产品价值实现的中国经验")
+        job_id = "job-qual-1"
+
+        with Session(self.sync_engine) as session:
+            session.add(Job(id=job_id, owner_user_id=alice_id, job_type="reading_qual", status="success"))
+            session.add(JobBibEntry(job_id=job_id, bib_entry_id=bib_id, role="target", sort_order=0))
+            session.commit()
+
+        self.seed_reading_item(
+            alice_id,
+            bib_id,
+            job_id=job_id,
+            mode="qual",
+            section_type="step",
+            item_key="qual.step1",
+            item_label="第一步：背景与问题",
+            content="",
+            sort_order=0,
+        )
+        self.seed_reading_item(
+            alice_id,
+            bib_id,
+            job_id=job_id,
+            mode="qual",
+            section_type="subquestion",
+            parent_key="qual.step1",
+            item_key="qual.step1.q1",
+            item_label="1. 论文分类",
+            content="案例研究。",
+            sort_order=1,
+        )
+        self.seed_reading_item(
+            alice_id,
+            bib_id,
+            job_id=job_id,
+            mode="qual",
+            section_type="subquestion",
+            parent_key="qual.step1",
+            item_key="qual.step1.q2",
+            item_label="2. 核心问题",
+            content="生态产品价值实现。",
+            sort_order=2,
+        )
+
+        response = self.client.get(f"/api/compare/jobs/{job_id}/structured", headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["mode"], "qual")
+        self.assertEqual(body["title"], "生态产品价值实现的中国经验")
+        self.assertIn("第一步", body["steps"])
+        self.assertEqual(body["steps"]["第一步"]["label"], "第一步：背景与问题")
+        self.assertEqual(body["steps"]["第一步"]["sub_questions"]["1. 论文分类"], "案例研究。")
 
     def test_save_synthesis_requires_authentication(self) -> None:
         response = self.client.post(

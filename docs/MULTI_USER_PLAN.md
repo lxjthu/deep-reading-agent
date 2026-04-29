@@ -63,8 +63,8 @@
 | `/api/upload/` | ① file 写到 `_uploads/{uid}/`；② 写入 `files` 表；③ 计算 `expires_at`；④ PDF/MD 自动调用 metadata_extractor 创建/匹配 `bib_entries` |
 | `/api/upload/{file_id}/info` | 仅查当前用户的 file |
 | `/api/filter/` | ① 题录解析后写入 `bib_entries`（source_db='wos'/'cnki'）；② 创建 `jobs(type='filter')`；③ 写入 `bib_filter_links` |
-| `/api/reading/long` `/quant` `/qual` | ① 创建 `jobs(type='reading_*')`；② 写 `job_bib_entries(role='target')`；③ 产物落库 `artifacts`；④ 完成时更新 `bib_entries.reading_status='read'` |
-| `/api/compare/` | ① 输入改成 bib_entry_ids；② 创建 `jobs(type='compare')`；③ 写多条 `job_bib_entries(role='compare_member')` |
+| `/api/reading/long` `/quant` `/qual` | ① 创建 `jobs(type='reading_*')`；② 写 `job_bib_entries(role='target')`；③ 产物落库 `artifacts`；④ 结构化结果落库 `reading_items`；⑤ 完成时更新 `bib_entries.reading_status='read'` |
+| `/api/compare/` | ① 输入改成 bib_entry_ids；② 创建 `jobs(type='compare')`；③ 写多条 `job_bib_entries(role='compare_member')`；④ 直接从 `reading_items` 聚合对比数据 |
 | `/api/history/` | 仅列当前用户的 jobs/artifacts；admin 可加 `?owner_user_id=` |
 | `/api/history/synthesis/` | 仅列当前用户的 synthesis；写入时创建 `jobs(type='synthesis')` + `artifacts` |
 | `/api/download/{filename}` | 校验 filename 对应 artifact 的 owner_user_id；admin 例外 |
@@ -188,8 +188,8 @@ API Key 设置面板继续沿用现有"localStorage 保存"逻辑，**服务端�
 | **P1** | `/api/auth/*` + JWT 中间件 + `users.token_version` | 1d | Postman 跑通注册/登录/me/refresh/logout 全流程 |
 | **P2** | `/api/upload/*` 改造 + `files` 表 + 按用户分目录 | 0.5d | 两个用户分别上传，文件物理隔离 |
 | **P3** | `/api/filter/*` 改造 + `bib_entries` + `bib_filter_links` 写入 | 1d | 上传题录跑筛选后，`bib_entries` 表里看到 100+ 条记录 |
-| **P4** | `/api/reading/*` 改造 + `jobs` + `job_bib_entries` + `artifacts` | 1d | 跑一次精读，产物正确归档到 `deep_reading_results/{uid}/{job_id}/` |
-| **P5** | `/api/compare/*` `/api/history/synthesis/*` 改造 | 0.5d | 对比 / 综述按 bib_entry_ids 输入跑通 |
+| **P4** | `/api/reading/*` 改造 + `jobs` + `job_bib_entries` + `reading_items` + `artifacts` | 1d | 跑一次精读后，结构化结果和 Markdown 产物都正确落库 |
+| **P5** | `/api/compare/*` `/api/history/synthesis/*` 改造 | 0.5d | 对比 / 综述按 bib_entry_ids 输入跑通，compare 直接读取 `reading_items` |
 | **P6** | `/api/history/*` `/api/download/*` 加权限校验 | 0.5d | 用户 A 无法下载用户 B 的文件 |
 | **P7** | 邀请码 + VIP 升降级 + 24h 清理任务（APScheduler） | 1d | 模拟 24h 后普通用户服务端全部数据消失（前端 localStorage 不动） |
 | **P8** | 历史数据迁移脚本（无主文件归 admin） | 0.5d | 跑完后 `_uploads/1/` 下有原 `yaojiaquan.pdf`，DB 有对应 file 记录 |

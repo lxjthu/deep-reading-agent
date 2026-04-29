@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import PROJECT_ROOT, get_db
-from db.models import Artifact, BibEntry, Job, JobBibEntry, User
+from db.models import Artifact, BibEntry, Job, JobBibEntry, ReadingItem, User
 from db.utils import compute_dedup_key
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -43,6 +44,24 @@ class LongCompareRequest(BaseModel):
     bib_entry_ids: List[str] = Field(default_factory=list)
     api_key: Optional[str] = None
     mode: Optional[str] = "single"
+
+
+class StructuredStepResponse(BaseModel):
+    label: str
+    sub_questions: dict[str, str] = Field(default_factory=dict)
+
+
+class StructuredReadingResponse(BaseModel):
+    job_id: str
+    bib_entry_id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = None
+    journal: str = ""
+    doi: str = ""
+    mode: str
+    dimensions: dict[str, str] = Field(default_factory=dict)
+    steps: dict[str, StructuredStepResponse] = Field(default_factory=dict)
 
 
 def get_api_key(provided_key: Optional[str] = None) -> str:
@@ -97,6 +116,42 @@ def bib_entry_to_paper_data(bib_entry: BibEntry) -> dict:
         "dimensions": {},
         "content": bib_entry.abstract or "",
     }
+
+
+async def build_structured_paper_data(
+    db: AsyncSession,
+    members: list[BibEntry],
+) -> list[dict]:
+    paper_data: list[dict] = []
+    for bib_entry in members:
+        items = (
+            await db.execute(
+                select(ReadingItem)
+                .where(
+                    ReadingItem.owner_user_id == bib_entry.owner_user_id,
+                    ReadingItem.bib_entry_id == bib_entry.id,
+                )
+                .order_by(ReadingItem.created_at.desc(), ReadingItem.sort_order.asc(), ReadingItem.id.asc())
+            )
+        ).scalars().all()
+
+        paper = bib_entry_to_paper_data(bib_entry)
+        seen_keys: set[str] = set()
+        for item in items:
+            if item.item_key in seen_keys:
+                continue
+            seen_keys.add(item.item_key)
+
+            if item.mode == "long":
+                paper["dimensions"][item.item_label] = item.content
+                if not paper["content"] and item.content:
+                    paper["content"] = item.content
+            elif item.section_type == "subquestion":
+                paper["subQuestions"][item.item_label] = item.content
+
+        paper_data.append(paper)
+
+    return paper_data
 
 
 async def resolve_compare_members(
@@ -213,7 +268,95 @@ def build_compare_markdown(title: str, synthesis: str) -> str:
     return f"# {title}\n\n{synthesis}\n"
 
 
-def ensure_paper_data(paper_data: list[dict], members: list[BibEntry]) -> list[dict]:
+def extract_step_id(item_key: str) -> str | None:
+    match = re.search(r"\.step(\d+)", item_key or "")
+    if not match:
+        return None
+    number = int(match.group(1))
+    cn = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+    if 1 <= number <= len(cn):
+        return f"第{cn[number - 1]}步"
+    return None
+
+
+@router.get("/jobs/{job_id}/structured", response_model=StructuredReadingResponse)
+async def get_structured_reading(
+    job_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StructuredReadingResponse:
+    job = await db.get(Job, job_id)
+    if job is None or job.owner_user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reading job not found")
+    if job.job_type not in {"reading_long", "reading_quant", "reading_qual"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported job type")
+
+    target = (
+        await db.execute(
+            select(JobBibEntry).where(
+                JobBibEntry.job_id == job_id,
+                JobBibEntry.role == "target",
+            )
+        )
+    ).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target bib entry not found")
+
+    bib_entry = await db.get(BibEntry, target.bib_entry_id)
+    if bib_entry is None or bib_entry.owner_user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bib entry not found")
+
+    items = (
+        await db.execute(
+            select(ReadingItem)
+            .where(ReadingItem.job_id == job_id)
+            .order_by(ReadingItem.sort_order.asc(), ReadingItem.id.asc())
+        )
+    ).scalars().all()
+    if not items:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Structured reading items not found")
+
+    response = StructuredReadingResponse(
+        job_id=job.id,
+        bib_entry_id=bib_entry.id,
+        title=bib_entry.title,
+        authors=json.loads(bib_entry.authors_json or "[]"),
+        year=bib_entry.year,
+        journal=bib_entry.journal or "",
+        doi=bib_entry.doi or "",
+        mode=items[0].mode,
+    )
+
+    for item in items:
+        if item.mode == "long":
+            response.dimensions[item.item_label] = item.content
+            continue
+        if item.section_type == "step":
+            step_id = extract_step_id(item.item_key)
+            if not step_id:
+                continue
+            response.steps[step_id] = StructuredStepResponse(label=item.item_label, sub_questions={})
+            continue
+        if item.section_type == "subquestion" and item.parent_key:
+            step_id = extract_step_id(item.parent_key)
+            if not step_id:
+                continue
+            if step_id not in response.steps:
+                response.steps[step_id] = StructuredStepResponse(label=step_id, sub_questions={})
+            response.steps[step_id].sub_questions[item.item_label] = item.content
+
+    return response
+
+
+async def ensure_paper_data(db: AsyncSession, paper_data: list[dict], members: list[BibEntry]) -> list[dict]:
+    if members:
+        structured = await build_structured_paper_data(db, members)
+        has_structured_content = any(
+            paper.get("dimensions") or paper.get("subQuestions") or paper.get("content")
+            for paper in structured
+        )
+        if has_structured_content:
+            return structured
     if paper_data:
         return paper_data
     return [bib_entry_to_paper_data(member) for member in members]
@@ -499,7 +642,7 @@ async def analyze_comparison(
         from openai import OpenAI
 
         members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
-        paper_data = ensure_paper_data(req.paperData, members)
+        paper_data = await ensure_paper_data(db, req.paperData, members)
         mode = req.mode or ("multi" if len(req.subQuestions) > 1 else "single")
         job_id = await create_compare_job(
             db,
@@ -574,7 +717,7 @@ async def analyze_long_comparison(
         from openai import OpenAI
 
         members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
-        paper_data = ensure_paper_data(req.paperData, members)
+        paper_data = await ensure_paper_data(db, req.paperData, members)
         mode = req.mode or "single"
         job_id = await create_compare_job(
             db,

@@ -1,5 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import './index.css'
+import LibraryTab from './LibraryTab'
+import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
+import { useAuthStore } from './store/auth'
 
 // Tab definitions
 const TABS = [
@@ -7,21 +11,63 @@ const TABS = [
   { id: 'long', label: '长文本精读', icon: '➤' },
   { id: 'quant', label: '七步精读', icon: '△' },
   { id: 'qual', label: '四步精读', icon: '◉' },
-  { id: 'compare', label: '对比分析', icon: '⇄' },
+  { id: 'compare-long', label: '长文本对比', icon: '⇄' },
+  { id: 'compare-7step', label: '七步对比', icon: '⇄' },
+  { id: 'compare-4step', label: '四步对比', icon: '⇄' },
+  { id: 'library', label: '我的文献库', icon: '📚' },
   { id: 'prompts', label: '提示词管理', icon: '⚙' },
   { id: 'history', label: '历史记录', icon: '📁' },
 ]
 
+const TAB_IDS = new Set(TABS.map((tab) => tab.id))
+
+function getInitialTab(pathname: string, search: string): string {
+  if (pathname.startsWith('/workspace/library')) {
+    return 'library'
+  }
+  const fromQuery = new URLSearchParams(search).get('tab') || ''
+  if (fromQuery === 'compare') {
+    return 'compare-long'
+  }
+  return TAB_IDS.has(fromQuery) && fromQuery !== 'library' ? fromQuery : 'filter'
+}
+
 function App() {
-  const [activeTab, setActiveTab] = useState('filter')
+  const navigate = useNavigate()
+  const location = useLocation()
+  const user = useAuthStore((state) => state.user)
+  const logout = useAuthStore((state) => state.logout)
+  const [activeTab, setActiveTab] = useState(() => getInitialTab(location.pathname, location.search))
   const [apiKey, setApiKey] = useState('')
   const [showKeyInput, setShowKeyInput] = useState(false)
   const [tempKey, setTempKey] = useState('')
+  const [showUserMenu, setShowUserMenu] = useState(false)
 
   useEffect(() => {
     const saved = localStorage.getItem('deepseek_api_key')
     if (saved) setApiKey(saved)
   }, [])
+
+  useEffect(() => {
+    setActiveTab(getInitialTab(location.pathname, location.search))
+  }, [location.pathname, location.search])
+
+  const handleTabChange = (tabId: string) => {
+    setActiveTab(tabId)
+    if (tabId === 'library') {
+      if (location.pathname !== '/workspace/library') {
+        navigate('/workspace/library')
+      }
+      return
+    }
+    const params = new URLSearchParams(location.search)
+    params.set('tab', tabId)
+    const nextSearch = params.toString()
+    const nextUrl = nextSearch ? `/workspace?${nextSearch}` : '/workspace'
+    if (`${location.pathname}${location.search}` !== nextUrl) {
+      navigate(nextUrl)
+    }
+  }
 
   const handleSaveKey = () => {
     if (tempKey.trim()) {
@@ -40,8 +86,27 @@ function App() {
     setShowKeyInput(false)
   }
 
+  const roleBadgeClass =
+    user?.role === 'admin'
+      ? 'bg-violet-100 text-violet-700'
+      : user?.role === 'vip'
+        ? 'bg-amber-100 text-amber-700'
+        : 'bg-gray-100 text-gray-600'
+
+  const roleLabel =
+    user?.role === 'admin' ? 'ADMIN' : user?.role === 'vip' ? 'VIP' : 'NORMAL'
+
+  const handleLogout = async () => {
+    setShowUserMenu(false)
+    await logout()
+    navigate('/login', { replace: true })
+  }
+
+  const isCompareTab =
+    activeTab === 'compare-long' || activeTab === 'compare-7step' || activeTab === 'compare-4step'
+
   return (
-    <div className={`min-h-screen bg-white text-gray-900 ${activeTab === 'compare' ? 'flex flex-col h-screen overflow-hidden' : ''}`}>
+    <div className={`${isCompareTab ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-white text-gray-900 flex flex-col`}>
       {/* Header */}
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
@@ -53,61 +118,126 @@ function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* API Key Button */}
+            <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+              DeepSeek ✓
+            </span>
             <div className="relative">
               <button
-                onClick={() => setShowKeyInput(!showKeyInput)}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                  apiKey
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
+                onClick={() => setShowUserMenu((value) => !value)}
+                className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:border-emerald-300"
               >
-                <span>{apiKey ? '🔐' : '🔓'}</span>
-                {apiKey ? 'Key 已设置' : '输入 Key'}
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">
+                  {user?.username?.slice(0, 1).toUpperCase() || 'U'}
+                </span>
+                <div className="text-left">
+                  <div className="text-sm font-medium text-gray-800">{user?.username || '未登录'}</div>
+                  <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${roleBadgeClass}`}>
+                    {roleLabel}
+                  </div>
+                </div>
               </button>
 
-              {showKeyInput && (
-                <div className="absolute right-0 top-full mt-2 w-80 rounded-xl border border-gray-200 bg-white p-4 shadow-lg z-50">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">DeepSeek API Key</h3>
-                  <input
-                    type="password"
-                    value={tempKey}
-                    onChange={(e) => setTempKey(e.target.value)}
-                    placeholder={apiKey ? '••••••••••••••••' : 'sk-...'}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-                  />
-                  <p className="mt-1 text-xs text-gray-400">保存在浏览器 localStorage，刷新后不丢失</p>
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      onClick={handleSaveKey}
-                      disabled={!tempKey.trim()}
-                      className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300 transition-colors"
-                    >
-                      保存
-                    </button>
-                    {apiKey && (
+              {showUserMenu && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+                  <div className="border-b border-gray-100 px-1 pb-3">
+                    <div className="text-sm font-semibold text-gray-800">{user?.username}</div>
+                    <div className="mt-1 text-xs text-gray-500">{user?.email || '未设置邮箱'}</div>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {user?.role === 'admin' && (
                       <button
-                        onClick={handleDeleteKey}
-                        className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          navigate('/admin')
+                        }}
+                        className="flex w-full items-center justify-between rounded-lg bg-violet-50 px-3 py-2 text-sm text-violet-700 hover:bg-violet-100"
                       >
-                        删除
+                        <span>管理员后台</span>
+                        <span>↗</span>
                       </button>
                     )}
+                    <button
+                      onClick={() => {
+                        setShowKeyInput((value) => !value)
+                        setShowUserMenu(false)
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <span>{apiKey ? '管理 API Key' : '设置 API Key'}</span>
+                      <span className={apiKey ? 'text-emerald-600' : 'text-gray-400'}>{apiKey ? '已设置' : '未设置'}</span>
+                    </button>
+                    <button
+                      onClick={handleLogout}
+                      className="flex w-full items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
+                    >
+                      <span>切换账号</span>
+                      <span>→</span>
+                    </button>
+                    <button
+                      onClick={handleLogout}
+                      className="flex w-full items-center justify-between rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 hover:bg-red-100"
+                    >
+                      <span>退出登录</span>
+                      <span>×</span>
+                    </button>
                   </div>
                 </div>
               )}
             </div>
-
-            <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-              DeepSeek ✓
-            </span>
-            <span className="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-              KIMI v3
-            </span>
           </div>
         </div>
       </header>
+
+      {showKeyInput && (
+        <div className="border-b border-emerald-100 bg-emerald-50/70">
+          <div className="mx-auto max-w-7xl px-4 py-4">
+            <div className="max-w-md rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">DeepSeek API Key</h3>
+              <input
+                type="password"
+                value={tempKey}
+                onChange={(e) => setTempKey(e.target.value)}
+                placeholder={apiKey ? '••••••••••••••••' : 'sk-...'}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+              />
+              <p className="mt-1 text-xs text-gray-400">保存在浏览器 localStorage，刷新后不丢失</p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={handleSaveKey}
+                  disabled={!tempKey.trim()}
+                  className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300 transition-colors"
+                >
+                  保存
+                </button>
+                {apiKey && (
+                  <button
+                    onClick={handleDeleteKey}
+                    className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
+                  >
+                    删除
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowKeyInput(false)}
+                  className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  收起
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {user?.warning_msg && (
+        <div className="border-b border-red-200 bg-red-50">
+          <div className="mx-auto max-w-7xl px-4 py-3 text-sm text-red-700">
+            <span className="font-semibold">⚠ 试用提醒：</span>
+            <span>{user.warning_msg}</span>
+          </div>
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <nav className="border-b border-gray-200 bg-white sticky top-0 z-10">
@@ -116,7 +246,7 @@ function App() {
             {TABS.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
                 className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                   activeTab === tab.id
                     ? 'border-emerald-500 text-emerald-700'
@@ -132,17 +262,182 @@ function App() {
       </nav>
 
       {/* Main Content */}
-      <main className={activeTab === 'compare' ? 'flex-1 min-h-0 overflow-hidden' : 'mx-auto max-w-7xl px-4 py-6'}>
+      <main className={isCompareTab ? 'flex flex-1 min-h-0 overflow-hidden' : 'mx-auto max-w-7xl flex-1 px-4 py-6'}>
         {activeTab === 'filter' && <FilterTab apiKey={apiKey} />}
         {activeTab === 'long' && <LongTab apiKey={apiKey} />}
         {activeTab === 'quant' && <QuantTab apiKey={apiKey} />}
         {activeTab === 'qual' && <QualTab apiKey={apiKey} />}
-        {activeTab === 'compare' && <CompareTab />}
+        {activeTab === 'compare-long' && <CompareTab title="长文本精读对比分析" src="/compare_long.html" />}
+        {activeTab === 'compare-7step' && <CompareTab title="七步法对比分析" src="/compare_7step.html" />}
+        {activeTab === 'compare-4step' && <CompareTab title="四步法对比分析" src="/compare_4step.html" />}
+        {activeTab === 'library' && <LibraryTab />}
         {activeTab === 'prompts' && <PromptsTab />}
         {activeTab === 'history' && <HistoryTab />}
       </main>
     </div>
   )
+}
+
+async function handleProtectedDownload(downloadPath: string, fallbackFilename: string) {
+  await downloadWithAuth(`/api/download/${encodeURIComponent(downloadPath)}`, fallbackFilename)
+}
+
+type ReadingTaskKind = 'long' | 'quant' | 'qual'
+
+function getReadingTaskStorageKey(kind: ReadingTaskKind) {
+  return `dra_reading_task_${kind}`
+}
+
+function persistReadingTaskId(kind: ReadingTaskKind, taskId: string | null) {
+  if (taskId) {
+    localStorage.setItem(getReadingTaskStorageKey(kind), taskId)
+  } else {
+    localStorage.removeItem(getReadingTaskStorageKey(kind))
+  }
+}
+
+function restoreReadingTaskId(kind: ReadingTaskKind): string | null {
+  return localStorage.getItem(getReadingTaskStorageKey(kind))
+}
+
+function computeReadingStep(progress: number, stepCount: number) {
+  if (stepCount <= 0 || progress <= 0) return 0
+  const ratio = 100 / stepCount
+  return Math.min(stepCount, Math.max(1, Math.ceil(progress / ratio)))
+}
+
+function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
+  const [taskId, setTaskId] = useState<string | null>(null)
+  const [isRunning, setIsRunning] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [stage, setStage] = useState('等待上传...')
+  const [logs, setLogs] = useState<string[]>([])
+  const [preview, setPreview] = useState('')
+  const [downloadUrl, setDownloadUrl] = useState('')
+  const [currentStep, setCurrentStep] = useState(0)
+  const pollRef = useRef<number | null>(null)
+
+  const stopPolling = () => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }
+
+  const resetTaskState = () => {
+    stopPolling()
+    persistReadingTaskId(kind, null)
+    setTaskId(null)
+    setIsRunning(false)
+    setProgress(0)
+    setStage('等待上传...')
+    setLogs([])
+    setPreview('')
+    setDownloadUrl('')
+    setCurrentStep(0)
+  }
+
+  const cancelTask = async () => {
+    if (taskId) {
+      try {
+        await fetch(`/api/reading/task/${taskId}/cancel`, { method: 'POST' })
+      } catch {
+        // Ignore network failures and still clear local UI state.
+      }
+    }
+    resetTaskState()
+    setStage('已取消')
+    setLogs((prev) => [...prev, '⚠ 用户取消了精读任务'])
+  }
+
+  const applyStatus = (statusData: any) => {
+    const nextProgress = statusData.progress || 0
+    setProgress(nextProgress)
+    setStage(statusData.stage || '处理中...')
+    if (Array.isArray(statusData.logs) && statusData.logs.length > 0) {
+      setLogs(statusData.logs)
+    }
+    if (statusData.result?.preview) {
+      setPreview(statusData.result.preview)
+    }
+    if (statusData.result?.output_path) {
+      setDownloadUrl(statusData.result.output_path)
+    }
+    if (stepCount > 0) {
+      setCurrentStep(
+        statusData.status === 'completed' ? stepCount : computeReadingStep(nextProgress, stepCount),
+      )
+    }
+
+    if (statusData.status === 'completed') {
+      stopPolling()
+      persistReadingTaskId(kind, null)
+      setIsRunning(false)
+      setProgress(100)
+      if (stepCount > 0) setCurrentStep(stepCount)
+    } else if (statusData.status === 'failed' || statusData.status === 'cancelled') {
+      stopPolling()
+      persistReadingTaskId(kind, null)
+      setIsRunning(false)
+    } else {
+      setIsRunning(true)
+    }
+  }
+
+  const fetchStatus = async (runningTaskId: string) => {
+    const statusRes = await fetch(`/api/reading/task/${runningTaskId}/status`)
+    const statusData = await statusRes.json()
+    applyStatus(statusData)
+    return statusData
+  }
+
+  const startTrackingTask = async (nextTaskId: string) => {
+    setTaskId(nextTaskId)
+    persistReadingTaskId(kind, nextTaskId)
+    setIsRunning(true)
+    await fetchStatus(nextTaskId)
+    stopPolling()
+    pollRef.current = window.setInterval(() => {
+      void fetchStatus(nextTaskId).catch((error) => {
+        stopPolling()
+        setIsRunning(false)
+        setStage('错误')
+        setLogs((prev) => [...prev, `❌ ${error.message || '读取任务状态失败'}`])
+      })
+    }, 1000)
+  }
+
+  useEffect(() => {
+    const savedTaskId = restoreReadingTaskId(kind)
+    if (savedTaskId) {
+      void startTrackingTask(savedTaskId).catch(() => {
+        persistReadingTaskId(kind, null)
+      })
+    }
+    return stopPolling
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return {
+    taskId,
+    isRunning,
+    progress,
+    stage,
+    logs,
+    preview,
+    downloadUrl,
+    currentStep,
+    setLogs,
+    setStage,
+    setProgress,
+    setPreview,
+    setDownloadUrl,
+    setCurrentStep,
+    startTrackingTask,
+    resetTaskState,
+    cancelTask,
+    setIsRunning,
+  }
 }
 
 // Tab 0: 文献筛选
@@ -470,11 +765,18 @@ function FilterTab({ apiKey }: { apiKey: string }) {
             </div>
             <p className="mt-3 text-xs text-gray-400">共 {results.length} 篇，按评分降序排列</p>
             {downloadUrl && (
-              <a href={`/api/download/${encodeURIComponent(downloadUrl)}`} 
-                 download
-                 className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors">
+              <button
+                type="button"
+                onClick={() =>
+                  handleProtectedDownload(
+                    downloadUrl,
+                    downloadUrl.split('/').pop() || 'filter-report.xlsx',
+                  ).catch((error) => alert(error.message))
+                }
+                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+              >
                 <span>↓</span> 下载筛选报告 (Excel)
-              </a>
+              </button>
             )}
           </div>
         )}
@@ -489,12 +791,22 @@ function LongTab({ apiKey }: { apiKey: string }) {
   const [dims, setDims] = useState<string[]>(["研究问题", "理论框架", "识别策略"])
   const [customQ, setCustomQ] = useState('')
   const [extraction, _setExtraction] = useState('full')
-  const [isRunning, setIsRunning] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [stage, setStage] = useState('等待上传...')
-  const [logs, setLogs] = useState<string[]>([])
-  const [preview, setPreview] = useState('')
-  const [downloadUrl, setDownloadUrl] = useState('')
+  const {
+    cancelTask,
+    isRunning,
+    progress,
+    stage,
+    logs,
+    preview,
+    downloadUrl,
+    setLogs,
+    setStage,
+    setProgress,
+    setPreview,
+    setDownloadUrl,
+    setIsRunning,
+    startTrackingTask,
+  } = useReadingTaskTracker('long')
 
   const ALL_DIMS = [
     "研究问题", "理论框架", "识别策略", "数据来源", "变量度量",
@@ -546,26 +858,9 @@ function LongTab({ apiKey }: { apiKey: string }) {
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
-
-      const pollInterval = setInterval(async () => {
-        const statusRes = await fetch(`/api/reading/task/${taskId}/status`)
-        const statusData = await statusRes.json()
-        setProgress(statusData.progress || 0)
-        setStage(statusData.stage || '处理中...')
-        if (statusData.logs) setLogs(statusData.logs)
-
-        if (statusData.status === 'completed') {
-          clearInterval(pollInterval)
-          setIsRunning(false); setProgress(100); setStage('完成'); addLog('✅ 全部完成！')
-          if (statusData.result?.preview) setPreview(statusData.result.preview)
-          if (statusData.result?.output_path) setDownloadUrl(statusData.result.output_path)
-        } else if (statusData.status === 'failed') {
-          clearInterval(pollInterval)
-          setIsRunning(false); setStage('错误'); addLog(`❌ ${statusData.error || '失败'}`)
-        }
-      }, 1000)
+      await startTrackingTask(taskId)
     } catch (error: any) {
-      setIsRunning(false); setStage('错误'); addLog(`❌ ${error.message}`)
+      setStage('错误'); addLog(`❌ ${error.message}`)
     }
   }
 
@@ -611,7 +906,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
           <button onClick={handleStart} disabled={isRunning || !apiKey} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
             {isRunning ? '分析中...' : apiKey ? '开始精读' : '请先输入 API Key'}
           </button>
-          <button onClick={() => setIsRunning(false)} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
+          <button onClick={() => void cancelTask()} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
             停止
           </button>
         </div>
@@ -643,9 +938,18 @@ function LongTab({ apiKey }: { apiKey: string }) {
               <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-gray-50 p-4 rounded-lg">{preview}</pre>
             </div>
             {downloadUrl && (
-              <a href={`/api/download/${encodeURIComponent(downloadUrl)}`} download className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors">
+              <button
+                type="button"
+                onClick={() =>
+                  handleProtectedDownload(
+                    downloadUrl,
+                    downloadUrl.split('/').pop() || 'reading-report.md',
+                  ).catch((error) => alert(error.message))
+                }
+                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+              >
                 ↓ 下载完整报告
-              </a>
+              </button>
             )}
           </div>
         )}
@@ -658,11 +962,20 @@ function LongTab({ apiKey }: { apiKey: string }) {
 function QuantTab({ apiKey }: { apiKey: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [extraction, setExtraction] = useState('full')
-  const [isRunning, setIsRunning] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [stage, setStage] = useState('等待上传...')
-  const [logs, setLogs] = useState<string[]>([])
-  const [currentStep, setCurrentStep] = useState(0)
+  const {
+    cancelTask,
+    isRunning,
+    progress,
+    stage,
+    logs,
+    currentStep,
+    setLogs,
+    setStage,
+    setProgress,
+    setCurrentStep,
+    setIsRunning,
+    startTrackingTask,
+  } = useReadingTaskTracker('quant', 7)
 
   const STEPS = [
     { num: 1, name: "研究概览", icon: "①" },
@@ -709,22 +1022,8 @@ function QuantTab({ apiKey }: { apiKey: string }) {
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
-
-      const pollInterval = setInterval(async () => {
-        const statusRes = await fetch(`/api/reading/task/${taskId}/status`)
-        const statusData = await statusRes.json()
-        setProgress(statusData.progress || 0)
-        setStage(statusData.stage || '处理中...')
-        if (statusData.logs) setLogs(statusData.logs)
-        const stepNum = Math.min(7, Math.floor((statusData.progress || 0) / 15) + 1)
-        setCurrentStep(stepNum)
-        if (statusData.status === 'completed') {
-          clearInterval(pollInterval); setIsRunning(false); setProgress(100); setStage('完成'); addLog('✅ 全部完成！'); setCurrentStep(7)
-        } else if (statusData.status === 'failed') {
-          clearInterval(pollInterval); setIsRunning(false); setStage('错误'); addLog(`❌ ${statusData.error || '失败'}`)
-        }
-      }, 1000)
-    } catch (error: any) { setIsRunning(false); setStage('错误'); addLog(`❌ ${error.message}`) }
+      await startTrackingTask(taskId)
+    } catch (error: any) { setStage('错误'); addLog(`❌ ${error.message}`) }
   }
   const addLog = (msg: string) => setLogs(prev => [...prev, msg])
 
@@ -757,7 +1056,7 @@ function QuantTab({ apiKey }: { apiKey: string }) {
           <button onClick={handleStart} disabled={isRunning || !apiKey} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
             {isRunning ? '分析中...' : apiKey ? '开始精读' : '请先输入 API Key'}
           </button>
-          <button onClick={() => setIsRunning(false)} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
+          <button onClick={() => void cancelTask()} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
             停止
           </button>
         </div>
@@ -801,11 +1100,20 @@ function QuantTab({ apiKey }: { apiKey: string }) {
 function QualTab({ apiKey }: { apiKey: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [extraction, setExtraction] = useState('full')
-  const [isRunning, setIsRunning] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [stage, setStage] = useState('等待上传...')
-  const [logs, setLogs] = useState<string[]>([])
-  const [currentStep, setCurrentStep] = useState(0)
+  const {
+    cancelTask,
+    isRunning,
+    progress,
+    stage,
+    logs,
+    currentStep,
+    setLogs,
+    setStage,
+    setProgress,
+    setCurrentStep,
+    setIsRunning,
+    startTrackingTask,
+  } = useReadingTaskTracker('qual', 4)
 
   const STEPS = [
     { num: 1, name: "背景与语境", icon: "①" },
@@ -849,22 +1157,8 @@ function QualTab({ apiKey }: { apiKey: string }) {
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
-
-      const pollInterval = setInterval(async () => {
-        const statusRes = await fetch(`/api/reading/task/${taskId}/status`)
-        const statusData = await statusRes.json()
-        setProgress(statusData.progress || 0)
-        setStage(statusData.stage || '处理中...')
-        if (statusData.logs) setLogs(statusData.logs)
-        const stepNum = Math.min(4, Math.floor((statusData.progress || 0) / 25) + 1)
-        setCurrentStep(stepNum)
-        if (statusData.status === 'completed') {
-          clearInterval(pollInterval); setIsRunning(false); setProgress(100); setStage('完成'); addLog('✅ 全部完成！'); setCurrentStep(4)
-        } else if (statusData.status === 'failed') {
-          clearInterval(pollInterval); setIsRunning(false); setStage('错误'); addLog(`❌ ${statusData.error || '失败'}`)
-        }
-      }, 1000)
-    } catch (error: any) { setIsRunning(false); setStage('错误'); addLog(`❌ ${error.message}`) }
+      await startTrackingTask(taskId)
+    } catch (error: any) { setStage('错误'); addLog(`❌ ${error.message}`) }
   }
   const addLog = (msg: string) => setLogs(prev => [...prev, msg])
 
@@ -897,7 +1191,7 @@ function QualTab({ apiKey }: { apiKey: string }) {
           <button onClick={handleStart} disabled={isRunning || !apiKey} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
             {isRunning ? '分析中...' : apiKey ? '开始精读' : '请先输入 API Key'}
           </button>
-          <button onClick={() => setIsRunning(false)} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
+          <button onClick={() => void cancelTask()} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
             停止
           </button>
         </div>
@@ -1123,21 +1417,28 @@ function HistoryTab() {
               </div>
             </div>
             <div className="flex items-center gap-2 ml-4">
-              <a
-                href={`/api/history/${encodeURIComponent(file.filename)}/preview`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() =>
+                  openPreviewWithAuth(`/api/history/${encodeURIComponent(file.filename)}/preview`).catch(
+                    (error) => alert(error.message),
+                  )
+                }
                 className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
               >
                 👁 预览
-              </a>
-              <a
-                href={`/api/download/${encodeURIComponent(file.filename)}`}
-                download
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleProtectedDownload(file.download_path || file.filename, file.filename).catch(
+                    (error) => alert(error.message),
+                  )
+                }
                 className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
               >
                 ⬇ 下载
-              </a>
+              </button>
               <button
                 onClick={() => handleDelete(file.filename, isSynthesis)}
                 className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
@@ -1193,61 +1494,19 @@ function HistoryTab() {
 }
 
 // Tab: 对比分析
-function CompareTab() {
-  const [mode, setMode] = useState<'long' | '7step' | '4step'>('long')
-
-  const srcMap = {
-    long: '/compare_long.html',
-    '7step': '/compare_7step.html',
-    '4step': '/compare_4step.html',
-  }
-
-  const modes = [
-    { id: 'long' as const, label: '长文本精读', desc: '自由维度对比' },
-    { id: '7step' as const, label: '七步法', desc: '定量实证对比' },
-    { id: '4step' as const, label: '四步法', desc: '定性理论对比' },
-  ]
-
+function CompareTab({ title, src }: { title: string; src: string }) {
   return (
-    <div className="flex h-full">
-      {/* Sidebar */}
-      <div className="w-48 bg-gray-900 text-white flex flex-col border-r border-gray-800">
-        <div className="p-4 border-b border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-300">对比分析</h3>
-          <p className="text-xs text-gray-500 mt-1">选择对比模式</p>
-        </div>
-        <div className="flex-1 p-2 space-y-1">
-          {modes.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => setMode(m.id)}
-              className={`w-full text-left px-3 py-3 rounded-lg text-sm transition-all ${
-                mode === m.id
-                  ? 'bg-emerald-600 text-white shadow-lg'
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-              }`}
-            >
-              <div className="font-medium">{m.label}</div>
-              <div className={`text-xs mt-0.5 ${mode === m.id ? 'text-emerald-200' : 'text-gray-600'}`}>
-                {m.desc}
-              </div>
-            </button>
-          ))}
-        </div>
-        <div className="p-3 border-t border-gray-800">
-          <p className="text-xs text-gray-600">
-            勾选文献后横向对比
-          </p>
-        </div>
+    <div className="flex flex-1 min-h-0 flex-col bg-gray-100">
+      <div className="shrink-0 border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
+        <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+        <p className="mt-1 text-sm text-gray-500">当前标签直接进入对应对比页面，内容区域按整个工作区展开。</p>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 bg-gray-100">
+      <div className="flex flex-1 min-h-0 bg-white p-2">
         <iframe
-          key={mode}
-          src={srcMap[mode]}
-          className="w-full h-full border-0"
-          title="文献对比分析"
+          src={src}
+          className="block flex-1 min-h-0 w-full rounded-xl border border-gray-200 bg-white"
+          title={title}
         />
       </div>
     </div>

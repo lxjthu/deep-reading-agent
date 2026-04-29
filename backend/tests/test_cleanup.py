@@ -50,6 +50,8 @@ class CleanupTests(unittest.TestCase):
         shutil.rmtree(TEMP_DIR, ignore_errors=True)
 
     def setUp(self) -> None:
+        os.environ["UPLOAD_ROOT_DIR"] = TEST_UPLOAD_ROOT.as_posix()
+        os.environ["RESULTS_ROOT_DIR"] = TEST_RESULTS_ROOT.as_posix()
         Base.metadata.drop_all(self.sync_engine)
         Base.metadata.create_all(self.sync_engine)
         shutil.rmtree(TEST_UPLOAD_ROOT, ignore_errors=True)

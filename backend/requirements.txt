@@ -9,6 +9,15 @@ python-dotenv==1.0.0
 markdown>=3.6
 pandas>=2.2.0
 openpyxl>=3.1.0
+requests>=2.31.0
+openai>=1.30.0
+tqdm>=4.66.0
+PyYAML>=6.0.0
+json_repair>=0.27.0
+pypdf>=4.0.0
+pdfplumber>=0.11.0
+PyMuPDF>=1.24.0
+PyPDF2>=3.0.0
 
 # --- multi-user system (P0+) ---
 sqlalchemy>=2.0.0

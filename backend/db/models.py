@@ -327,6 +327,52 @@ Index("idx_jbe_bib", JobBibEntry.bib_entry_id)
 
 
 # --------------------------------------------------------------------------
+# Structured reading outputs
+# --------------------------------------------------------------------------
+
+class ReadingItem(Base):
+    """Structured reading result items for compare/library queries."""
+    __tablename__ = "reading_items"
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('long','quant','qual')",
+            name="ck_reading_items_mode",
+        ),
+        CheckConstraint(
+            "section_type IN ('dimension','step','subquestion','custom')",
+            name="ck_reading_items_section_type",
+        ),
+        UniqueConstraint("job_id", "item_key", name="uq_reading_items_job_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    bib_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("bib_entries.id", ondelete="CASCADE"), nullable=False
+    )
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    section_type: Mapped[str] = mapped_column(String, nullable=False)
+    parent_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    item_key: Mapped[str] = mapped_column(String, nullable=False)
+    item_label: Mapped[str] = mapped_column(String, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_reading_items_owner", ReadingItem.owner_user_id)
+Index("idx_reading_items_bib", ReadingItem.bib_entry_id)
+Index("idx_reading_items_job", ReadingItem.job_id)
+Index("idx_reading_items_mode", ReadingItem.mode)
+Index("idx_reading_items_parent", ReadingItem.parent_key)
+
+
+# --------------------------------------------------------------------------
 # Artifacts (job outputs)
 # --------------------------------------------------------------------------
 

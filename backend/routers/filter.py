@@ -280,7 +280,16 @@ async def persist_filter_results(
 
         await db.commit()
 
-    display_cols = ["Title", "Authors", "Journal", "Year", "score", "reason"]
+    display_cols = [
+        "Title",
+        "Authors",
+        "Journal",
+        "Year",
+        "Abstract",
+        "abstract_cn",
+        "score",
+        "reason",
+    ]
     final_cols = [c for c in display_cols if c in df.columns]
     if final_cols:
         preview_df = df[final_cols].copy()
@@ -384,7 +393,17 @@ def run_filter_task(
         
         user_results_dir = get_filter_results_dir(user_id, task_id)
         out_path = user_results_dir / f"filtered_{mode}_{task_id}.xlsx"
-        display_cols = ["Title", "Authors", "Journal", "Year", "score", "reason"]
+        display_cols = [
+            "Title",
+            "Authors",
+            "Journal",
+            "Year",
+            "DOI",
+            "Abstract",
+            "abstract_cn",
+            "score",
+            "reason",
+        ]
         final_cols = [c for c in display_cols if c in df.columns]
         df_display = df[final_cols].copy()
         df_display.to_excel(out_path, index=False)

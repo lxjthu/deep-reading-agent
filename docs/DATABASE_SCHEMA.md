@@ -336,7 +336,60 @@ CREATE INDEX idx_jbe_bib ON job_bib_entries (bib_entry_id);
 - `compare` 任务有 ≥2 个 `role='compare_member'`
 - `synthesis` 任务有 ≥1 个 `role='synthesis_member'`
 
-### 3.10 `artifacts` — 任务产物
+### 3.10 `reading_items` — 精读结构化结果
+
+> 目的：把三类精读结果按“模式 / 维度(步骤) / 子问题”拆成结构化记录，供 compare / synthesis / library 直接查询，避免前端继续下载 Markdown 再做字符串解析。
+
+```sql
+CREATE TABLE reading_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL REFERENCES users(id),
+    bib_entry_id    TEXT NOT NULL REFERENCES bib_entries(id) ON DELETE CASCADE,
+    job_id          TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+
+    mode            TEXT NOT NULL CHECK (mode IN ('long', 'quant', 'qual')),
+    section_type    TEXT NOT NULL CHECK (section_type IN ('dimension', 'step', 'subquestion', 'custom')),
+    parent_key      TEXT,                                        -- 如 quant.step1 / qual.step2
+    item_key        TEXT NOT NULL,                               -- 如 long.research_question / quant.step1.q1
+    item_label      TEXT NOT NULL,                               -- 显示名，如“研究问题”“1.研究主题与核心结论”
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    content         TEXT NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+
+    UNIQUE (job_id, item_key)
+);
+
+CREATE INDEX idx_reading_items_owner ON reading_items (owner_user_id);
+CREATE INDEX idx_reading_items_bib ON reading_items (bib_entry_id);
+CREATE INDEX idx_reading_items_job ON reading_items (job_id);
+CREATE INDEX idx_reading_items_mode ON reading_items (mode);
+CREATE INDEX idx_reading_items_parent ON reading_items (parent_key);
+```
+
+**入库约定**：
+
+- 长文本精读：
+  - `mode='long'`
+  - 12 个分析维度写成 `section_type='dimension'`
+  - 自定义问题写成 `section_type='custom'`
+  - `item_key` 使用稳定 key，例如 `long.research_question`、`long.theory_framework`、`long.custom_question`
+- 七步精读：
+  - `mode='quant'`
+  - 每个步骤先写一条 `section_type='step'`
+  - 步骤下按编号子问题继续写 `section_type='subquestion'`
+  - 例如 `quant.step1`、`quant.step1.q1`
+- 四步精读：
+  - `mode='qual'`
+  - 同样保留“步骤 -> 子问题”两层
+  - 例如 `qual.step1`、`qual.step1.q1`
+
+**设计说明**：
+
+- 不把几十个精读结果字段直接塞进 `bib_entries`
+- `reading_items` 保留 job 级历史，支持同一篇文献多次精读
+- `artifacts` 继续保存 Markdown 产物，作为下载与人工阅读版本
+
+### 3.11 `artifacts` — 任务产物
 
 ```sql
 CREATE TABLE artifacts (
@@ -371,10 +424,10 @@ CREATE INDEX idx_artifacts_expires ON artifacts (expires_at);
 
 | 触发 | 行为 |
 |---|---|
-| 删除 `users` | 级联删除该用户的 settings/files/bib_entries/jobs/artifacts/upload_batches/invite_codes（DB ON DELETE CASCADE） + 物理删除 `_uploads/{user_id}/` 和 `deep_reading_results/{user_id}/` |
-| 删除 `bib_entries` | DB 级联删 bib_filter_links、job_bib_entries（**只删关联**）；通过应用层逻辑清理仅由本档案独占的 jobs/artifacts |
+| 删除 `users` | 级联删除该用户的 settings/files/bib_entries/jobs/reading_items/artifacts/upload_batches/invite_codes（DB ON DELETE CASCADE） + 物理删除 `_uploads/{user_id}/` 和 `deep_reading_results/{user_id}/` |
+| 删除 `bib_entries` | DB 级联删 bib_filter_links、job_bib_entries、reading_items（**只删关联/结构化结果**）；通过应用层逻辑清理仅由本档案独占的 jobs/artifacts |
 | 删除 `files` | 应用层处理：清空所有引用该 file 的 `bib_entries.source_file_id`；若 file 是 filter job 的 input，禁止删除（除非任务已完成） |
-| 删除 `jobs` | DB 级联删 job_bib_entries、artifacts；不动 bib_entries 本身 |
+| 删除 `jobs` | DB 级联删 job_bib_entries、reading_items、artifacts；不动 bib_entries 本身 |
 
 **应用层级联清理 bib_entries 时的逻辑**：
 ```python
@@ -403,11 +456,11 @@ def cleanup_expired() -> None:
 
 **`expires_at` 计算**（在创建/更新时设置）：
 
-| 角色 | files | bib_entries | jobs | artifacts |
-|---|---|---|---|---|
-| normal | created+24h | created+24h | created+24h | created+24h |
-| vip | NULL | NULL | NULL | NULL |
-| admin | NULL | NULL | NULL | NULL |
+| 角色 | files | bib_entries | jobs | reading_items | artifacts |
+|---|---|---|---|---|---|
+| normal | created+24h | created+24h | created+24h | created+24h | created+24h |
+| vip | NULL | NULL | NULL | NULL | NULL |
+| admin | NULL | NULL | NULL | NULL | NULL |
 
 **API Key 不入清理范围**：DeepSeek API Key 仅存储于用户浏览器 `localStorage`，服务端不持有，故 24h 任务不涉及 key。
 
@@ -536,6 +589,7 @@ alembic init -t async migrations
 backend/migrations/versions/
 ├── 001_initial_schema.py        # 创建全部表
 ├── 002_add_users_token_version.py  # P1: users.token_version，用于严格 logout
+├── 003_add_reading_items.py     # 精读结构化结果表，供 compare / library 直接查询
 └── (后续新增字段时追加)
 ```
 
@@ -548,6 +602,13 @@ backend/migrations/versions/
 - 全部归到 `admin` 名下（owner_user_id=1）
 - 物理移动到 `_uploads/1/`、`deep_reading_results/1/`
 - 在 DB 中建立对应 `files` / `jobs` / `artifacts` 记录（尽力而为，元数据不全的标记 `metadata_completeness='minimal'`）
+
+`backend/scripts/backfill_reading_items.py`：
+- 扫描已有 `reading_long / reading_quant / reading_qual` 任务
+- 读取 `artifacts(reading_final)` 对应 Markdown
+- 按当前标题规则拆分并回填 `reading_items`
+- 支持 `--dry-run`
+- 若某个 job 已有 `reading_items`，则直接跳过，保证幂等
 
 ## 9. 未来扩展点（已在 schema 中预留）
 

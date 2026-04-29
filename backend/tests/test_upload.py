@@ -35,7 +35,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from auth.security import hash_password  # noqa: E402
 from db import Base, SYNC_DATABASE_URL, engine as async_engine  # noqa: E402
-from db.models import File, InviteCode, User  # noqa: E402
+from db.models import BibEntry, File, InviteCode, User  # noqa: E402
 from routers import auth as auth_router  # noqa: E402
 from routers import upload as upload_router  # noqa: E402
 
@@ -110,6 +110,34 @@ class UploadRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def create_bib_entry(self, owner_user_id: int, *, title: str) -> str:
+        with Session(self.sync_engine) as session:
+            entry = BibEntry(
+                id=f"bib-{owner_user_id}-{abs(hash(title)) % 1000000}",
+                owner_user_id=owner_user_id,
+                title=title,
+                authors_json='["测试作者"]',
+                year=2024,
+                doi=None,
+                journal="测试期刊",
+                abstract="摘要",
+                keywords_json='["关键词"]',
+                venue_type=None,
+                citation_count=None,
+                source_db="cnki",
+                source_filter_job_id=None,
+                source_file_id=None,
+                user_tags_json="[]",
+                user_note=None,
+                is_pinned=0,
+                reading_status="none",
+                metadata_completeness="partial",
+                dedup_key=f"title:{title}",
+            )
+            session.add(entry)
+            session.commit()
+            return entry.id
+
     def test_upload_requires_authentication(self) -> None:
         response = self.client.post(
             "/api/upload/",
@@ -164,6 +192,25 @@ class UploadRouterTests(unittest.TestCase):
         with Session(self.sync_engine) as session:
             count = session.query(File).count()
             self.assertEqual(count, 1)
+
+    def test_upload_pdf_auto_matches_existing_bib_by_title(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        bib_id = self.create_bib_entry(
+            1,
+            title="生态产品价值实现的中国经验-基于国家部委典型案例的实践解构与理论阐释",
+        )
+
+        payload = self.upload_pdf(
+            headers,
+            filename="生态产品价值实现的中国经验——基于国家部委典型案例的实践解构与理论阐释.pdf",
+        )
+
+        self.assertEqual(payload["matched_bib_entry_id"], bib_id)
+        with Session(self.sync_engine) as session:
+            entry = session.execute(select(BibEntry).where(BibEntry.id == bib_id)).scalar_one()
+            self.assertEqual(entry.source_file_id, payload["file_id"])
+            self.assertEqual(entry.reading_status, "has_pdf")
 
     def test_different_users_same_md5_create_separate_records(self) -> None:
         self.register("alice", "pwd12345")

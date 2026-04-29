@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.dependencies import current_user
 from db import get_db
 from db.models import BibEntry, File, Job, User
+from db.utils import title_match_score
 from upload_storage import build_storage_path, get_user_upload_dir, resolve_storage_path
 
 
@@ -87,7 +88,52 @@ async def persist_upload_to_temp(file: UploadFile, temp_path: Path) -> tuple[str
     return hasher.hexdigest(), size_bytes, sample
 
 
-def build_upload_response(record: File, *, message: str, deduplicated: bool) -> dict:
+async def find_matching_bib_entry(db: AsyncSession, user_id: int, title: str) -> BibEntry | None:
+    title = (title or "").strip()
+    if not title:
+        return None
+
+    candidates = (
+        await db.execute(
+            select(BibEntry).where(BibEntry.owner_user_id == user_id).order_by(BibEntry.updated_at.desc(), BibEntry.created_at.desc())
+        )
+    ).scalars().all()
+
+    best_entry: BibEntry | None = None
+    best_score = 0.0
+    for candidate in candidates:
+        score = title_match_score(title, candidate.title or "")
+        if score > best_score:
+            best_score = score
+            best_entry = candidate
+
+    if best_entry is None:
+        return None
+    if best_score >= 0.92:
+        return best_entry
+    if best_score >= 0.72:
+        return best_entry
+    return None
+
+
+async def bind_uploaded_file_to_existing_bib(db: AsyncSession, user: User, record: File) -> BibEntry | None:
+    if record.file_type not in {"pdf", "markdown"}:
+        return None
+
+    title = Path(record.original_name or "").stem
+    matched = await find_matching_bib_entry(db, user.id, title)
+    if matched is None:
+        return None
+
+    if not matched.source_file_id:
+        matched.source_file_id = record.id
+    if matched.reading_status == "none":
+        matched.reading_status = "has_pdf"
+    matched.updated_at = utcnow_naive()
+    return matched
+
+
+def build_upload_response(record: File, *, message: str, deduplicated: bool, matched_bib: BibEntry | None = None) -> dict:
     stored_file_path = resolve_storage_path(record.storage_path)
     return {
         "success": True,
@@ -100,6 +146,8 @@ def build_upload_response(record: File, *, message: str, deduplicated: bool) -> 
         "exists": stored_file_path.exists(),
         "deduplicated": deduplicated,
         "message": message,
+        "matched_bib_entry_id": matched_bib.id if matched_bib else None,
+        "matched_bib_title": matched_bib.title if matched_bib else None,
     }
 
 
@@ -135,12 +183,15 @@ async def upload_file(
             )
         ).scalar_one_or_none()
         if existing is not None:
+            matched_bib = await bind_uploaded_file_to_existing_bib(db, user, existing)
+            await db.commit()
             if temp_path.exists():
                 temp_path.unlink()
             return build_upload_response(
                 existing,
                 message="文件已存在，返回已有记录。",
                 deduplicated=True,
+                matched_bib=matched_bib,
             )
 
         file_id = str(uuid.uuid4())
@@ -158,6 +209,7 @@ async def upload_file(
             expires_at=compute_expires_at(user),
         )
         db.add(record)
+        matched_bib = await bind_uploaded_file_to_existing_bib(db, user, record)
 
         try:
             await db.commit()
@@ -176,10 +228,11 @@ async def upload_file(
                 existing,
                 message="文件已存在，返回已有记录。",
                 deduplicated=True,
+                matched_bib=matched_bib,
             )
 
         await db.refresh(record)
-        return build_upload_response(record, message="上传成功。", deduplicated=False)
+        return build_upload_response(record, message="上传成功。", deduplicated=False, matched_bib=matched_bib)
     except HTTPException:
         if temp_path.exists():
             temp_path.unlink()

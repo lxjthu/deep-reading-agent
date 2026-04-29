@@ -35,7 +35,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from db import Base, SYNC_DATABASE_URL, engine as async_engine  # noqa: E402
-from db.models import Artifact, BibEntry, File, Job, JobBibEntry  # noqa: E402
+from db.models import Artifact, BibEntry, File, Job, JobBibEntry, ReadingItem  # noqa: E402
 from routers import auth as auth_router  # noqa: E402
 from routers import reading as reading_router  # noqa: E402
 from routers import upload as upload_router  # noqa: E402
@@ -125,6 +125,34 @@ class ReadingRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def create_bib_entry(self, owner_user_id: int, *, title: str) -> str:
+        with Session(self.sync_engine) as session:
+            bib = BibEntry(
+                id=f"bib-{owner_user_id}-{abs(hash(title)) % 1000000}",
+                owner_user_id=owner_user_id,
+                title=title,
+                authors_json='["测试作者"]',
+                year=2024,
+                doi=None,
+                journal="测试期刊",
+                abstract="摘要",
+                keywords_json='["关键词"]',
+                venue_type=None,
+                citation_count=None,
+                source_db="cnki",
+                source_filter_job_id=None,
+                source_file_id=None,
+                user_tags_json="[]",
+                user_note=None,
+                is_pinned=0,
+                reading_status="none",
+                metadata_completeness="partial",
+                dedup_key=f"title:{title}",
+            )
+            session.add(bib)
+            session.commit()
+            return bib.id
+
     @staticmethod
     def fake_long(task_id: str, user_id: int, bib_entry_id: str, file_path: str, analysis_dims, custom_question, extraction_method, api_key=None):
         import asyncio
@@ -133,6 +161,10 @@ class ReadingRouterTests(unittest.TestCase):
         result_dir = reading_router.get_results_dir(user_id, task_id)
         report_path = result_dir / "long_report.md"
         report_path.write_text("# long report\n\nok", encoding="utf-8")
+        results = {
+            "研究问题": "这篇文章回答了核心研究问题。",
+            "理论框架": "理论框架围绕双重嵌入展开。",
+        }
         reading_router.tasks[task_id]["status"] = "completed"
         reading_router.tasks[task_id]["progress"] = 100
         reading_router.tasks[task_id]["stage"] = "完成"
@@ -147,6 +179,7 @@ class ReadingRouterTests(unittest.TestCase):
                 bib_entry_id,
                 user_id,
                 [{"artifact_type": "reading_final", "absolute_path": report_path}],
+                reading_items=reading_router.build_long_reading_items(results),
             )
         )
 
@@ -160,6 +193,12 @@ class ReadingRouterTests(unittest.TestCase):
         final_path = result_dir / "quant_report.md"
         step_path.write_text("# step 1", encoding="utf-8")
         final_path.write_text("# quant final", encoding="utf-8")
+        results = {
+            "第一步：核心贡献识别": (
+                "### **1. 研究主题与核心结论**\n\n文章指出了核心发现。\n\n"
+                "### **2. 问题意识**\n\n问题意识聚焦政策冲击。"
+            )
+        }
         reading_router.tasks[task_id]["status"] = "completed"
         reading_router.tasks[task_id]["progress"] = 100
         reading_router.tasks[task_id]["stage"] = "完成"
@@ -177,6 +216,7 @@ class ReadingRouterTests(unittest.TestCase):
                     {"artifact_type": "reading_step", "absolute_path": step_path},
                     {"artifact_type": "reading_final", "absolute_path": final_path},
                 ],
+                reading_items=reading_router.build_step_reading_items(results, mode="quant"),
             )
         )
 
@@ -188,6 +228,12 @@ class ReadingRouterTests(unittest.TestCase):
         result_dir = reading_router.get_results_dir(user_id, task_id)
         final_path = result_dir / "qual_report.md"
         final_path.write_text("# qual final", encoding="utf-8")
+        results = {
+            "第一步：背景与问题": (
+                "## 1. 论文分类\n\n案例研究。\n\n"
+                "## 2. 核心问题\n\n核心问题是生态价值实现。"
+            )
+        }
         reading_router.tasks[task_id]["status"] = "completed"
         reading_router.tasks[task_id]["progress"] = 100
         reading_router.tasks[task_id]["stage"] = "完成"
@@ -202,6 +248,7 @@ class ReadingRouterTests(unittest.TestCase):
                 bib_entry_id,
                 user_id,
                 [{"artifact_type": "reading_final", "absolute_path": final_path}],
+                reading_items=reading_router.build_step_reading_items(results, mode="qual"),
             )
         )
 
@@ -324,6 +371,26 @@ class ReadingRouterTests(unittest.TestCase):
             self.assertEqual(len(links), 2)
             self.assertNotEqual(first["task_id"], second["task_id"])
 
+    def test_reading_matches_existing_bib_by_similar_title(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        bib_id = self.create_bib_entry(
+            1,
+            title="生态产品价值实现的中国经验-基于国家部委典型案例的实践解构与理论阐释",
+        )
+        payload = self.upload_pdf(
+            headers,
+            filename="生态产品价值实现的中国经验——基于国家部委典型案例的实践解构与理论阐释.pdf",
+        )
+
+        started = self.start_long(headers, payload["file_id"])
+
+        with Session(self.sync_engine) as session:
+            bib = session.execute(select(BibEntry).where(BibEntry.id == bib_id)).scalar_one()
+            link = session.execute(select(JobBibEntry).where(JobBibEntry.job_id == started["task_id"])).scalar_one()
+            self.assertEqual(bib.source_file_id, payload["file_id"])
+            self.assertEqual(link.bib_entry_id, bib_id)
+
     def test_quant_writes_step_and_final_artifacts(self) -> None:
         self.register("alice", "pwd12345")
         headers = self.login_headers("alice", "pwd12345")
@@ -337,6 +404,60 @@ class ReadingRouterTests(unittest.TestCase):
             self.assertEqual(len(artifacts), 2)
             self.assertEqual(artifacts[0].artifact_type, "reading_step")
             self.assertEqual(artifacts[1].artifact_type, "reading_final")
+
+    def test_long_writes_structured_reading_items(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        payload = self.upload_pdf(headers)
+        started = self.start_long(headers, payload["file_id"])
+
+        with Session(self.sync_engine) as session:
+            items = session.execute(
+                select(ReadingItem)
+                .where(ReadingItem.job_id == started["task_id"])
+                .order_by(ReadingItem.sort_order, ReadingItem.id)
+            ).scalars().all()
+            self.assertEqual(len(items), 2)
+            self.assertEqual(items[0].mode, "long")
+            self.assertEqual(items[0].section_type, "dimension")
+            self.assertEqual(items[0].item_key, "long.research_question")
+            self.assertEqual(items[1].item_key, "long.theory_framework")
+
+    def test_quant_writes_step_and_subquestion_reading_items(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        payload = self.upload_pdf(headers)
+        started = self.start_quant(headers, payload["file_id"])
+
+        with Session(self.sync_engine) as session:
+            items = session.execute(
+                select(ReadingItem)
+                .where(ReadingItem.job_id == started["task_id"])
+                .order_by(ReadingItem.sort_order, ReadingItem.id)
+            ).scalars().all()
+            self.assertEqual(len(items), 3)
+            self.assertEqual(items[0].section_type, "step")
+            self.assertEqual(items[0].item_key, "quant.step1")
+            self.assertEqual(items[1].section_type, "subquestion")
+            self.assertEqual(items[1].item_label, "1. 研究主题与核心结论")
+            self.assertEqual(items[2].item_key, "quant.step1.q2")
+
+    def test_qual_writes_step_and_subquestion_reading_items(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        payload = self.upload_pdf(headers)
+        started = self.start_qual(headers, payload["file_id"])
+
+        with Session(self.sync_engine) as session:
+            items = session.execute(
+                select(ReadingItem)
+                .where(ReadingItem.job_id == started["task_id"])
+                .order_by(ReadingItem.sort_order, ReadingItem.id)
+            ).scalars().all()
+            self.assertEqual(len(items), 3)
+            self.assertEqual(items[0].item_key, "qual.step1")
+            self.assertEqual(items[1].item_key, "qual.step1.q1")
+            self.assertEqual(items[2].item_label, "2. 核心问题")
 
     def test_reading_status_and_cancel_require_owner(self) -> None:
         self.register("alice", "pwd12345")

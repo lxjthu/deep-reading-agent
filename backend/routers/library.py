@@ -1,0 +1,325 @@
+"""Library router for bib-entry centric browsing and editing."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from auth.dependencies import current_user
+from db import PROJECT_ROOT, get_db
+from db.models import Artifact, BibEntry, BibFilterLink, File, Job, JobBibEntry, User
+
+router = APIRouter()
+RESULTS_DIR = PROJECT_ROOT / "deep_reading_results"
+
+
+class LibraryEntrySummary(BaseModel):
+    id: str
+    title: str
+    authors: list[str]
+    year: Optional[int]
+    doi: Optional[str]
+    journal: Optional[str]
+    reading_status: str
+    metadata_completeness: str
+    is_pinned: int
+    source_db: str
+    source_file_id: Optional[str]
+    source_file_name: Optional[str]
+    tags: list[str]
+    note: Optional[str]
+
+
+class LibraryArtifactResponse(BaseModel):
+    id: int
+    filename: str
+    artifact_type: str
+    storage_path: str
+    created_at: Optional[str]
+
+
+class LibraryTimelineItem(BaseModel):
+    job_id: str
+    job_type: str
+    status: str
+    created_at: Optional[str]
+    finished_at: Optional[str]
+    artifacts: list[LibraryArtifactResponse]
+
+
+class LibraryFilterEvaluation(BaseModel):
+    filter_job_id: str
+    passed: int
+    score: Optional[float]
+    reason: Optional[str]
+    abstract_translation: Optional[str]
+    created_at: Optional[str]
+
+
+class LibraryEntryDetail(LibraryEntrySummary):
+    abstract: Optional[str]
+    keywords: list[str]
+    timeline: list[LibraryTimelineItem]
+    filter_evaluations: list[LibraryFilterEvaluation]
+
+
+class LibraryEntryUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1)
+    authors: Optional[list[str]] = None
+    year: Optional[int] = None
+    doi: Optional[str] = None
+    journal: Optional[str] = None
+    abstract: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    tags: Optional[list[str]] = None
+    note: Optional[str] = None
+    is_pinned: Optional[int] = Field(default=None, ge=0, le=1)
+
+
+def _json_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+
+def _dt(value) -> Optional[str]:
+    return value.isoformat() if value is not None else None
+
+
+def _clean_optional_text(value) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return None
+    return text
+
+
+def _load_abstract_translation_from_artifact(entry: BibEntry, artifact: Artifact | None) -> Optional[str]:
+    if artifact is None:
+        return None
+    target_path = RESULTS_DIR / artifact.storage_path
+    if not target_path.exists() or target_path.suffix.lower() not in {".xlsx", ".xls"}:
+        return None
+
+    import pandas as pd
+
+    try:
+        df = pd.read_excel(target_path)
+    except Exception:
+        return None
+
+    translation_columns = [
+        "abstract_cn",
+        "Abstract_CN",
+        "abstract_zh",
+        "摘要翻译",
+        "中文摘要",
+        "Abstract Translation",
+    ]
+    available_translation_columns = [col for col in translation_columns if col in df.columns]
+    if not available_translation_columns:
+        return None
+
+    candidates = df
+    if entry.doi and "DOI" in df.columns:
+        candidates = df[df["DOI"].astype(str).str.strip() == entry.doi]
+    elif "Title" in df.columns:
+        candidates = df[df["Title"].astype(str).str.strip() == entry.title]
+
+    if candidates.empty:
+        return None
+
+    row = candidates.iloc[0]
+    for column in available_translation_columns:
+        text = _clean_optional_text(row.get(column))
+        if text:
+            return text
+    return None
+
+
+def build_entry_summary(entry: BibEntry, source_file: File | None) -> LibraryEntrySummary:
+    return LibraryEntrySummary(
+        id=entry.id,
+        title=entry.title,
+        authors=_json_list(entry.authors_json),
+        year=entry.year,
+        doi=entry.doi,
+        journal=entry.journal,
+        reading_status=entry.reading_status,
+        metadata_completeness=entry.metadata_completeness,
+        is_pinned=entry.is_pinned,
+        source_db=entry.source_db,
+        source_file_id=entry.source_file_id,
+        source_file_name=source_file.original_name if source_file else None,
+        tags=_json_list(entry.user_tags_json),
+        note=entry.user_note,
+    )
+
+
+async def get_owned_entry(db: AsyncSession, user: User, entry_id: str) -> BibEntry:
+    entry = (
+        await db.execute(
+            select(BibEntry).where(BibEntry.id == entry_id, BibEntry.owner_user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bib entry not found")
+    return entry
+
+
+@router.get("/entries", response_model=list[LibraryEntrySummary])
+async def list_entries(
+    search: str = Query(default=""),
+    journal: str = Query(default=""),
+    reading_status: str = Query(default=""),
+    pinned_only: bool = Query(default=False),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LibraryEntrySummary]:
+    stmt = (
+        select(BibEntry, File)
+        .outerjoin(File, File.id == BibEntry.source_file_id)
+        .where(BibEntry.owner_user_id == user.id)
+        .order_by(BibEntry.is_pinned.desc(), BibEntry.updated_at.desc(), BibEntry.created_at.desc())
+    )
+    if search.strip():
+        like = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                BibEntry.title.ilike(like),
+                BibEntry.doi.ilike(like),
+                BibEntry.journal.ilike(like),
+            )
+        )
+    if journal.strip():
+        stmt = stmt.where(BibEntry.journal.ilike(f"%{journal.strip()}%"))
+    if reading_status.strip():
+        stmt = stmt.where(BibEntry.reading_status == reading_status.strip())
+    if pinned_only:
+        stmt = stmt.where(BibEntry.is_pinned == 1)
+
+    rows = (await db.execute(stmt)).all()
+    return [build_entry_summary(entry, source_file) for entry, source_file in rows]
+
+
+@router.get("/entries/{entry_id}", response_model=LibraryEntryDetail)
+async def get_entry_detail(
+    entry_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LibraryEntryDetail:
+    entry = await get_owned_entry(db, user, entry_id)
+    source_file = await db.get(File, entry.source_file_id) if entry.source_file_id else None
+
+    timeline_rows = (
+        await db.execute(
+            select(Job, Artifact)
+            .join(JobBibEntry, JobBibEntry.job_id == Job.id)
+            .outerjoin(Artifact, Artifact.job_id == Job.id)
+            .where(JobBibEntry.bib_entry_id == entry.id, Job.owner_user_id == user.id)
+            .order_by(Job.created_at.desc(), Artifact.sort_order.asc(), Artifact.id.asc())
+        )
+    ).all()
+
+    grouped: dict[str, LibraryTimelineItem] = {}
+    for job, artifact in timeline_rows:
+        item = grouped.get(job.id)
+        if item is None:
+            item = LibraryTimelineItem(
+                job_id=job.id,
+                job_type=job.job_type,
+                status=job.status,
+                created_at=_dt(job.created_at),
+                finished_at=_dt(job.finished_at),
+                artifacts=[],
+            )
+            grouped[job.id] = item
+        if artifact is not None:
+            item.artifacts.append(
+                LibraryArtifactResponse(
+                    id=artifact.id,
+                    filename=artifact.filename,
+                    artifact_type=artifact.artifact_type,
+                    storage_path=artifact.storage_path,
+                    created_at=_dt(artifact.created_at),
+                )
+            )
+
+    filter_rows = (
+        await db.execute(
+            select(BibFilterLink, Job, Artifact)
+            .join(Job, Job.id == BibFilterLink.filter_job_id)
+            .outerjoin(
+                Artifact,
+                (Artifact.job_id == Job.id) & (Artifact.artifact_type == "filter_excel"),
+            )
+            .where(BibFilterLink.bib_entry_id == entry.id, Job.owner_user_id == user.id)
+            .order_by(Job.created_at.desc(), BibFilterLink.id.desc())
+        )
+    ).all()
+
+    filter_evaluations: list[LibraryFilterEvaluation] = []
+    for link, job, artifact in filter_rows:
+        filter_evaluations.append(
+            LibraryFilterEvaluation(
+                filter_job_id=job.id,
+                passed=link.passed,
+                score=link.score,
+                reason=link.reason,
+                abstract_translation=_load_abstract_translation_from_artifact(entry, artifact),
+                created_at=_dt(link.created_at),
+            )
+        )
+
+    summary = build_entry_summary(entry, source_file)
+    return LibraryEntryDetail(
+        **summary.model_dump(),
+        abstract=entry.abstract,
+        keywords=_json_list(entry.keywords_json),
+        timeline=list(grouped.values()),
+        filter_evaluations=filter_evaluations,
+    )
+
+
+@router.patch("/entries/{entry_id}", response_model=LibraryEntryDetail)
+async def update_entry(
+    entry_id: str,
+    request: LibraryEntryUpdateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LibraryEntryDetail:
+    entry = await get_owned_entry(db, user, entry_id)
+
+    if request.title is not None:
+        entry.title = request.title.strip()
+    if request.authors is not None:
+        entry.authors_json = json.dumps(request.authors, ensure_ascii=False)
+    if request.year is not None:
+        entry.year = request.year
+    if request.doi is not None:
+        entry.doi = request.doi.strip() or None
+    if request.journal is not None:
+        entry.journal = request.journal.strip() or None
+    if request.abstract is not None:
+        entry.abstract = request.abstract.strip() or None
+    if request.keywords is not None:
+        entry.keywords_json = json.dumps(request.keywords, ensure_ascii=False)
+    if request.tags is not None:
+        entry.user_tags_json = json.dumps(request.tags, ensure_ascii=False)
+    if request.note is not None:
+        entry.user_note = request.note.strip() or None
+    if request.is_pinned is not None:
+        entry.is_pinned = request.is_pinned
+
+    await db.commit()
+    return await get_entry_detail(entry_id, user=user, db=db)
