@@ -23,6 +23,7 @@ from db import AsyncSessionLocal, PROJECT_ROOT, get_db
 from db.models import Artifact, BibEntry, File, Job, JobBibEntry, ReadingItem, User
 from db.utils import compute_dedup_key, title_match_score
 from backend.routers.metadata_extractor import extract_metadata, build_frontmatter
+from prompt_service import get_effective_prompt_map
 from upload_storage import lookup_original_name, lookup_path_by_file_id
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -31,26 +32,6 @@ router = APIRouter()
 
 RESULTS_ROOT = PROJECT_ROOT / "deep_reading_results"
 RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
-
-# Prompts directory
-PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "prompts")
-
-QUANT_PROMPT_FILES = {
-    "第一步：核心贡献识别": "quant_analysis/step_1_overview.md",
-    "第二步：理论框架评估": "quant_analysis/step_2_theory.md",
-    "第三步：方法论批判": "quant_analysis/step_3_data.md",
-    "第四步：实证结果解读": "quant_analysis/step_4_vars.md",
-    "第五步：局限性分析": "quant_analysis/step_5_identification.md",
-    "第六步：实践意义": "quant_analysis/step_6_results.md",
-    "第七步：未来方向": "quant_analysis/step_7_critique.md",
-}
-
-QUAL_PROMPT_FILES = {
-    "第一步：背景与问题": "qual_analysis/L1_Context_Prompt.md",
-    "第二步：理论视角": "qual_analysis/L2_Theory_Prompt.md",
-    "第三步：逻辑与证据": "qual_analysis/L3_Logic_Prompt.md",
-    "第四步：价值与启示": "qual_analysis/L4_Value_Prompt.md",
-}
 
 LONG_DIMENSION_KEYS = {
     "研究问题": "long.research_question",
@@ -85,18 +66,31 @@ QUAL_STEP_KEYS = {
     "第四步：价值与启示": "qual.step4",
 }
 
-def load_prompt_file(relative_path: str) -> str:
-    """Load a prompt file from prompts directory and append no-greeting instruction"""
-    path = os.path.join(PROMPTS_DIR, relative_path)
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-        # Append no-greeting instruction if not already present
-        if "寒暄" not in content and "客套" not in content:
-            content += "\n\n# 重要\n直接输出分析内容，不要\"好的\"\"我将\"\"作为...\"等客套开场白。"
-        return content
-    # Fallback: return a simple prompt
-    return "请分析这个维度。直接输出分析内容，不要客套开场白。"
+QUANT_PROMPT_KEYS = {
+    "第一步：核心贡献识别": "step_1",
+    "第二步：理论框架评估": "step_2",
+    "第三步：方法论批判": "step_3",
+    "第四步：实证结果解读": "step_4",
+    "第五步：局限性分析": "step_5",
+    "第六步：实践意义": "step_6",
+    "第七步：未来方向": "step_7",
+}
+
+QUAL_PROMPT_KEYS = {
+    "第一步：背景与问题": "L1",
+    "第二步：理论视角": "L2",
+    "第三步：逻辑与证据": "L3",
+    "第四步：价值与启示": "L4",
+}
+
+
+def normalize_reading_prompt(content: str) -> str:
+    text = (content or "").strip()
+    if not text:
+        text = "请分析这个维度。"
+    if "寒暄" not in text and "客套" not in text:
+        text += '\n\n# 重要\n直接输出分析内容，不要"好的""我将""作为..."等客套开场白。'
+    return text
 
 
 def slugify_key_fragment(value: str) -> str:
@@ -541,6 +535,7 @@ def run_long_context_task(
     analysis_dims: list,
     custom_question: Optional[str],
     extraction_method: str,
+    prompt_overrides: dict[str, str],
     api_key: Optional[str] = None,
 ):
     """Run long context analysis in background thread. api_key is REQUIRED."""
@@ -584,7 +579,12 @@ def run_long_context_task(
         )
         paper_cache = PaperCache(text=paper_text, metadata=metadata)
         
-        engine = ConversationEngine(config=config, paper_cache=paper_cache, max_history_turns=0)
+        engine = ConversationEngine(
+            config=config,
+            paper_cache=paper_cache,
+            max_history_turns=0,
+            prompt_overrides=prompt_overrides,
+        )
         
         tasks[task_id]["progress"] = 30
         tasks[task_id]["stage"] = "PDF 提取完成"
@@ -712,7 +712,14 @@ def run_long_context_task(
         asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
 
 
-def run_quant_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str, api_key: Optional[str] = None):
+def run_quant_task(
+    task_id: str,
+    user_id: int,
+    bib_entry_id: str,
+    file_path: str,
+    prompt_overrides: dict[str, str],
+    api_key: Optional[str] = None,
+):
     """Run 7-step quantitative analysis. api_key is REQUIRED."""
     try:
         import asyncio
@@ -745,19 +752,10 @@ def run_quant_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str
         
         tasks[task_id]["logs"].append("✓ PDF 提取完成")
         
-        # 7 steps with full prompts from prompts directory
-        steps = [
-            ("第一步：核心贡献识别", "quant_analysis/step_1_overview.md"),
-            ("第二步：理论框架评估", "quant_analysis/step_2_theory.md"),
-            ("第三步：方法论批判", "quant_analysis/step_3_data.md"),
-            ("第四步：实证结果解读", "quant_analysis/step_4_vars.md"),
-            ("第五步：局限性分析", "quant_analysis/step_5_identification.md"),
-            ("第六步：实践意义", "quant_analysis/step_6_results.md"),
-            ("第七步：未来方向", "quant_analysis/step_7_critique.md"),
-        ]
+        steps = list(QUANT_PROMPT_KEYS.items())
         
         results = {}
-        for i, (step_name, prompt_file) in enumerate(steps):
+        for i, (step_name, prompt_key) in enumerate(steps):
             if tasks[task_id]["status"] == "cancelled":
                 return
             
@@ -766,7 +764,7 @@ def run_quant_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str
             tasks[task_id]["logs"].append(f"[{i+1}/7] {step_name}...")
             
             try:
-                prompt_content = load_prompt_file(prompt_file)
+                prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
                 answer = engine.ask(prompt_content)
                 results[step_name] = answer
                 tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
@@ -830,7 +828,14 @@ def run_quant_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str
         asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
 
 
-def run_qual_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str, api_key: Optional[str] = None):
+def run_qual_task(
+    task_id: str,
+    user_id: int,
+    bib_entry_id: str,
+    file_path: str,
+    prompt_overrides: dict[str, str],
+    api_key: Optional[str] = None,
+):
     """Run 4-step qualitative analysis. api_key is REQUIRED."""
     try:
         import asyncio
@@ -863,16 +868,10 @@ def run_qual_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str,
         
         tasks[task_id]["logs"].append("✓ PDF 提取完成")
         
-        # 4 steps with full prompts from prompts directory
-        steps = [
-            ("第一步：背景与问题", "qual_analysis/L1_Context_Prompt.md"),
-            ("第二步：理论视角", "qual_analysis/L2_Theory_Prompt.md"),
-            ("第三步：逻辑与证据", "qual_analysis/L3_Logic_Prompt.md"),
-            ("第四步：价值与启示", "qual_analysis/L4_Value_Prompt.md"),
-        ]
+        steps = list(QUAL_PROMPT_KEYS.items())
         
         results = {}
-        for i, (step_name, prompt_file) in enumerate(steps):
+        for i, (step_name, prompt_key) in enumerate(steps):
             if tasks[task_id]["status"] == "cancelled":
                 return
             
@@ -881,7 +880,7 @@ def run_qual_task(task_id: str, user_id: int, bib_entry_id: str, file_path: str,
             tasks[task_id]["logs"].append(f"[{i+1}/4] {step_name}...")
             
             try:
-                prompt_content = load_prompt_file(prompt_file)
+                prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
                 answer = engine.ask(prompt_content)
                 results[step_name] = answer
                 tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
@@ -948,6 +947,7 @@ async def start_long_context(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="long")
     task_id = await create_reading_job(
         db,
         user,
@@ -965,7 +965,17 @@ async def start_long_context(
     
     thread = threading.Thread(
         target=run_long_context_task,
-        args=(task_id, user.id, bib_entry.id, file_path, request.analysis_dims, request.custom_question, request.extraction_method, request.api_key),
+        args=(
+            task_id,
+            user.id,
+            bib_entry.id,
+            file_path,
+            request.analysis_dims,
+            request.custom_question,
+            request.extraction_method,
+            prompt_overrides,
+            request.api_key,
+        ),
         daemon=True
     )
     thread.start()
@@ -986,6 +996,7 @@ async def start_quant(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="quant")
     task_id = await create_reading_job(
         db,
         user,
@@ -999,7 +1010,7 @@ async def start_quant(
     
     thread = threading.Thread(
         target=run_quant_task,
-        args=(task_id, user.id, bib_entry.id, file_path, request.api_key),
+        args=(task_id, user.id, bib_entry.id, file_path, prompt_overrides, request.api_key),
         daemon=True
     )
     thread.start()
@@ -1020,6 +1031,7 @@ async def start_qual(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="qual")
     task_id = await create_reading_job(
         db,
         user,
@@ -1033,7 +1045,7 @@ async def start_qual(
     
     thread = threading.Thread(
         target=run_qual_task,
-        args=(task_id, user.id, bib_entry.id, file_path, request.api_key),
+        args=(task_id, user.id, bib_entry.id, file_path, prompt_overrides, request.api_key),
         daemon=True
     )
     thread.start()

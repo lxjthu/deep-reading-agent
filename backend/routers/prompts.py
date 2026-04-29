@@ -1,52 +1,24 @@
-"""
-Prompts Router - Prompt management for all analysis types
-"""
-import os
+"""Prompt center router."""
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from auth.dependencies import current_user, require_admin
+from db import get_db
+from db.models import User
+from prompt_registry import get_prompt_definition
+from prompt_service import (
+    delete_user_prompt,
+    get_catalog,
+    get_prompt_payload,
+    upsert_system_prompt,
+    upsert_user_prompt,
+)
+
 
 router = APIRouter()
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-
-PROMPT_PATHS = {
-    "quant": {
-        "step_1": "prompts/quant_analysis/step_1_overview.md",
-        "step_2": "prompts/quant_analysis/step_2_theory.md",
-        "step_3": "prompts/quant_analysis/step_3_data.md",
-        "step_4": "prompts/quant_analysis/step_4_vars.md",
-        "step_5": "prompts/quant_analysis/step_5_identification.md",
-        "step_6": "prompts/quant_analysis/step_6_results.md",
-        "step_7": "prompts/quant_analysis/step_7_critique.md",
-    },
-    "qual": {
-        "L1": "prompts/qual_analysis/L1_Context_Prompt.md",
-        "L2": "prompts/qual_analysis/L2_Theory_Prompt.md",
-        "L3": "prompts/qual_analysis/L3_Logic_Prompt.md",
-        "L4": "prompts/qual_analysis/L4_Value_Prompt.md",
-    },
-    "long": {
-        "overview": "prompts/long/overview.md",
-        "theory": "prompts/long/theory.md",
-        "methodology": "prompts/long/methodology.md",
-        "data_source": "prompts/long/data_source.md",
-        "variable_measurement": "prompts/long/variable_measurement.md",
-        "identification_assumptions": "prompts/long/identification_assumptions.md",
-        "results": "prompts/long/results.md",
-        "mechanism": "prompts/long/mechanism.md",
-        "robustness": "prompts/long/robustness.md",
-        "external_validity": "prompts/long/external_validity.md",
-        "contributions_limitations": "prompts/long/contributions_limitations.md",
-        "writing_quality": "prompts/long/writing_quality.md",
-        "custom": "prompts/long/custom.md",
-    },
-    "filter": {
-        "explorer": "prompts/literature_filter/explorer.md",
-        "reviewer": "prompts/literature_filter/reviewer.md",
-        "empiricist": "prompts/literature_filter/empiricist.md",
-    }
-}
 
 
 class PromptUpdate(BaseModel):
@@ -55,56 +27,174 @@ class PromptUpdate(BaseModel):
     content: str
 
 
+class PromptItemUpdate(BaseModel):
+    type: str
+    key: str
+    content: str
+
+
+def _normalize_slot(prompt_type: str, prompt_key: str) -> tuple[str, str]:
+    try:
+        get_prompt_definition(prompt_type, prompt_key)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return prompt_type, prompt_key
+
+
+@router.get("/catalog")
+async def prompt_catalog(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return {"types": await get_catalog(db, user_id=user.id)}
+
+
+@router.get("/item")
+async def get_prompt_item(
+    type: str = Query(...),
+    key: str = Query(...),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    prompt_type, prompt_key = _normalize_slot(type, key)
+    payload = await get_prompt_payload(
+        db,
+        prompt_type=prompt_type,
+        prompt_key=prompt_key,
+        user_id=user.id,
+    )
+    return {
+        "type": prompt_type,
+        "key": prompt_key,
+        "title": payload.title,
+        "effective_content": payload.effective_content,
+        "system_content": payload.system_content,
+        "user_content": payload.user_content,
+        "source": payload.source,
+        "has_system_default": payload.has_system_default,
+        "has_user_override": payload.has_user_override,
+        "can_edit_system": user.role == "admin",
+    }
+
+
+@router.put("/my")
+async def save_my_prompt(
+    request: PromptItemUpdate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    prompt_type, prompt_key = _normalize_slot(request.type, request.key)
+    await upsert_user_prompt(
+        db,
+        user_id=user.id,
+        prompt_type=prompt_type,
+        prompt_key=prompt_key,
+        content=request.content,
+    )
+    return {"success": True, "message": "个人提示词已保存。"}
+
+
+@router.delete("/my")
+async def reset_my_prompt(
+    type: str = Query(...),
+    key: str = Query(...),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    prompt_type, prompt_key = _normalize_slot(type, key)
+    deleted = await delete_user_prompt(
+        db,
+        user_id=user.id,
+        prompt_type=prompt_type,
+        prompt_key=prompt_key,
+    )
+    return {"success": True, "deleted": deleted}
+
+
+@router.put("/system")
+async def save_system_prompt(
+    request: PromptItemUpdate,
+    admin_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    prompt_type, prompt_key = _normalize_slot(request.type, request.key)
+    await upsert_system_prompt(
+        db,
+        admin_user_id=admin_user.id,
+        prompt_type=prompt_type,
+        prompt_key=prompt_key,
+        content=request.content,
+    )
+    return {"success": True, "message": "系统默认提示词已保存。"}
+
+
 @router.get("/")
-async def get_prompt(type: str, step: str):
-    """Get prompt content by type and step"""
-    if type not in PROMPT_PATHS:
-        raise HTTPException(status_code=400, detail=f"Invalid type: {type}")
-    
-    if step not in PROMPT_PATHS[type]:
-        raise HTTPException(status_code=400, detail=f"Invalid step: {step}")
-    
-    path = os.path.join(BASE_DIR, PROMPT_PATHS[type][step])
-    
-    if not os.path.exists(path):
-        return {"type": type, "step": step, "content": "", "exists": False}
-    
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
-    
-    return {"type": type, "step": step, "content": content, "exists": True}
+async def get_prompt(
+    type: str = Query(...),
+    step: str = Query(...),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    prompt_type, prompt_key = _normalize_slot(type, step)
+    payload = await get_prompt_payload(
+        db,
+        prompt_type=prompt_type,
+        prompt_key=prompt_key,
+        user_id=user.id,
+    )
+    return {
+        "type": prompt_type,
+        "step": prompt_key,
+        "content": payload.effective_content,
+        "exists": True,
+        "source": payload.source,
+        "title": payload.title,
+    }
 
 
 @router.put("/")
-async def update_prompt(request: PromptUpdate):
-    """Update prompt content"""
-    if request.type not in PROMPT_PATHS:
-        raise HTTPException(status_code=400, detail=f"Invalid type: {request.type}")
-    
-    if request.step not in PROMPT_PATHS[request.type]:
-        raise HTTPException(status_code=400, detail=f"Invalid step: {request.step}")
-    
-    path = os.path.join(BASE_DIR, PROMPT_PATHS[request.type][request.step])
-    
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(request.content)
-    
-    return {"success": True, "message": "Prompt saved"}
+async def update_prompt(
+    request: PromptUpdate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    prompt_type, prompt_key = _normalize_slot(request.type, request.step)
+    if user.role == "admin":
+        await upsert_system_prompt(
+            db,
+            admin_user_id=user.id,
+            prompt_type=prompt_type,
+            prompt_key=prompt_key,
+            content=request.content,
+        )
+        return {"success": True, "message": "系统默认提示词已保存。", "target": "system"}
+
+    await upsert_user_prompt(
+        db,
+        user_id=user.id,
+        prompt_type=prompt_type,
+        prompt_key=prompt_key,
+        content=request.content,
+    )
+    return {"success": True, "message": "个人提示词已保存。", "target": "user"}
 
 
 @router.get("/list")
-async def list_prompts():
-    """List all available prompts"""
-    result = {}
-    for type_name, steps in PROMPT_PATHS.items():
-        result[type_name] = {}
-        for step_name, path in steps.items():
-            full_path = os.path.join(BASE_DIR, path)
-            result[type_name][step_name] = {
-                "path": path,
-                "exists": os.path.exists(full_path)
+async def list_prompts(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    catalog = await get_catalog(db, user_id=user.id)
+    result: dict[str, dict[str, dict[str, object]]] = {}
+    for prompt_type in catalog:
+        result[prompt_type["type"]] = {}
+        for item in prompt_type["items"]:
+            result[prompt_type["type"]][item["key"]] = {
+                "exists": item["has_system_default"],
+                "has_user_override": item["has_user_override"],
+                "source": item["source"],
             }
     return result

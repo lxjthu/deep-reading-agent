@@ -17,6 +17,7 @@ from auth.dependencies import current_user
 from db import AsyncSessionLocal, PROJECT_ROOT, get_db
 from db.models import Artifact, BibEntry, BibFilterLink, File, Job, User
 from db.utils import compute_dedup_key
+from prompt_service import get_effective_prompt_text
 from upload_storage import lookup_path_by_file_id
 
 # Add parent directory to path to import existing modules
@@ -315,6 +316,7 @@ def run_filter_task(
     topic: str,
     min_year: int,
     keywords: Optional[str],
+    prompt_template: str,
     api_key: Optional[str] = None,
 ):
     """Run filter pipeline in background thread. api_key is REQUIRED."""
@@ -343,7 +345,7 @@ def run_filter_task(
         tasks[task_id]["stage"] = "解析文献题录..."
         
         from parsers import get_parser
-        from smart_literature_filter import filter_literature, AIEvaluator, PromptManager
+        from smart_literature_filter import filter_literature, AIEvaluator
         
         # 1. Parse file
         parser = get_parser(file_path)
@@ -373,8 +375,6 @@ def run_filter_task(
         tasks[task_id]["stage"] = "AI 评估中..."
         
         evaluator = AIEvaluator(api_key=api_key)
-        prompt_template = PromptManager.load_prompt(mode)
-        
         ai_results = evaluator.evaluate_batch(df, prompt_template, topic)
         
         tasks[task_id]["progress"] = 80
@@ -474,6 +474,12 @@ async def start_filter(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="筛选仅支持题录文件。",
         )
+    prompt_template = await get_effective_prompt_text(
+        db,
+        user_id=user.id,
+        prompt_type="filter",
+        prompt_key=request.mode,
+    )
 
     file_path = get_file_path(request.file_id)
     if not file_path:
@@ -527,6 +533,7 @@ async def start_filter(
             request.topic,
             request.min_year,
             request.keywords,
+            prompt_template,
             request.api_key,
         ),
         daemon=True

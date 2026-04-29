@@ -154,7 +154,17 @@ class ReadingRouterTests(unittest.TestCase):
             return bib.id
 
     @staticmethod
-    def fake_long(task_id: str, user_id: int, bib_entry_id: str, file_path: str, analysis_dims, custom_question, extraction_method, api_key=None):
+    def fake_long(
+        task_id: str,
+        user_id: int,
+        bib_entry_id: str,
+        file_path: str,
+        analysis_dims,
+        custom_question,
+        extraction_method,
+        prompt_overrides=None,
+        api_key=None,
+    ):
         import asyncio
 
         asyncio.run(reading_router.sync_job_and_bib_start(task_id, bib_entry_id, stage="执行长文本分析...", progress=20))
@@ -184,7 +194,14 @@ class ReadingRouterTests(unittest.TestCase):
         )
 
     @staticmethod
-    def fake_quant(task_id: str, user_id: int, bib_entry_id: str, file_path: str, api_key=None):
+    def fake_quant(
+        task_id: str,
+        user_id: int,
+        bib_entry_id: str,
+        file_path: str,
+        prompt_overrides=None,
+        api_key=None,
+    ):
         import asyncio
 
         asyncio.run(reading_router.sync_job_and_bib_start(task_id, bib_entry_id, stage="执行七步精读...", progress=20))
@@ -221,7 +238,14 @@ class ReadingRouterTests(unittest.TestCase):
         )
 
     @staticmethod
-    def fake_qual(task_id: str, user_id: int, bib_entry_id: str, file_path: str, api_key=None):
+    def fake_qual(
+        task_id: str,
+        user_id: int,
+        bib_entry_id: str,
+        file_path: str,
+        prompt_overrides=None,
+        api_key=None,
+    ):
         import asyncio
 
         asyncio.run(reading_router.sync_job_and_bib_start(task_id, bib_entry_id, stage="执行四步精读...", progress=20))

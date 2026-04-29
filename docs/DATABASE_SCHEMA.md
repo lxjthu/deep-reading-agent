@@ -103,7 +103,7 @@ CREATE INDEX idx_invite_codes_code ON invite_codes (code);
 ```sql
 CREATE TABLE user_settings (
     user_id              INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    preferences_json     TEXT,           -- 预留：UI 偏好、默认 prompt 等
+    preferences_json     TEXT,           -- 预留：UI 偏好等轻量设置；提示词已独立到 prompt_templates
     updated_at           DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 ```
@@ -111,7 +111,40 @@ CREATE TABLE user_settings (
 **v1 暂未启用**，建表占位。  
 **API Key 不入库**：DeepSeek API Key 继续保留在前端 `localStorage`，由用户自行管理。普通用户 24h 清理只清服务端文件与档案，**不清前端 key**。前端登录页对普通用户提示"上传文件、文献档案、精读结果将在 24h 后清空，但您的 API Key 保存在浏览器本地，不会被清理；请自行备份产出文件"。
 
-### 3.4 `files` — 物理文件
+### 3.4 `prompt_templates` — 提示词模板（系统默认 + 用户覆盖）
+
+> 目的：把 `quant / qual / long / filter` 四类提示词从文件系统迁入数据库，支持“系统默认提示词 + 用户个人覆盖”，并统一所有分析链路的读取来源。
+
+```sql
+CREATE TABLE prompt_templates (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    scope               TEXT NOT NULL CHECK (scope IN ('system', 'user')),
+    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter')),
+    prompt_key          TEXT NOT NULL,
+    title               TEXT NOT NULL,
+    content             TEXT NOT NULL,
+    updated_by_user_id  INTEGER REFERENCES users(id),
+    created_at          DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at          DATETIME NOT NULL DEFAULT (datetime('now')),
+
+    UNIQUE (owner_user_id, prompt_type, prompt_key)
+);
+
+CREATE INDEX idx_prompt_templates_scope ON prompt_templates (scope);
+CREATE INDEX idx_prompt_templates_owner ON prompt_templates (owner_user_id);
+CREATE INDEX idx_prompt_templates_type_key ON prompt_templates (prompt_type, prompt_key);
+```
+
+**约定**：
+
+- `owner_user_id IS NULL` + `scope='system'`：系统默认提示词
+- `owner_user_id=<当前用户>` + `scope='user'`：该用户自己的提示词覆盖
+- 当前阶段仍只允许固定槽位，不开放任意自定义 key
+- 运行时优先级：`用户覆盖 → 系统默认 → prompts/ 文件兜底 → 代码内置兜底`
+- 首批系统默认值从现有 `prompts/` 目录幂等导入数据库
+
+### 3.5 `files` — 物理文件
 
 ```sql
 CREATE TABLE files (
@@ -590,6 +623,7 @@ backend/migrations/versions/
 ├── 001_initial_schema.py        # 创建全部表
 ├── 002_add_users_token_version.py  # P1: users.token_version，用于严格 logout
 ├── 003_add_reading_items.py     # 精读结构化结果表，供 compare / library 直接查询
+├── 004_add_prompt_templates.py  # 提示词模板表（系统默认 + 用户覆盖）
 └── (后续新增字段时追加)
 ```
 

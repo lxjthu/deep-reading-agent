@@ -1233,104 +1233,348 @@ function QualTab({ apiKey }: { apiKey: string }) {
 
 // Tab 4: 提示词管理
 function PromptsTab() {
+  const user = useAuthStore((state) => state.user)
   const [promptType, setPromptType] = useState('long')
-  const [currentStep, setCurrentStep] = useState('overview')
-  const [content, setContent] = useState('')
+  const [currentKey, setCurrentKey] = useState('overview')
+  const [catalog, setCatalog] = useState<any[]>([])
+  const [effectiveContent, setEffectiveContent] = useState('')
+  const [userContent, setUserContent] = useState('')
+  const [systemContent, setSystemContent] = useState('')
+  const [source, setSource] = useState('')
+  const [title, setTitle] = useState('')
+  const [hasUserOverride, setHasUserOverride] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState('')
 
   const TYPES = [
-    { id: 'quant', label: '七步精读', steps: [
-      { id: 'step_1', label: 'Step 1: 研究概览' },
-      { id: 'step_2', label: 'Step 2: 理论机制' },
-      { id: 'step_3', label: 'Step 3: 数据说明' },
-      { id: 'step_4', label: 'Step 4: 变量与度量' },
-      { id: 'step_5', label: 'Step 5: 识别策略' },
-      { id: 'step_6', label: 'Step 6: 结果呈现' },
-      { id: 'step_7', label: 'Step 7: 批判性评估' },
-    ]},
-    { id: 'qual', label: '四步精读', steps: [
-      { id: 'L1', label: 'L1: 背景与语境' },
-      { id: 'L2', label: 'L2: 理论框架' },
-      { id: 'L3', label: 'L3: 论证逻辑' },
-      { id: 'L4', label: 'L4: 价值与启示' },
-    ]},
-    { id: 'long', label: '长文本精读', steps: [
-      { id: 'overview', label: '研究问题' },
-      { id: 'theory', label: '理论框架' },
-      { id: 'methodology', label: '识别策略' },
-      { id: 'data_source', label: '数据来源' },
-      { id: 'variable_measurement', label: '变量度量' },
-      { id: 'identification_assumptions', label: '识别假设' },
-      { id: 'results', label: '统计结果' },
-      { id: 'mechanism', label: '机制分析' },
-      { id: 'robustness', label: '稳健性检验' },
-      { id: 'external_validity', label: '外部有效性' },
-      { id: 'contributions_limitations', label: '贡献与局限' },
-      { id: 'writing_quality', label: '写作质量' },
-      { id: 'custom', label: '自定义问题' },
-    ]},
-    { id: 'filter', label: '文献筛选', steps: [
-      { id: 'explorer', label: '探索者模式' },
-      { id: 'reviewer', label: '评审者模式' },
-      { id: 'empiricist', label: '实证主义者' },
-    ]},
+    {
+      id: 'quant',
+      label: '七步精读',
+      steps: [
+        { key: 'step_1', title: 'Step 1: 研究概览' },
+        { key: 'step_2', title: 'Step 2: 理论机制' },
+        { key: 'step_3', title: 'Step 3: 数据说明' },
+        { key: 'step_4', title: 'Step 4: 变量与度量' },
+        { key: 'step_5', title: 'Step 5: 识别策略' },
+        { key: 'step_6', title: 'Step 6: 结果呈现' },
+        { key: 'step_7', title: 'Step 7: 批判性评估' },
+      ],
+    },
+    {
+      id: 'qual',
+      label: '四步精读',
+      steps: [
+        { key: 'L1', title: 'L1: 背景与语境' },
+        { key: 'L2', title: 'L2: 理论框架' },
+        { key: 'L3', title: 'L3: 论证逻辑' },
+        { key: 'L4', title: 'L4: 价值与启示' },
+      ],
+    },
+    {
+      id: 'long',
+      label: '长文本精读',
+      steps: [
+        { key: 'overview', title: '研究问题' },
+        { key: 'theory', title: '理论框架' },
+        { key: 'methodology', title: '识别策略' },
+        { key: 'data_source', title: '数据来源' },
+        { key: 'variable_measurement', title: '变量度量' },
+        { key: 'identification_assumptions', title: '识别假设' },
+        { key: 'results', title: '统计结果' },
+        { key: 'mechanism', title: '机制分析' },
+        { key: 'robustness', title: '稳健性检验' },
+        { key: 'external_validity', title: '外部有效性' },
+        { key: 'contributions_limitations', title: '贡献与局限' },
+        { key: 'writing_quality', title: '写作质量' },
+        { key: 'custom', title: '自定义问题' },
+      ],
+    },
+    {
+      id: 'filter',
+      label: '文献筛选',
+      steps: [
+        { key: 'explorer', title: '探索者模式' },
+        { key: 'reviewer', title: '评审者模式' },
+        { key: 'empiricist', title: '实证主义者' },
+      ],
+    },
   ]
 
-  const currentType = TYPES.find(t => t.id === promptType) || TYPES[0]
+  const currentType =
+    catalog.find((t) => t.type === promptType) ||
+    TYPES.find((t) => t.id === promptType) ||
+    TYPES[0]
 
-  const handleLoad = async () => {
-    setIsLoading(true); setMessage('')
+  const sourceLabel =
+    source === 'user_override'
+      ? '当前生效：我的覆盖'
+      : source === 'system_default'
+        ? '当前生效：系统默认'
+        : source === 'file_fallback'
+          ? '当前生效：文件兜底'
+          : source === 'builtin_fallback'
+            ? '当前生效：代码兜底'
+            : '当前生效：未确定'
+
+  const readError = async (response: Response) => {
+    const text = await response.text()
     try {
-      const res = await fetch(`/api/prompts/?type=${promptType}&step=${currentStep}`)
-      const data = await res.json()
-      setContent(data.content || '')
-      setMessage('✓ 加载成功')
-    } catch (e) { setMessage('❌ 加载失败') }
+      const data = JSON.parse(text)
+      return data?.detail || data?.message || `请求失败（HTTP ${response.status}）`
+    } catch {
+      return text || `请求失败（HTTP ${response.status}）`
+    }
+  }
+
+  const syncSelectionFromCatalog = (nextCatalog: any[]) => {
+    if (!nextCatalog.length) return
+    const matchedType = nextCatalog.find((item) => item.type === promptType) || nextCatalog[0]
+    if (matchedType.type !== promptType) {
+      setPromptType(matchedType.type)
+    }
+    const matchedItem =
+      matchedType.items?.find((item: any) => item.key === currentKey) || matchedType.items?.[0]
+    if (matchedItem && matchedItem.key !== currentKey) {
+      setCurrentKey(matchedItem.key)
+    }
+  }
+
+  const loadCatalog = async () => {
+    const res = await fetch('/api/prompts/catalog')
+    if (!res.ok) throw new Error(await readError(res))
+    const data = await res.json()
+    const nextCatalog = data.types || []
+    setCatalog(nextCatalog)
+    syncSelectionFromCatalog(nextCatalog)
+  }
+
+  const loadItem = async (type: string, key: string) => {
+    const params = new URLSearchParams({ type, key })
+    const res = await fetch(`/api/prompts/item?${params.toString()}`)
+    if (!res.ok) throw new Error(await readError(res))
+    const data = await res.json()
+    setTitle(data.title || '')
+    setEffectiveContent(data.effective_content || '')
+    setUserContent(data.user_content || '')
+    setSystemContent(data.system_content || '')
+    setSource(data.source || '')
+    setHasUserOverride(Boolean(data.has_user_override))
+  }
+
+  const refreshAll = async (type = promptType, key = currentKey) => {
+    setIsLoading(true)
+    setMessage('')
+    try {
+      await loadCatalog()
+      await loadItem(type, key)
+      setMessage('✓ 提示词已加载')
+    } catch (error: any) {
+      setMessage(`❌ ${error?.message || '加载失败'}`)
+    }
     setIsLoading(false)
   }
 
-  const handleSave = async () => {
-    setIsLoading(true); setMessage('')
+  useEffect(() => {
+    void refreshAll(promptType, currentKey)
+  }, [])
+
+  useEffect(() => {
+    if (!currentType) return
+    const stepExists = (currentType.items || currentType.steps || []).some((item: any) => (item.key || item.id) === currentKey)
+    if (!stepExists) {
+      const fallbackKey = (currentType.items || currentType.steps || [])[0]?.key || (currentType.items || currentType.steps || [])[0]?.id
+      if (fallbackKey) {
+        setCurrentKey(fallbackKey)
+      }
+      return
+    }
+    void refreshAll(promptType, currentKey)
+  }, [promptType, currentKey])
+
+  const saveMyPrompt = async () => {
+    setIsLoading(true)
+    setMessage('')
     try {
-      const res = await fetch('/api/prompts/', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: promptType, step: currentStep, content })
+      const res = await fetch('/api/prompts/my', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: promptType, key: currentKey, content: userContent }),
       })
-      if (res.ok) setMessage('✓ 保存成功')
-      else setMessage('❌ 保存失败')
-    } catch (e) { setMessage('❌ 保存失败') }
+      if (!res.ok) throw new Error(await readError(res))
+      await refreshAll(promptType, currentKey)
+      setMessage('✓ 我的提示词已保存')
+    } catch (error: any) {
+      setMessage(`❌ ${error?.message || '保存失败'}`)
+    }
+    setIsLoading(false)
+  }
+
+  const resetMyPrompt = async () => {
+    setIsLoading(true)
+    setMessage('')
+    try {
+      const params = new URLSearchParams({ type: promptType, key: currentKey })
+      const res = await fetch(`/api/prompts/my?${params.toString()}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await readError(res))
+      await refreshAll(promptType, currentKey)
+      setMessage('✓ 已恢复为系统默认')
+    } catch (error: any) {
+      setMessage(`❌ ${error?.message || '恢复默认失败'}`)
+    }
+    setIsLoading(false)
+  }
+
+  const saveSystemPrompt = async () => {
+    setIsLoading(true)
+    setMessage('')
+    try {
+      const res = await fetch('/api/prompts/system', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: promptType, key: currentKey, content: systemContent }),
+      })
+      if (!res.ok) throw new Error(await readError(res))
+      await refreshAll(promptType, currentKey)
+      setMessage('✓ 系统默认提示词已保存')
+    } catch (error: any) {
+      setMessage(`❌ ${error?.message || '保存系统默认失败'}`)
+    }
     setIsLoading(false)
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
-      <div className="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start">
-        <div className="flex-1">
+    <div className="mx-auto max-w-6xl space-y-4">
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
           <label className="block text-xs font-medium text-gray-600 mb-1.5">类型</label>
-          <select value={promptType} onChange={(e) => { setPromptType(e.target.value); setCurrentStep(TYPES.find(t => t.id === e.target.value)?.steps[0].id || '') }} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none">
+          <select
+            value={promptType}
+            onChange={(e) => {
+              const nextType = e.target.value
+              setPromptType(nextType)
+              const nextCatalogType =
+                catalog.find((item) => item.type === nextType) ||
+                TYPES.find((item) => item.id === nextType)
+              const nextKey =
+                nextCatalogType?.items?.[0]?.key ||
+                nextCatalogType?.steps?.[0]?.key
+              if (nextKey) setCurrentKey(nextKey)
+            }}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+          >
             {TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
         </div>
-        <div className="flex-1">
+        <div>
           <label className="block text-xs font-medium text-gray-600 mb-1.5">步骤</label>
-          <select value={currentStep} onChange={(e) => setCurrentStep(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none">
-            {currentType.steps.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          <select
+            value={currentKey}
+            onChange={(e) => setCurrentKey(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+          >
+            {(currentType.items || currentType.steps || []).map((item: any) => (
+              <option key={item.key || item.id} value={item.key || item.id}>
+                {item.title || item.label}
+              </option>
+            ))}
           </select>
         </div>
-        <div className="pt-6 flex gap-2">
-          <button onClick={handleLoad} disabled={isLoading} className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 transition-colors">加载</button>
-          <button onClick={handleSave} disabled={isLoading} className="rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">保存</button>
+        <div className="flex items-end justify-end">
+          <button
+            onClick={() => void refreshAll(promptType, currentKey)}
+            disabled={isLoading}
+            className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+          >
+            刷新
+          </button>
         </div>
       </div>
-      {message && <div className={`text-sm ${message.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>{message}</div>}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-base font-semibold text-gray-900">{title || '提示词管理'}</h3>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+            {sourceLabel}
+          </span>
+          {hasUserOverride && (
+            <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">
+              已存在个人覆盖
+            </span>
+          )}
+        </div>
+        <p className="mt-2 text-sm text-gray-500">
+          普通用户可维护自己的提示词覆盖；管理员额外可维护系统默认提示词。
+        </p>
+      </div>
+      {message && <div className={`text-sm ${message.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>{message}</div>}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="mb-3 text-sm font-medium text-gray-700">当前生效内容</div>
+          <textarea
+            value={effectiveContent}
+            readOnly
+            rows={16}
+            className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-mono text-gray-700"
+          />
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-sm font-medium text-gray-700">我的覆盖</div>
+            <div className="flex gap-2">
+              <button
+                onClick={saveMyPrompt}
+                disabled={isLoading}
+                className="rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all"
+              >
+                保存我的覆盖
+              </button>
+              <button
+                onClick={resetMyPrompt}
+                disabled={isLoading}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+              >
+                恢复默认
+              </button>
+            </div>
+          </div>
+          <textarea
+            value={userContent}
+            onChange={(e) => setUserContent(e.target.value)}
+            placeholder="未设置个人覆盖时，将自动使用系统默认提示词。"
+            rows={16}
+            className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm font-mono focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          />
+        </div>
+      </div>
+      {user?.role === 'admin' && (
+        <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-violet-800">系统默认提示词</div>
+              <div className="mt-1 text-xs text-violet-700">仅管理员可编辑；普通用户未设置覆盖时将使用这里的内容。</div>
+            </div>
+            <button
+              onClick={saveSystemPrompt}
+              disabled={isLoading}
+              className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            >
+              保存系统默认
+            </button>
+          </div>
+          <textarea
+            value={systemContent}
+            onChange={(e) => setSystemContent(e.target.value)}
+            rows={14}
+            className="w-full rounded-lg border border-violet-200 bg-white px-4 py-3 text-sm font-mono focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+          />
+        </div>
+      )}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="mb-2 text-sm font-medium text-gray-700">说明</div>
         <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="选择类型和步骤后点击「加载」查看提示词内容..."
-          rows={20}
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm font-mono focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          value={'优先级：我的覆盖 > 系统默认 > 文件兜底 > 代码兜底\n\n修改“我的覆盖”只影响当前账号；修改“系统默认”会影响所有未设置覆盖的用户。'}
+          readOnly
+          rows={4}
+          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600"
         />
       </div>
     </div>

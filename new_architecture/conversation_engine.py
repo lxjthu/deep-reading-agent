@@ -1,5 +1,6 @@
 """对话式分析引擎 - 核心模块"""
 import json
+from pathlib import Path
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
 
@@ -54,7 +55,13 @@ class ConversationEngine:
 - 使用 Markdown 格式（标题、列表、表格）
 """
     
-    def __init__(self, config: Config, paper_cache: PaperCache, max_history_turns: int = 2):
+    def __init__(
+        self,
+        config: Config,
+        paper_cache: PaperCache,
+        max_history_turns: int = 2,
+        prompt_overrides: Optional[Dict[str, str]] = None,
+    ):
         self.config = config
         self.paper_cache = paper_cache
         # 使用长超时 (180-300s) 以支持大上下文 + 缓存匹配
@@ -65,15 +72,18 @@ class ConversationEngine:
         )
         self.results: List[TurnResult] = []
         self.max_history_turns = max_history_turns  # 滑动窗口大小
+        self.prompt_overrides = prompt_overrides or {}
         
     def _load_prompt_from_file(self, dimension: str) -> Optional[str]:
         """尝试从 prompts/long/ 目录加载维度提示词"""
-        import os
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        prompt_path = os.path.join(base_dir, "prompts", "long", f"{dimension}.md")
-        if os.path.exists(prompt_path):
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                content = f.read().strip()
+        override = (self.prompt_overrides.get(dimension) or "").strip()
+        if override:
+            return override
+
+        base_dir = Path(__file__).resolve().parents[1]
+        prompt_path = base_dir / "prompts" / "long" / f"{dimension}.md"
+        if prompt_path.exists():
+            content = prompt_path.read_text(encoding="utf-8").strip()
             if content:
                 return content
         return None

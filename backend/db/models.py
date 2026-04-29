@@ -89,6 +89,56 @@ class UserSettings(Base):
 
 
 # --------------------------------------------------------------------------
+# Prompt templates
+# --------------------------------------------------------------------------
+
+class PromptTemplate(Base):
+    __tablename__ = "prompt_templates"
+    __table_args__ = (
+        CheckConstraint(
+            "scope IN ('system','user')",
+            name="ck_prompt_templates_scope",
+        ),
+        CheckConstraint(
+            "prompt_type IN ('quant','qual','long','filter')",
+            name="ck_prompt_templates_type",
+        ),
+        UniqueConstraint(
+            "owner_user_id",
+            "prompt_type",
+            "prompt_key",
+            name="uq_prompt_templates_owner_type_key",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    scope: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_type: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_key: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_prompt_templates_scope", PromptTemplate.scope)
+Index("idx_prompt_templates_owner", PromptTemplate.owner_user_id)
+Index("idx_prompt_templates_type_key", PromptTemplate.prompt_type, PromptTemplate.prompt_key)
+
+
+# --------------------------------------------------------------------------
 # Files & batches
 # --------------------------------------------------------------------------
 

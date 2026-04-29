@@ -68,7 +68,7 @@
 | `/api/history/` | 仅列当前用户的 jobs/artifacts；admin 可加 `?owner_user_id=` |
 | `/api/history/synthesis/` | 仅列当前用户的 synthesis；写入时创建 `jobs(type='synthesis')` + `artifacts` |
 | `/api/download/{filename}` | 校验 filename 对应 artifact 的 owner_user_id；admin 例外 |
-| `/api/prompts/` | 提示词全局共享（不按用户隔离） |
+| `/api/prompts/*` | 已登录用户可读当前生效提示词；普通用户只可维护自己的覆盖；admin 可维护系统默认提示词；运行时按“用户覆盖 → 系统默认 → 文件兜底”解析 |
 | `/api/deploy/` | 仅 admin 可用（加 `Depends(require_admin)`） |
 
 ### 3.3 鉴权中间件

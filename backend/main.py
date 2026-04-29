@@ -20,6 +20,8 @@ import uvicorn
 
 # Routers
 from cleanup import cleanup_expired, get_cleanup_interval_minutes
+from db import AsyncSessionLocal
+from prompt_service import ensure_builtin_prompt_templates
 from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library
 
 # Create upload directory
@@ -33,6 +35,11 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     print("🚀 Deep Reading Agent API starting...")
+    try:
+        async with AsyncSessionLocal() as db:
+            await ensure_builtin_prompt_templates(db)
+    except Exception as exc:  # pragma: no cover - defensive startup logging
+        print(f"[prompt-seed] skipped: {exc}")
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(
         cleanup_expired,
