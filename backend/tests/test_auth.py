@@ -112,7 +112,7 @@ class AuthRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
         self.assertEqual(data["user"]["role"], "normal")
-        self.assertIn("24 小时", data["user"]["warning_msg"])
+        self.assertIn("每天 0 点", data["user"]["warning_msg"])
 
         tokens = self.login("alice", "pwd12345")
         me = self.client.get(

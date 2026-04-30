@@ -42,7 +42,7 @@ def utcnow_naive() -> datetime:
 def build_warning_message(role: str) -> str | None:
     if role == "normal":
         return (
-            "您是免费试用账户，上传文件、文献档案和精读结果将在 24 小时后自动清理；"
+            "您是免费试用账户，上传文件、文献档案和精读结果将于每天 0 点自动清空；"
             "浏览器本地保存的 API Key 不受影响。"
         )
     return None
