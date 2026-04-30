@@ -208,7 +208,7 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "job_type IN ('filter','reading_long','reading_quant','reading_qual',"
-            "'compare','synthesis')",
+            "'compare','synthesis','reference_trace')",
             name="ck_jobs_job_type",
         ),
         CheckConstraint(
@@ -350,12 +350,99 @@ Index("idx_bfl_bib", BibFilterLink.bib_entry_id)
 Index("idx_bfl_filter", BibFilterLink.filter_job_id)
 
 
+class BibReference(Base):
+    __tablename__ = "bib_references"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    source_bib_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("bib_entries.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_job_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    reference_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    authors_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    journal: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    volume: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    issue: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    pages: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    doi: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    language: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    dedup_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    matched_bib_entry_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("bib_entries.id"),
+        nullable=True,
+    )
+    match_method: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    match_score: Mapped[Optional[float]] = mapped_column(nullable=True)
+    citation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_bib_refs_owner", BibReference.owner_user_id)
+Index("idx_bib_refs_source_bib", BibReference.source_bib_entry_id)
+Index("idx_bib_refs_source_job", BibReference.source_job_id)
+Index("idx_bib_refs_matched_bib", BibReference.matched_bib_entry_id)
+Index("idx_bib_refs_doi", BibReference.doi)
+Index("idx_bib_refs_dedup", BibReference.dedup_key)
+
+
+class BibReferenceCitation(Base):
+    __tablename__ = "bib_reference_citations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    source_bib_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("bib_entries.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    bib_reference_id: Mapped[str] = mapped_column(
+        ForeignKey("bib_references.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_job_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    citation_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    page_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    section_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    paragraph_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    quote_text: Mapped[str] = mapped_column(Text, nullable=False)
+    quote_text_zh: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    char_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    char_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    match_method: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_brc_owner", BibReferenceCitation.owner_user_id)
+Index("idx_brc_source_bib", BibReferenceCitation.source_bib_entry_id)
+Index("idx_brc_reference", BibReferenceCitation.bib_reference_id)
+Index("idx_brc_source_job", BibReferenceCitation.source_job_id)
+
+
 class JobBibEntry(Base):
     """Associates a job (reading/compare/synthesis) with one or more bib entries."""
     __tablename__ = "job_bib_entries"
     __table_args__ = (
         CheckConstraint(
-            "role IN ('target','compare_member','synthesis_member')",
+            "role IN ('target','compare_member','synthesis_member','reference_source')",
             name="ck_jbe_role",
         ),
         UniqueConstraint("job_id", "bib_entry_id", "role", name="uq_jbe_unique"),
@@ -431,7 +518,9 @@ class Artifact(Base):
     __table_args__ = (
         CheckConstraint(
             "artifact_type IN ('reading_step','reading_final','reading_extract',"
-            "'filter_excel','compare_excel','compare_md','synthesis_md')",
+            "'filter_excel','compare_excel','compare_md','synthesis_md',"
+            "'references_excel','references_with_citations_excel',"
+            "'citation_trace_md','references_json')",
             name="ck_artifacts_artifact_type",
         ),
     )

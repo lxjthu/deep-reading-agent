@@ -15,6 +15,12 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def clean_for_excel(text):
+    """Remove control characters that Excel cannot handle (except tab, LF, CR)."""
+    if not isinstance(text, str):
+        return text
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+
 def get_deepseek_client():
     api_key = os.getenv("DEEPSEEK_API_KEY")
     base_url = "https://api.deepseek.com"
@@ -234,6 +240,10 @@ def main():
     df = df[existing_cols + other_cols]
     
     out_path = os.path.join(out_dir, f"{base_name}_references.xlsx")
+    # Clean control characters that Excel cannot handle (openpyxl rejects chars \x00-\x08, \x0b, \x0c, \x0e-\x1f)
+    for col in df.columns:
+        if pd.api.types.is_string_dtype(df[col]):
+            df[col] = df[col].apply(clean_for_excel)
     df.to_excel(out_path, index=False)
     logger.info(f"Saved {len(parsed_refs)} references to {out_path}")
 

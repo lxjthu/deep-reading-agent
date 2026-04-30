@@ -316,6 +316,17 @@
 
   <script>
     if (!window.requireAuthSession()) { throw new Error('auth required'); }
+    function getCurrentApiKey() {
+      try {
+        const rawUser = localStorage.getItem('dra_user');
+        const user = rawUser ? JSON.parse(rawUser) : null;
+        const username = typeof user?.username === 'string' ? user.username.trim() : '';
+        return username ? (localStorage.getItem(`deepseek_api_key:${username}`) || '') : '';
+      } catch (error) {
+        console.warn('Failed to load scoped API key:', error);
+        return '';
+      }
+    }
     // Global state
     let allReports = [];
     let selectedDims = new Set();
@@ -658,7 +669,7 @@
             dimension: dims[0],
             papers: selectedPapers,
             paperData: paperData,
-            api_key: localStorage.getItem('deepseek_api_key') || '',
+            api_key: getCurrentApiKey(),
             mode: isMulti ? 'multi' : 'single'
           })
         });

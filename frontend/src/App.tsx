@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import './index.css'
 import LibraryTab from './LibraryTab'
+import ReferenceTraceTab from './ReferenceTraceTab'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import { useAuthStore } from './store/auth'
 
@@ -15,11 +16,18 @@ const TABS = [
   { id: 'qual', label: '四步精读', icon: '◉' },
   { id: 'compare-4step', label: '四步对比', icon: '⇄' },
   { id: 'library', label: '我的文献库', icon: '📚' },
+  { id: 'references', label: '参考文献梳理', icon: '🔗' },
   { id: 'prompts', label: '提示词管理', icon: '⚙' },
   { id: 'history', label: '历史记录', icon: '📁' },
 ]
 
 const TAB_IDS = new Set(TABS.map((tab) => tab.id))
+const LEGACY_API_KEY_STORAGE = 'deepseek_api_key'
+
+function getApiKeyStorageKey(username?: string | null) {
+  const normalized = username?.trim()
+  return normalized ? `deepseek_api_key:${normalized}` : null
+}
 
 function getInitialTab(pathname: string, search: string): string {
   if (pathname.startsWith('/workspace/library')) {
@@ -44,9 +52,16 @@ function App() {
   const [showUserMenu, setShowUserMenu] = useState(false)
 
   useEffect(() => {
-    const saved = localStorage.getItem('deepseek_api_key')
-    if (saved) setApiKey(saved)
-  }, [])
+    const storageKey = getApiKeyStorageKey(user?.username)
+    if (!storageKey) {
+      setApiKey('')
+      setTempKey('')
+      return
+    }
+    const saved = localStorage.getItem(storageKey)
+    setApiKey(saved || '')
+    setTempKey('')
+  }, [user?.username])
 
   useEffect(() => {
     setActiveTab(getInitialTab(location.pathname, location.search))
@@ -70,19 +85,24 @@ function App() {
   }
 
   const handleSaveKey = () => {
-    if (tempKey.trim()) {
-      const key = tempKey.trim()
-      setApiKey(key)
-      localStorage.setItem('deepseek_api_key', key)
-      setShowKeyInput(false)
-      setTempKey('')
-    }
+    const storageKey = getApiKeyStorageKey(user?.username)
+    if (!storageKey || !tempKey.trim()) return
+    const key = tempKey.trim()
+    setApiKey(key)
+    localStorage.setItem(storageKey, key)
+    localStorage.removeItem(LEGACY_API_KEY_STORAGE)
+    setShowKeyInput(false)
+    setTempKey('')
   }
 
   const handleDeleteKey = () => {
+    const storageKey = getApiKeyStorageKey(user?.username)
     setApiKey('')
     setTempKey('')
-    localStorage.removeItem('deepseek_api_key')
+    if (storageKey) {
+      localStorage.removeItem(storageKey)
+    }
+    localStorage.removeItem(LEGACY_API_KEY_STORAGE)
     setShowKeyInput(false)
   }
 
@@ -205,7 +225,7 @@ function App() {
                 placeholder={apiKey ? '••••••••••••••••' : 'sk-...'}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
               />
-              <p className="mt-1 text-xs text-gray-400">保存在浏览器 localStorage，刷新后不丢失</p>
+              <p className="mt-1 text-xs text-gray-400">仅保存在当前账号对应的浏览器 localStorage 中，不会与其他账号共用</p>
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={handleSaveKey}
@@ -276,6 +296,7 @@ function App() {
           {activeTab === 'compare-7step' && <CompareTab title="七步法对比分析" src="/compare_7step.html" />}
           {activeTab === 'compare-4step' && <CompareTab title="四步法对比分析" src="/compare_4step.html" />}
           {activeTab === 'library' && <LibraryTab />}
+          {activeTab === 'references' && <ReferenceTraceTab />}
           {activeTab === 'prompts' && <PromptsTab />}
           {activeTab === 'history' && <HistoryTab />}
         </div>

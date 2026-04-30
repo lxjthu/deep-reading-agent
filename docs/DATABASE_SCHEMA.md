@@ -1,8 +1,8 @@
 # 数据库设计文档
 
-> **版本**: v1.1  
-> **日期**: 2026-04-26  
-> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)
+> **版本**: v1.2  
+> **日期**: 2026-04-29  
+> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)
 
 ## 1. 选型与约定
 
@@ -24,29 +24,39 @@
                     │   users     │
                     └──────┬──────┘
                            │ owns
-   ┌───────────────────────┼─────────────────────────┐
-   │                       │                         │
-   ▼                       ▼                         ▼
-┌────────┐         ┌──────────────┐           ┌──────────┐
-│ files  │◀──pdf───│ bib_entries  │──┐        │   jobs   │
-│        │         │  ⭐ 枢纽     │  │ N:M    │          │
+   ┌───────────────────────┼──────────────────────────────────────────────┐
+   │                       │                                              │
+   ▼                       ▼                                              ▼
+┌────────┐         ┌──────────────┐           ┌──────────┐          ┌────────────────┐
+│ files  │◀──pdf───│ bib_entries  │──┐        │   jobs   │          │ invite_codes   │
+│        │         │  ⭐ 枢纽     │  │ N:M    │          │          └────────────────┘
 └───┬────┘         └──────┬───────┘  ▼        └────┬─────┘
-    │ N:1                 │ N:M    ┌──────────┐    │
-    │                     │        │job_bib_  │    │ produces
-    ▼                     ▼        │ entries  │    ▼
-filter_jobs         bib_filter_   └──────────┘  ┌──────────┐
-                     links                       │artifacts │
-                                                 └──────────┘
-                                                  
-┌────────────────┐    ┌────────────────┐    ┌────────────────┐
-│ invite_codes   │    │ user_settings  │    │ upload_batches │
-└────────────────┘    └────────────────┘    └────────────────┘
+    │ N:1                 │        ┌──────────┐    │ produces
+    │                     │        │job_bib_  │    ▼
+    ▼                     │        │ entries  │  ┌──────────┐
+upload_batches            │        └──────────┘  │artifacts │
+                          │                      └──────────┘
+                          │
+                          ▼
+                  ┌──────────────────┐
+                  │  bib_references  │
+                  └────────┬─────────┘
+                           │ has many citations
+                           ▼
+                ┌─────────────────────────┐
+                │ bib_reference_citations │
+                └─────────────────────────┘
+
+┌────────────────┐
+│ user_settings  │
+└────────────────┘
 ```
 
 枢纽：`bib_entries`（一篇文献的"档案"）  
 物理：`files`（PDF / 题录 / MD / DOCX）  
-事件：`jobs`（filter / reading_* / compare / synthesis）  
-产物：`artifacts`（任务输出文件）
+事件：`jobs`（filter / reading_* / compare / synthesis / reference_trace 等）  
+产物：`artifacts`（任务输出文件）  
+引用：`bib_references` / `bib_reference_citations`（参考文献条目与正文引用命中）
 
 ## 3. 表定义
 
@@ -285,6 +295,15 @@ def compute_dedup_key(doi: str | None, title: str, authors: list[str], year: int
 
 PDF 提取后若为 `partial` 或 `minimal`，前端弹出"请补充元数据"对话框。
 
+**参考文献梳理的轻量聚合字段（规划）**：
+
+- `reference_count`
+- `outgoing_citation_count`
+- `incoming_citation_count`
+- `reference_trace_status`
+
+这些字段首期不保存明细，只作为未来在 `bib_entries` 上做列表聚合和状态展示的轻量补充。
+
 ### 3.7 `bib_filter_links` — 文献 ↔ 筛选任务（多对多）
 
 ```sql
@@ -307,7 +326,103 @@ CREATE INDEX idx_bfl_filter ON bib_filter_links (filter_job_id);
 - "这篇文献被哪几次筛选打过分？"→ 跨任务追踪核心  
 - "这次筛选输出了哪些文献？"→ 重建筛选 Excel  
 
-### 3.8 `jobs` — 任务记录
+### 3.8 `bib_references` — 源文献的参考文献条目
+
+> 目的：保存“某篇源文献的参考文献目录条目”，作为参考文献梳理功能的核心实体。它不等价于正式文献库记录；只有匹配成功或用户确认导入后，才会映射到 `bib_entries`。
+
+```sql
+CREATE TABLE bib_references (
+    id                  TEXT PRIMARY KEY,                         -- UUID
+    owner_user_id       INTEGER NOT NULL REFERENCES users(id),
+    source_bib_entry_id TEXT NOT NULL REFERENCES bib_entries(id) ON DELETE CASCADE,
+    source_job_id       TEXT REFERENCES jobs(id) ON DELETE CASCADE,
+
+    reference_order     INTEGER NOT NULL DEFAULT 0,
+    raw_text            TEXT NOT NULL,                           -- 参考文献原文
+    authors_json        TEXT NOT NULL DEFAULT '[]',
+    year                INTEGER,
+    title               TEXT,
+    journal             TEXT,
+    volume              TEXT,
+    issue               TEXT,
+    pages               TEXT,
+    doi                 TEXT,
+    language            TEXT,
+    dedup_key           TEXT,
+
+    matched_bib_entry_id TEXT REFERENCES bib_entries(id),        -- 命中已有文献库记录时填写
+    match_method        TEXT,                                    -- doi_exact/title_author_year/manual/none
+    match_score         REAL,
+    citation_count      INTEGER NOT NULL DEFAULT 0,
+
+    created_at          DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at          DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_bib_refs_owner ON bib_references (owner_user_id);
+CREATE INDEX idx_bib_refs_source_bib ON bib_references (source_bib_entry_id);
+CREATE INDEX idx_bib_refs_source_job ON bib_references (source_job_id);
+CREATE INDEX idx_bib_refs_matched_bib ON bib_references (matched_bib_entry_id);
+CREATE INDEX idx_bib_refs_doi ON bib_references (doi);
+CREATE INDEX idx_bib_refs_dedup ON bib_references (dedup_key);
+```
+
+**字段语义**：
+
+- `source_bib_entry_id`
+  - 当前这条参考文献属于哪篇源文献
+- `matched_bib_entry_id`
+  - 这条参考文献是否已经对应到文献库中的某篇文献
+- `citation_count`
+  - 在正文中命中的次数
+
+**设计说明**：
+
+- 任何解析出的参考文献都先进入 `bib_references`
+- 高置信度命中已有 `bib_entries` 时，填充 `matched_bib_entry_id`
+- 未命中时仍保留条目本身，供前端“重新匹配 / 导入文献库”
+- 该表不单独设置 `expires_at`，普通用户场景下跟随 `source_bib_entry_id` / `source_job_id` 的级联删除
+
+### 3.9 `bib_reference_citations` — 正文引用命中
+
+> 目的：保存“某条参考文献在正文中的具体命中记录”，包括引用文本、上下文摘录、位置与置信度。这是首期必须入库的明细层。
+
+```sql
+CREATE TABLE bib_reference_citations (
+    id                  TEXT PRIMARY KEY,                         -- UUID
+    owner_user_id       INTEGER NOT NULL REFERENCES users(id),
+    source_bib_entry_id TEXT NOT NULL REFERENCES bib_entries(id) ON DELETE CASCADE,
+    bib_reference_id    TEXT NOT NULL REFERENCES bib_references(id) ON DELETE CASCADE,
+    source_job_id       TEXT REFERENCES jobs(id) ON DELETE CASCADE,
+
+    citation_index      INTEGER NOT NULL DEFAULT 0,
+    page_label          TEXT,
+    section_label       TEXT,
+    paragraph_label     TEXT,
+    quote_text          TEXT NOT NULL,                           -- 命中的原始引用文本
+    quote_text_zh       TEXT,                                    -- 可选：双语展示预留
+    excerpt             TEXT,                                    -- 上下文摘录
+    char_start          INTEGER,
+    char_end            INTEGER,
+    match_method        TEXT,                                    -- author_year/numeric/title_keyword/llm_verify
+    confidence          REAL,
+    created_at          DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_brc_owner ON bib_reference_citations (owner_user_id);
+CREATE INDEX idx_brc_source_bib ON bib_reference_citations (source_bib_entry_id);
+CREATE INDEX idx_brc_reference ON bib_reference_citations (bib_reference_id);
+CREATE INDEX idx_brc_source_job ON bib_reference_citations (source_job_id);
+```
+
+**关键约定**：
+
+- `quote_text`、`excerpt` 是首期必须保存的字段
+- `quote_text_zh` 为可选扩展，不要求首期一定填充
+- 位置字段允许部分缺失，避免因为页码/段号识别不稳定而阻塞入库
+- `bib_reference_citations` 的生命周期跟随所属 `bib_reference_id`、`source_bib_entry_id` 和 `source_job_id`
+
+### 3.10 `jobs` — 任务记录
 
 ```sql
 CREATE TABLE jobs (
@@ -319,7 +434,11 @@ CREATE TABLE jobs (
                          'reading_quant',
                          'reading_qual',
                          'compare',
-                         'synthesis')),
+                         'synthesis',
+                         'reference_trace',   -- 参考文献梳理全链路
+                         'reference_extract', -- 仅抽取参考文献目录
+                         'citation_trace'     -- 仅重跑正文引用核验
+                        )),
     status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
                         ('pending', 'running', 'success', 'failed', 'canceled')),
 
@@ -344,7 +463,16 @@ CREATE INDEX idx_jobs_type ON jobs (job_type);
 CREATE INDEX idx_jobs_expires ON jobs (expires_at);
 ```
 
-### 3.9 `job_bib_entries` — 任务 ↔ 文献（多对多）
+**参考文献梳理任务约定**：
+
+- `reference_trace`
+  - 端到端执行“参考文献目录提取 + 条目匹配 + 正文引用核验 + 产物生成”
+- `reference_extract`
+  - 仅抽取参考文献目录并结构化入库
+- `citation_trace`
+  - 针对已有参考文献条目，仅重跑正文引用候选召回与 LLM 核验
+
+### 3.11 `job_bib_entries` — 任务 ↔ 文献（多对多）
 
 ```sql
 CREATE TABLE job_bib_entries (
@@ -354,7 +482,8 @@ CREATE TABLE job_bib_entries (
     role            TEXT NOT NULL CHECK (role IN
                         ('target',          -- reading_* 的精读对象
                          'compare_member',  -- compare 的对比成员
-                         'synthesis_member' -- synthesis 的综述成员
+                         'synthesis_member',-- synthesis 的综述成员
+                         'reference_source' -- reference_trace / citation_trace 的源文献
                         )),
     sort_order      INTEGER NOT NULL DEFAULT 0,                  -- 在多成员任务中的顺序
     UNIQUE (job_id, bib_entry_id, role)
@@ -368,8 +497,9 @@ CREATE INDEX idx_jbe_bib ON job_bib_entries (bib_entry_id);
 - `reading_long/quant/qual` 任务必须**仅有一个** `role='target'`
 - `compare` 任务有 ≥2 个 `role='compare_member'`
 - `synthesis` 任务有 ≥1 个 `role='synthesis_member'`
+- `reference_trace/reference_extract/citation_trace` 任务必须仅有一个 `role='reference_source'`
 
-### 3.10 `reading_items` — 精读结构化结果
+### 3.12 `reading_items` — 精读结构化结果
 
 > 目的：把三类精读结果按“模式 / 维度(步骤) / 子问题”拆成结构化记录，供 compare / synthesis / library 直接查询，避免前端继续下载 Markdown 再做字符串解析。
 
@@ -422,7 +552,7 @@ CREATE INDEX idx_reading_items_parent ON reading_items (parent_key);
 - `reading_items` 保留 job 级历史，支持同一篇文献多次精读
 - `artifacts` 继续保存 Markdown 产物，作为下载与人工阅读版本
 
-### 3.11 `artifacts` — 任务产物
+### 3.13 `artifacts` — 任务产物
 
 ```sql
 CREATE TABLE artifacts (
@@ -436,7 +566,11 @@ CREATE TABLE artifacts (
                          'filter_excel',     -- 筛选 Excel
                          'compare_excel',    -- 对比 Excel
                          'compare_md',       -- 对比 MD（如有）
-                         'synthesis_md'      -- 综述 MD
+                         'synthesis_md',     -- 综述 MD
+                         'references_excel', -- 参考文献目录 Excel
+                         'references_with_citations_excel', -- 含正文引用命中的 Excel
+                         'citation_trace_md',-- 引用梳理 Markdown 报告
+                         'references_json'   -- 可选：结构化 JSON 产物
                         )),
     filename        TEXT NOT NULL,
     storage_path    TEXT NOT NULL,
@@ -453,21 +587,33 @@ CREATE INDEX idx_artifacts_expires ON artifacts (expires_at);
 
 **存储路径规则**：`deep_reading_results/{owner_user_id}/{job_id}/{filename}`
 
+**参考文献梳理产物约定**：
+
+- `references_excel`
+  - 仅包含参考文献目录及匹配结果
+- `references_with_citations_excel`
+  - 包含参考文献目录、文献库匹配、正文命中次数与引用摘要
+- `citation_trace_md`
+  - 用于人工审阅和历史留档的 Markdown 汇总报告
+- `references_json`
+  - 供调试、审计和潜在前端二次渲染使用
+
 ## 4. 级联删除规则
 
 | 触发 | 行为 |
 |---|---|
-| 删除 `users` | 级联删除该用户的 settings/files/bib_entries/jobs/reading_items/artifacts/upload_batches/invite_codes（DB ON DELETE CASCADE） + 物理删除 `_uploads/{user_id}/` 和 `deep_reading_results/{user_id}/` |
-| 删除 `bib_entries` | DB 级联删 bib_filter_links、job_bib_entries、reading_items（**只删关联/结构化结果**）；通过应用层逻辑清理仅由本档案独占的 jobs/artifacts |
+| 删除 `users` | 级联删除该用户的 settings/files/bib_entries/jobs/reading_items/artifacts/upload_batches/invite_codes/bib_references/bib_reference_citations（DB ON DELETE CASCADE） + 物理删除 `_uploads/{user_id}/` 和 `deep_reading_results/{user_id}/` |
+| 删除 `bib_entries` | DB 级联删 bib_filter_links、job_bib_entries、reading_items、以其为 `source_bib_entry_id` 的 `bib_references / bib_reference_citations`（**只删关联/结构化结果**）；通过应用层逻辑清理仅由本档案独占的 jobs/artifacts |
 | 删除 `files` | 应用层处理：清空所有引用该 file 的 `bib_entries.source_file_id`；若 file 是 filter job 的 input，禁止删除（除非任务已完成） |
-| 删除 `jobs` | DB 级联删 job_bib_entries、reading_items、artifacts；不动 bib_entries 本身 |
+| 删除 `jobs` | DB 级联删 job_bib_entries、reading_items、artifacts，以及以其为 `source_job_id` 的 `bib_references / bib_reference_citations`；不动 bib_entries 本身 |
 
 **应用层级联清理 bib_entries 时的逻辑**：
 ```python
 # 删除 bib_entry B5 时：
 # 1. 找出所有 role='target' 且唯一指向 B5 的 reading job → 这些是 B5 独占的，删
-# 2. 找出 compare/synthesis job 中包含 B5 的 → 把 B5 移出成员，job 本身保留
+# 2. 找出 compare/synthesis/reference_* job 中包含 B5 的 → 把 B5 移出成员，job 本身保留
 # 3. B5 关联的 source_file（PDF）→ 询问用户是否一并删除（前端弹窗）
+# 4. 级联删除以 B5 为 source_bib_entry_id 的 bib_references / bib_reference_citations
 ```
 
 ## 5. 24 小时清理任务（普通用户）
@@ -481,7 +627,7 @@ def cleanup_expired() -> None:
     now = datetime.utcnow()
     # 1. 清理过期 artifacts（物理 + 数据库）
     # 2. 清理过期 jobs
-    # 3. 清理过期 bib_entries（级联清理空依赖）
+    # 3. 清理过期 bib_entries（级联清理 bib_references / bib_reference_citations 等依赖）
     # 4. 清理过期 files（物理 + 数据库）
     # 5. 清理过期 upload_batches
     # 6. 清理空目录 _uploads/{uid}/、deep_reading_results/{uid}/
@@ -498,6 +644,12 @@ def cleanup_expired() -> None:
 **API Key 不入清理范围**：DeepSeek API Key 仅存储于用户浏览器 `localStorage`，服务端不持有，故 24h 任务不涉及 key。
 
 **用户角色变更**（normal → vip 或反之）时，需要批量更新 `expires_at`。在 `auth.py` 升降级接口中处理。
+
+**参考文献梳理明细的保留策略**：
+
+- `bib_references` / `bib_reference_citations` 不单独设置 `expires_at`
+- 普通用户数据到期时，依赖 `source_bib_entry_id` 或 `source_job_id` 的级联删除一并清理
+- 这样可以避免多处重复维护到期时间，同时保证引用明细不会脱离源文献长期残留
 
 ## 6. 关键查询示例
 
@@ -549,6 +701,18 @@ WHERE jbe.bib_entry_id IN ('B5', 'B12', 'B33')
   AND a.artifact_type = 'reading_final'
   AND j.status = 'success'
 ORDER BY a.created_at DESC;
+
+-- 源文献 B5 的参考文献条目列表（含命中状态）
+SELECT r.reference_order, r.title, r.year, r.doi, r.citation_count, r.matched_bib_entry_id
+FROM bib_references r
+WHERE r.source_bib_entry_id = 'B5'
+ORDER BY r.reference_order;
+
+-- 参考文献 R8 在正文中的全部引用命中
+SELECT c.quote_text, c.excerpt, c.page_label, c.section_label, c.confidence
+FROM bib_reference_citations c
+WHERE c.bib_reference_id = 'R8'
+ORDER BY c.citation_index;
 ```
 
 ## 7. SQLAlchemy 2.0 模型骨架（参考）
@@ -624,6 +788,7 @@ backend/migrations/versions/
 ├── 002_add_users_token_version.py  # P1: users.token_version，用于严格 logout
 ├── 003_add_reading_items.py     # 精读结构化结果表，供 compare / library 直接查询
 ├── 004_add_prompt_templates.py  # 提示词模板表（系统默认 + 用户覆盖）
+├── 005_add_reference_trace_tables.py  # bib_references / bib_reference_citations + jobs/artifacts 扩展
 └── (后续新增字段时追加)
 ```
 
@@ -653,6 +818,8 @@ backend/migrations/versions/
 | 批量精读 | `jobs.batch_id` |
 | 文献标签/笔记 | `bib_entries.user_tags_json`, `user_note`, `is_pinned` |
 | 引文计数/h-index | `bib_entries.citation_count` |
+| 参考文献梳理与正文引用对齐 | `bib_references` + `bib_reference_citations` + `jobs.job_type/artifacts.artifact_type` 扩展 |
+| 引用网络分析 / 共引分析 | 依赖 `bib_references.source_bib_entry_id -> matched_bib_entry_id` 关系继续向上扩展 |
 | VIP 试用期 | `users.vip_expires_at` |
 | 团队/共享空间 | 不在本期，需要新增 `workspaces` 中间层（暂不规划） |
 

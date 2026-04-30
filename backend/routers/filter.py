@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import uuid
@@ -10,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -24,6 +26,13 @@ from upload_storage import lookup_path_by_file_id
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 router = APIRouter()
+
+
+def _clean_for_excel(text):
+    """Remove control characters that Excel cannot handle (except tab, LF, CR)."""
+    if not isinstance(text, str):
+        return text
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
 
 # In-memory task store (runtime cache; DB is the source of truth)
 tasks = {}
@@ -406,6 +415,10 @@ def run_filter_task(
         ]
         final_cols = [c for c in display_cols if c in df.columns]
         df_display = df[final_cols].copy()
+        # Clean control characters before writing to Excel
+        for col in df_display.columns:
+            if pd.api.types.is_string_dtype(df_display[col]):
+                df_display[col] = df_display[col].apply(_clean_for_excel)
         df_display.to_excel(out_path, index=False)
 
         async def finalize_success():

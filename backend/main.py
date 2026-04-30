@@ -22,7 +22,7 @@ import uvicorn
 from cleanup import cleanup_expired, get_cleanup_interval_minutes
 from db import AsyncSessionLocal
 from prompt_service import ensure_builtin_prompt_templates
-from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library
+from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references
 
 # Create upload directory
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
@@ -34,7 +34,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
-    print("🚀 Deep Reading Agent API starting...")
+    print("[startup] Deep Reading Agent API starting...")
     try:
         async with AsyncSessionLocal() as db:
             await ensure_builtin_prompt_templates(db)
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     app.state.cleanup_scheduler = scheduler
     yield
     scheduler.shutdown(wait=False)
-    print("👋 Deep Reading Agent API shutting down...")
+    print("[shutdown] Deep Reading Agent API shutting down...")
 
 
 app = FastAPI(
@@ -82,6 +82,7 @@ app.include_router(download.router, prefix="/api/download", tags=["Download"])
 app.include_router(history.router, prefix="/api/history", tags=["History"])
 app.include_router(compare.router, prefix="/api/compare", tags=["Compare"])
 app.include_router(library.router, prefix="/api/library", tags=["Library"])
+app.include_router(references.router, prefix="/api/references", tags=["References"])
 app.include_router(deploy.router, prefix="/api/deploy", tags=["Deploy"])
 
 

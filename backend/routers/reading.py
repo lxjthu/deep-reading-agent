@@ -1,4 +1,5 @@
 """Reading Router - authenticated reading jobs with DB persistence."""
+import logging
 import os
 import sys
 import uuid
@@ -527,6 +528,95 @@ def sanitize_filename(name: str) -> str:
     return name
 
 
+def _try_extract_references(
+    file_path: str,
+    user_id: int,
+    task_id: str,
+    source_title: str,
+    bib_entry_id: str,
+) -> list[dict]:
+    """Try to extract references during reading. Returns artifact files on success, empty on failure."""
+    try:
+        from routers.references import write_trace_outputs, persist_trace_success
+        from services.deepseek_refs import extract_references_deepseek, trace_citations_deepseek
+
+        references = extract_references_deepseek(file_path)
+        if not references:
+            return []
+
+        references = trace_citations_deepseek(file_path, references)
+
+        for ref in references:
+            ref["dedup_key"] = compute_dedup_key(
+                ref.get("doi"), ref.get("title") or ref.get("raw_text", "")[:80],
+                ref.get("authors", []), ref.get("year"),
+            )
+            ref.setdefault("citations", [])
+
+        artifact_files = write_trace_outputs(user_id, task_id, source_title, references)
+
+        # Create a separate reference_trace job for database persistence
+        ref_task_id = str(uuid.uuid4())
+        import asyncio
+        asyncio.run(_create_ref_trace_job_and_persist(
+            ref_task_id, user_id, bib_entry_id, references, artifact_files,
+        ))
+
+        return artifact_files
+    except Exception as e:
+        logging.getLogger(__name__).warning("Reference extraction during reading failed: %s", e)
+        return []
+
+
+async def _create_ref_trace_job_and_persist(
+    ref_task_id: str,
+    user_id: int,
+    bib_entry_id: str,
+    references: list[dict],
+    artifact_files: list[dict],
+) -> None:
+    """Create a reference_trace job and persist references to database."""
+    from routers.references import persist_trace_success
+
+    async with AsyncSessionLocal() as db:
+        owner = await db.get(User, user_id)
+        if owner is None:
+            return
+
+        # Create a reference_trace type job
+        job = Job(
+            id=ref_task_id,
+            owner_user_id=user_id,
+            job_type="reference_trace",
+            status="pending",
+            progress=0,
+            current_stage="等待开始...",
+            expires_at=compute_expires_at(owner),
+        )
+        db.add(job)
+
+        # Link job to bib_entry as reference_source
+        db.add(
+            JobBibEntry(
+                job_id=ref_task_id,
+                bib_entry_id=bib_entry_id,
+                role="reference_source",
+                sort_order=0,
+            )
+        )
+        await db.commit()
+
+    # Now persist the references using the existing function
+    await persist_trace_success(ref_task_id, user_id, bib_entry_id, references, artifact_files)
+
+
+def _clean_for_excel(text):
+    """Remove control characters that Excel cannot handle."""
+    if not isinstance(text, str):
+        return text
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+
+
 def run_long_context_task(
     task_id: str,
     user_id: int,
@@ -682,6 +772,16 @@ def run_long_context_task(
         for dim_key, answer in results.items():
             preview_parts.append(f"## {dim_key}\n{answer[:500]}...")
         
+        # Extract references (optional, does not fail the main task)
+        tasks[task_id]["stage"] = "提取参考文献..."
+        tasks[task_id]["logs"].append("尝试提取参考文献...")
+        original_name = get_original_filename(file_path)
+        ref_artifacts = _try_extract_references(
+            file_path, user_id, task_id, original_name, bib_entry_id,
+        )
+        if ref_artifacts:
+            tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")
+        
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["stage"] = "完成"
@@ -692,12 +792,15 @@ def run_long_context_task(
             "dimensions": list(results.keys()),
         }
         reading_items = build_long_reading_items(results, custom_question)
+        # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
+        # Only pass reading_final artifact to avoid duplicates
+        all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
         asyncio.run(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
                 user_id,
-                [{"artifact_type": "reading_final", "absolute_path": report_path}],
+                all_artifacts,
                 reading_items=reading_items,
             )
         )
@@ -798,6 +901,16 @@ def run_quant_task(
         
         preview = "\n\n".join([f"## {k}\n{v[:400]}..." for k, v in list(results.items())[:3]])
         
+        # Extract references (optional, does not fail the main task)
+        tasks[task_id]["stage"] = "提取参考文献..."
+        tasks[task_id]["logs"].append("尝试提取参考文献...")
+        original_name = get_original_filename(file_path)
+        ref_artifacts = _try_extract_references(
+            file_path, user_id, task_id, original_name, bib_entry_id,
+        )
+        if ref_artifacts:
+            tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")
+        
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["stage"] = "完成"
@@ -808,12 +921,15 @@ def run_quant_task(
             "steps": list(results.keys()),
         }
         reading_items = build_step_reading_items(results, mode="quant")
+        # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
+        # Only pass reading_final artifact to avoid duplicates
+        all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
         asyncio.run(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
                 user_id,
-                [{"artifact_type": "reading_final", "absolute_path": report_path}],
+                all_artifacts,
                 reading_items=reading_items,
             )
         )
@@ -904,6 +1020,16 @@ def run_qual_task(
         
         preview = "\n\n".join([f"## {k}\n{v[:400]}..." for k, v in list(results.items())[:2]])
         
+        # Extract references (optional, does not fail the main task)
+        tasks[task_id]["stage"] = "提取参考文献..."
+        tasks[task_id]["logs"].append("尝试提取参考文献...")
+        original_name = get_original_filename(file_path)
+        ref_artifacts = _try_extract_references(
+            file_path, user_id, task_id, original_name, bib_entry_id,
+        )
+        if ref_artifacts:
+            tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")
+        
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["stage"] = "完成"
@@ -914,12 +1040,15 @@ def run_qual_task(
             "steps": list(results.keys()),
         }
         reading_items = build_step_reading_items(results, mode="qual")
+        # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
+        # Only pass reading_final artifact to avoid duplicates
+        all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
         asyncio.run(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
                 user_id,
-                [{"artifact_type": "reading_final", "absolute_path": report_path}],
+                all_artifacts,
                 reading_items=reading_items,
             )
         )

@@ -28,6 +28,12 @@ type AuthFormProps = {
   mode: 'login' | 'register'
 }
 
+const PASSWORD_RULE_TEXT = '密码必须至少 8 位，且同时包含字母和数字。'
+
+function isStrongPassword(password: string) {
+  return password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password)
+}
+
 function AuthLayout({ title, subtitle, footer, onSubmit, mode }: AuthFormProps) {
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
@@ -55,6 +61,9 @@ function AuthLayout({ title, subtitle, footer, onSubmit, mode }: AuthFormProps) 
             try {
               if (mode === 'register' && password !== confirmPassword) {
                 throw new Error('两次输入的密码不一致。')
+              }
+              if (mode === 'register' && !isStrongPassword(password)) {
+                throw new Error(PASSWORD_RULE_TEXT)
               }
               await onSubmit({
                 username,
@@ -102,7 +111,11 @@ function AuthLayout({ title, subtitle, footer, onSubmit, mode }: AuthFormProps) 
               placeholder="请输入密码"
               type="password"
               required
+              minLength={mode === 'register' ? 8 : undefined}
             />
+            {mode === 'register' && (
+              <p className="mt-1 text-xs text-gray-500">{PASSWORD_RULE_TEXT}</p>
+            )}
           </div>
 
           {mode === 'register' && (
