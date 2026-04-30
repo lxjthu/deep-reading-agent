@@ -19,7 +19,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # Routers
-from cleanup import cleanup_expired, get_cleanup_interval_minutes
+from cleanup import cleanup_normal_user_data
 from db import AsyncSessionLocal
 from prompt_service import ensure_builtin_prompt_templates
 from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references
@@ -31,6 +31,27 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
+async def _recover_hanging_jobs() -> None:
+    """Mark all pending/running jobs as failed after a server restart."""
+    from sqlalchemy import update
+    from db.models import Job
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            update(Job)
+            .where(Job.status.in_(["pending", "running"]))
+            .values(
+                status="failed",
+                current_stage="后端重启，任务中断",
+                error_msg="任务因服务器重启而中断，请重新提交。",
+                progress=0,
+            )
+        )
+        await db.commit()
+        if result.rowcount:
+            print(f"[startup] Recovered {result.rowcount} hanging jobs (pending/running -> failed)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
@@ -40,12 +61,20 @@ async def lifespan(app: FastAPI):
             await ensure_builtin_prompt_templates(db)
     except Exception as exc:  # pragma: no cover - defensive startup logging
         print(f"[prompt-seed] skipped: {exc}")
-    scheduler = AsyncIOScheduler(timezone="UTC")
+
+    # Recover jobs left hanging from previous crash/restart
+    try:
+        await _recover_hanging_jobs()
+    except Exception as exc:
+        print(f"[job-recovery] skipped: {exc}")
+
+    scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
     scheduler.add_job(
-        cleanup_expired,
-        "interval",
-        minutes=get_cleanup_interval_minutes(),
-        id="cleanup-expired-data",
+        cleanup_normal_user_data,
+        "cron",
+        hour=0,
+        minute=0,
+        id="cleanup-normal-users",
         replace_existing=True,
     )
     scheduler.start()
