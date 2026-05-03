@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { downloadWithAuth } from './lib/download'
+import MetadataMatchPanel from './MetadataMatchPanel'
 
 type LibraryEntrySummary = {
   id: string
@@ -188,7 +189,7 @@ function buildDraft(detail: LibraryEntryDetail): EditDraft {
   }
 }
 
-export default function LibraryTab() {
+export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [search, setSearch] = useState('')
   const [journalFilter, setJournalFilter] = useState('')
   const [readingStatus, setReadingStatus] = useState('')
@@ -495,7 +496,18 @@ export default function LibraryTab() {
               <div className="space-y-5">
                 {detail.metadata_completeness !== 'full' && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    当前文献的元数据完整度为“{metadataLabel(detail.metadata_completeness)}”，建议补齐标题、作者、DOI、摘要和关键词。
+                    当前文献的元数据完整度为"{metadataLabel(detail.metadata_completeness)}"，建议补齐标题、作者、DOI、摘要和关键词。
+                  </div>
+                )}
+
+                {(!detail.doi || !detail.journal) && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">元数据补全</h4>
+                    <MetadataMatchPanel
+                      entryId={detail.id}
+                      apiKey={apiKey}
+                      onComplete={() => loadDetail(detail.id)}
+                    />
                   </div>
                 )}
 

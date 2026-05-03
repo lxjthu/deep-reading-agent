@@ -106,6 +106,19 @@ function App() {
     setShowKeyInput(false)
   }
 
+  const promptForApiKey = (): string => {
+    if (apiKey) return apiKey
+    const key = prompt('请输入 DeepSeek API Key（sk-开头）：')
+    if (!key || !key.trim()) return ''
+    const trimmed = key.trim()
+    const storageKey = getApiKeyStorageKey(user?.username)
+    if (storageKey) {
+      localStorage.setItem(storageKey, trimmed)
+    }
+    setApiKey(trimmed)
+    return trimmed
+  }
+
   const roleBadgeClass =
     user?.role === 'admin'
       ? 'bg-violet-100 text-violet-700'
@@ -295,7 +308,7 @@ function App() {
           {activeTab === 'compare-long' && <CompareTab title="长文本精读对比分析" src="/compare_long.html" />}
           {activeTab === 'compare-7step' && <CompareTab title="七步法对比分析" src="/compare_7step.html" />}
           {activeTab === 'compare-4step' && <CompareTab title="四步法对比分析" src="/compare_4step.html" />}
-          {activeTab === 'library' && <LibraryTab />}
+          {activeTab === 'library' && <LibraryTab apiKey={apiKey} />}
           {activeTab === 'references' && <ReferenceTraceTab apiKey={apiKey} />}
           {activeTab === 'prompts' && <PromptsTab />}
           {activeTab === 'history' && <HistoryTab />}
@@ -488,6 +501,11 @@ function FilterTab({ apiKey }: { apiKey: string }) {
   }
 
   const handleStart = async () => {
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) {
+      alert('请先设置 DeepSeek API Key')
+      return
+    }
     if (!file) {
       alert('请先上传文献题录文件')
       return
@@ -548,7 +566,7 @@ function FilterTab({ apiKey }: { apiKey: string }) {
           topic,
           min_year: minYear,
           keywords: keywords || undefined,
-          ...(apiKey ? { api_key: apiKey } : {}),
+          ...(effectiveKey ? { api_key: effectiveKey } : {}),
         }),
       })
       const startData = await startRes.json()
@@ -704,10 +722,10 @@ function FilterTab({ apiKey }: { apiKey: string }) {
         <div className="flex gap-2">
           <button
             onClick={handleStart}
-            disabled={isRunning || !apiKey}
+            disabled={isRunning}
             className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
-            {isRunning ? '处理中...' : apiKey ? '开始筛选' : '请先输入 API Key'}
+            {isRunning ? '处理中...' : '开始筛选'}
           </button>
           <button
             onClick={handleCancel}
@@ -850,6 +868,8 @@ function LongTab({ apiKey }: { apiKey: string }) {
   }
 
   const handleStart = async () => {
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { alert('请先设置 DeepSeek API Key'); return }
     if (!file) { alert('请先上传 PDF'); return }
     if (dims.length === 0 && !customQ.trim()) { alert('请至少选择一个分析维度或输入自定义问题'); return }
 
@@ -880,7 +900,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
       const startRes = await fetch('/api/reading/long/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, custom_question: customQ || undefined, extraction_method: extraction, ...(apiKey ? { api_key: apiKey } : {}) })
+        body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey })
       })
       const startData = await startRes.json()
       const taskId = startData.task_id
@@ -930,8 +950,8 @@ function LongTab({ apiKey }: { apiKey: string }) {
         </div>
 
         <div className="flex gap-2">
-          <button onClick={handleStart} disabled={isRunning || !apiKey} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
-            {isRunning ? '分析中...' : apiKey ? '开始精读' : '请先输入 API Key'}
+          <button onClick={handleStart} disabled={isRunning} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
+            {isRunning ? '分析中...' : '开始精读'}
           </button>
           <button onClick={() => void cancelTask()} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
             停止
@@ -1019,6 +1039,8 @@ function QuantTab({ apiKey }: { apiKey: string }) {
   }
 
   const handleStart = async () => {
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { alert('请先设置 DeepSeek API Key'); return }
     if (!file) { alert('请先上传 PDF'); return }
     setIsRunning(true); setProgress(0); setStage('上传文件中...'); setLogs([]); setCurrentStep(0)
     try {
@@ -1044,7 +1066,7 @@ function QuantTab({ apiKey }: { apiKey: string }) {
 
       const startRes = await fetch('/api/reading/quant/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, ...(apiKey ? { api_key: apiKey } : {}) })
+        body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey })
       })
       const startData = await startRes.json()
       const taskId = startData.task_id
@@ -1080,8 +1102,8 @@ function QuantTab({ apiKey }: { apiKey: string }) {
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleStart} disabled={isRunning || !apiKey} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
-            {isRunning ? '分析中...' : apiKey ? '开始精读' : '请先输入 API Key'}
+          <button onClick={handleStart} disabled={isRunning} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
+            {isRunning ? '分析中...' : '开始精读'}
           </button>
           <button onClick={() => void cancelTask()} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
             停止
@@ -1156,6 +1178,8 @@ function QualTab({ apiKey }: { apiKey: string }) {
   }
 
   const handleStart = async () => {
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { alert('请先设置 DeepSeek API Key'); return }
     if (!file) { alert('请先上传 PDF'); return }
     setIsRunning(true); setProgress(0); setStage('上传文件中...'); setLogs([]); setCurrentStep(0)
     try {
@@ -1181,7 +1205,7 @@ function QualTab({ apiKey }: { apiKey: string }) {
 
       const startRes = await fetch('/api/reading/qual/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, ...(apiKey ? { api_key: apiKey } : {}) })
+        body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey })
       })
       const startData = await startRes.json()
       const taskId = startData.task_id
@@ -1217,8 +1241,8 @@ function QualTab({ apiKey }: { apiKey: string }) {
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleStart} disabled={isRunning || !apiKey} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
-            {isRunning ? '分析中...' : apiKey ? '开始精读' : '请先输入 API Key'}
+          <button onClick={handleStart} disabled={isRunning} className="flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-emerald-700 hover:to-emerald-600 disabled:opacity-50 transition-all">
+            {isRunning ? '分析中...' : '开始精读'}
           </button>
           <button onClick={() => void cancelTask()} disabled={!isRunning} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors">
             停止
