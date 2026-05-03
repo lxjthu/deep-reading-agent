@@ -202,6 +202,89 @@
 | `list_entries(...)` | 返回文献库列表 | 列表筛选、排序、搜索、期刊筛选问题 |
 | `get_entry_detail(...)` | 返回单篇文献详情和时间线 | 文献详情、产物列表、筛选评价问题 |
 | `update_entry(...)` | 更新文献元数据 | 文献库编辑保存问题 |
+| `match_online(...)` | 对单篇文献执行在线元数据匹配 | 在线匹配失败、候选结果异常 |
+| `apply_match(...)` | 应用候选元数据到文献 | 应用匹配结果失败 |
+
+## 2.12.1 `backend/services/pdf_metadata_extract.py`
+
+文件：
+
+- [pdf_metadata_extract.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/pdf_metadata_extract.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `extract_front_matter(pdf_path)` | 从 PDF 前 1-3 页提取文本和 DOI/ISBN | 元数据提取失败 |
+| `extract_dois(text)` | 从文本中正则提取 DOI | DOI 提取不全或误提取 |
+| `extract_isbns(text)` | 从文本中正则提取 ISBN | ISBN 提取问题 |
+| `extract_page_header(page)` | 提取页面页眉区域 | 页眉提取不准确 |
+
+## 2.12.2 `backend/services/pdf_metadata_llm.py`
+
+文件：
+
+- [pdf_metadata_llm.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/pdf_metadata_llm.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `extract_metadata_with_llm(front_matter, filename)` | 调用 DeepSeek 从 PDF 前几页抽取结构化元数据 | LLM 抽取结果异常 |
+| `_clean_metadata(data)` | 清洗和验证 LLM 返回的元数据 | 元数据字段格式问题 |
+
+## 2.12.3 `backend/services/metadata_sources.py`
+
+文件：
+
+- [metadata_sources.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/metadata_sources.py)
+
+| 类 / 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `CandidateMetadata` | 候选元数据数据类 | 候选数据结构问题 |
+| `MetadataSource` | 元数据源抽象基类 | 新增数据源时参考 |
+
+## 2.12.4 `backend/services/crossref_source.py`
+
+文件：
+
+- [crossref_source.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/crossref_source.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `CrossrefSource.search_by_doi(doi)` | 通过 Crossref API 查询 DOI | Crossref 查询失败 |
+| `CrossrefSource.search_by_metadata(title, authors, year)` | 通过标题/作者/年份搜索 | Crossref 搜索无结果 |
+
+## 2.12.5 `backend/services/openalex_source.py`
+
+文件：
+
+- [openalex_source.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/openalex_source.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `OpenAlexSource.search_by_doi(doi)` | 通过 OpenAlex API 查询 DOI | OpenAlex 查询失败 |
+| `OpenAlexSource.search_by_metadata(title, authors, year)` | 通过标题/作者/年份搜索 | OpenAlex 搜索无结果 |
+
+## 2.12.6 `backend/services/metadata_match_service.py`
+
+文件：
+
+- [metadata_match_service.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/metadata_match_service.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `score_candidates(extracted, candidates)` | 对候选列表评分排序 | 评分逻辑问题 |
+| `classify_confidence(score)` | 将分数分为 high/medium/low | 置信度阈值问题 |
+| `apply_high_confidence_match(bib_entry, candidate)` | 高置信度自动补空字段 | 自动补全逻辑问题 |
+
+## 2.12.7 `backend/db/utils.py` (新增函数)
+
+文件：
+
+- [utils.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/db/utils.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `compute_metadata_match_score(extracted, existing)` | 综合评分：DOI、标题、作者、年份、期刊 | 匹配分数计算问题 |
+| `normalize_doi(value)` | DOI 标准化 | DOI 比对问题 |
+| `_extract_surname(author_name)` | 提取作者姓氏 | 作者匹配问题 |
 
 ## 2.13 `backend/routers/history.py`
 
@@ -294,6 +377,34 @@
 | `build_messages(...)` | 构造发给 DeepSeek 的消息列表 | 提示词拼接、缓存命中逻辑 |
 | `ask(...)` | 执行单轮问答 | 七步/四步 prompt 问题 |
 | `analyze_dimension(...)` | 执行长文本某维度分析 | 长文本输出异常 |
+
+## 2.20 `backend/services/deepseek_refs.py`
+
+文件：
+
+- [deepseek_refs.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/deepseek_refs.py)
+
+| 函数 / 变量 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `extract_references_deepseek(pdf_path, api_key)` | 从 PDF 尾部提取参考文献（主入口） | 参考文献提取结果异常 |
+| `trace_citations_deepseek(pdf_path, references, api_key)` | 追踪每条参考文献在正文中的引用位置 | 引用追踪结果异常 |
+| `extract_candidate_text(pdf_path)` | 从 PDF 提取参考文献候选文本（双栏自动检测） | 候选文本为空或乱码 |
+| `extract_body_text(pdf_path)` | 从 PDF 提取正文文本和段落信息（双栏自动检测） | 正文提取顺序异常 |
+| `_is_two_column(chars)` | 通过字符 x0 分布判断是否为双栏布局 | 双栏检测不准确 |
+| `_extract_page_text(page, force_text_flow)` | 统一页面文本提取（支持 use_text_flow） | 页面文本提取问题 |
+| `call_deepseek_json(messages, **kwargs)` | 封装 DeepSeek API 调用（重试 + JSON 修复） | DeepSeek 返回异常 |
+
+## 2.21 `backend/routers/references.py`
+
+文件：
+
+- [references.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/routers/references.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `run_reference_trace_task(...)` | 后台执行参考文献梳理任务 | 参考文献任务异常 |
+| `write_trace_outputs(...)` | 生成 Excel/MD/JSON 产物文件 | 产物生成异常 |
+| `persist_trace_success(...)` | 将参考文献和引用写入数据库 | 数据库写入异常 |
 
 ## 3. 前端函数索引
 

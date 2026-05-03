@@ -424,6 +424,8 @@ API Key 本身没有单独的后端管理接口。
 | 拉列表 | `GET /api/library/entries` | `library.py.list_entries(...)` |
 | 拉详情 | `GET /api/library/entries/{entry_id}` | `library.py.get_entry_detail(...)` |
 | 保存编辑 | `PATCH /api/library/entries/{entry_id}` | `library.py.update_entry(...)` |
+| 在线匹配 | `POST /api/library/entries/{entry_id}/match-online` | `library.py.match_online(...)` |
+| 应用匹配 | `POST /api/library/entries/{entry_id}/apply-match` | `library.py.apply_match(...)` |
 
 ## 9.3 数据库映射
 
@@ -567,6 +569,31 @@ API Key 本身没有单独的后端管理接口。
 | 下载按钮 | `downloadWithAuth(...)` |
 
 ## 12. 最近重点改动的影响范围
+
+## 12.0 参考文献文本提取层迁移（pypdf → pdfplumber）
+
+影响层：
+
+- 后端参考文献提取服务
+
+相关文件：
+
+- `backend/services/deepseek_refs.py`
+
+影响点：
+
+- `extract_candidate_text()` 使用 pdfplumber + 双栏检测
+- `extract_body_text()` 使用 pdfplumber + 双栏检测
+- `extract_references_deepseek()` fallback 使用 pdfplumber
+- `trace_citations_deepseek()` body_text 提取使用 pdfplumber
+- 新增 `_is_two_column()` 双栏检测、`_extract_page_text()` 统一提取
+
+不影响：
+
+- 前端
+- 数据库
+- API 接口结构
+- 深度阅读主链路（使用 PaddleOCR 独立提取）
 
 ## 12.1 注册密码规则前置
 
