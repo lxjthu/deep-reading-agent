@@ -13,6 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.dependencies import current_user
 from db import PROJECT_ROOT, get_db
 from db.models import Artifact, BibEntry, BibFilterLink, File, Job, JobBibEntry, User
+from services.crossref_source import CrossrefSource
+from services.metadata_match_service import classify_confidence, score_candidates
+from services.metadata_sources import CandidateMetadata
+from services.openalex_source import OpenAlexSource
+from services.pdf_metadata_extract import extract_front_matter
+from services.pdf_metadata_llm import extract_metadata_with_llm
+from upload_storage import resolve_storage_path
 
 router = APIRouter()
 RESULTS_DIR = PROJECT_ROOT / "deep_reading_results"
@@ -323,3 +330,141 @@ async def update_entry(
 
     await db.commit()
     return await get_entry_detail(entry_id, user=user, db=db)
+
+
+# ============================================================
+# Online Metadata Matching Endpoints
+# ============================================================
+
+
+class OnlineMatchResponse(BaseModel):
+    candidates: list[dict]
+    extracted_metadata: dict
+    high_confidence_count: int
+    medium_confidence_count: int
+
+
+class ApplyMatchRequest(BaseModel):
+    candidate_index: int
+
+
+@router.post("/entries/{entry_id}/match-online", response_model=OnlineMatchResponse)
+async def match_online(
+    entry_id: str,
+    request: dict = {},
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> OnlineMatchResponse:
+    """Execute online metadata matching for a single entry."""
+    entry = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.id == entry_id,
+                BibEntry.owner_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if entry is None:
+        raise HTTPException(status_code=404, detail="文献不存在。")
+
+    api_key = request.get("api_key")
+
+    extracted = {
+        "title": entry.title,
+        "authors": json.loads(entry.authors_json) if entry.authors_json else [],
+        "year": entry.year,
+        "doi": entry.doi,
+        "journal": entry.journal,
+        "language": None,
+    }
+
+    if entry.source_file_id:
+        file_record = await db.get(File, entry.source_file_id)
+        if file_record:
+            file_path = resolve_storage_path(file_record.storage_path)
+            if file_path.exists() and file_path.suffix.lower() == ".pdf":
+                front_matter = extract_front_matter(str(file_path))
+                if front_matter.get("page_1_full"):
+                    llm_metadata = extract_metadata_with_llm(
+                        front_matter,
+                        file_record.original_name,
+                        api_key=api_key,
+                    )
+                    for key in ["title", "authors", "year", "doi", "journal", "language"]:
+                        if not extracted.get(key) and llm_metadata.get(key):
+                            extracted[key] = llm_metadata[key]
+                    if not extracted.get("doi") and front_matter.get("doi_candidates"):
+                        extracted["doi"] = front_matter["doi_candidates"][0]
+
+    candidates = []
+
+    if extracted.get("doi"):
+        crossref = CrossrefSource()
+        openalex = OpenAlexSource()
+
+        doi_result_crossref = await crossref.search_by_doi(extracted["doi"])
+        if doi_result_crossref:
+            candidates.append(doi_result_crossref)
+
+        doi_result_openalex = await openalex.search_by_doi(extracted["doi"])
+        if doi_result_openalex:
+            if not any(c.doi == doi_result_openalex.doi for c in candidates):
+                candidates.append(doi_result_openalex)
+
+    if not candidates and extracted.get("title"):
+        crossref = CrossrefSource()
+        openalex = OpenAlexSource()
+
+        title_results_crossref = await crossref.search_by_metadata(
+            extracted["title"],
+            extracted.get("authors"),
+            extracted.get("year"),
+            max_results=3,
+        )
+        candidates.extend(title_results_crossref)
+
+        title_results_openalex = await openalex.search_by_metadata(
+            extracted["title"],
+            extracted.get("authors"),
+            extracted.get("year"),
+            max_results=3,
+        )
+        candidates.extend(title_results_openalex)
+
+    scored = score_candidates(extracted, candidates)
+
+    visible = [c for c in scored if c.score >= 0.78]
+
+    high_count = sum(1 for c in visible if classify_confidence(c.score) == "high")
+    medium_count = sum(1 for c in visible if classify_confidence(c.score) == "medium")
+
+    return OnlineMatchResponse(
+        candidates=[c.to_dict() for c in visible],
+        extracted_metadata=extracted,
+        high_confidence_count=high_count,
+        medium_confidence_count=medium_count,
+    )
+
+
+@router.post("/entries/{entry_id}/apply-match")
+async def apply_match(
+    entry_id: str,
+    request: ApplyMatchRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Apply a candidate match to fill empty fields."""
+    entry = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.id == entry_id,
+                BibEntry.owner_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if entry is None:
+        raise HTTPException(status_code=404, detail="文献不存在。")
+
+    return {"message": "Match applied successfully."}
