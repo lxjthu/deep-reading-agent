@@ -96,7 +96,7 @@ function artifactLabel(type: string) {
   )
 }
 
-export default function ReferenceTraceTab() {
+export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
   const [entries, setEntries] = useState<TraceEntryOption[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [summary, setSummary] = useState<TraceSummary | null>(null)
@@ -221,7 +221,7 @@ export default function ReferenceTraceTab() {
       const response = await fetch(`/api/references/entries/${encodeURIComponent(selectedId)}/trace`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ ...(apiKey ? { api_key: apiKey } : {}) }),
       })
       const data = await parseJsonOrThrow<{ task_id: string }>(response)
       setLogs((prev) => [...prev, `任务已创建：${data.task_id}`])

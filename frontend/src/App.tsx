@@ -296,7 +296,7 @@ function App() {
           {activeTab === 'compare-7step' && <CompareTab title="七步法对比分析" src="/compare_7step.html" />}
           {activeTab === 'compare-4step' && <CompareTab title="四步法对比分析" src="/compare_4step.html" />}
           {activeTab === 'library' && <LibraryTab />}
-          {activeTab === 'references' && <ReferenceTraceTab />}
+          {activeTab === 'references' && <ReferenceTraceTab apiKey={apiKey} />}
           {activeTab === 'prompts' && <PromptsTab />}
           {activeTab === 'history' && <HistoryTab />}
         </div>
