@@ -25,6 +25,7 @@
 | P11 — 前端"我的文献库"页面 | ✅ 本地完成 | 已实现并本地验证：`/workspace/library`、搜索/筛选、详情编辑、时间线与 artifact 下载 |
 | P12 — 前端管理员后台 | ✅ 本地完成 | 已实现并本地构建验证：`/admin`、用户角色调整、启停账号、密码重置、邀请码管理 |
 | P12.5 — 提示词管理数据库化 + 用户覆盖 | ✅ 本地完成 | 已实现并本地验证：`prompt_templates`、系统默认 + 用户覆盖、统一 PromptService、提示词中心页面 |
+| P12.6 — 任务队列管理器 | ✅ 本地完成 | 已实现并本地验证：`TaskQueueManager`（排队位置、预估等待、并发跟踪）、30 个单元测试全通过 |
 | P13 — Playwright E2E + 部署验收 | ⏳ | |
 
 ## 2. P0 已交付
@@ -1340,7 +1341,37 @@ vite build 成功，前端产物生成
 - 系统默认提示词仍以数据库为主，文件仅作为初始化与兜底来源。
 - 提示词版本历史、变更审计和 diff 展示暂未做，若后续需要可在此基础上继续补。
 
-### 4.17 P13 规划
+### 4.17 P12.6 已交付
+
+> 目标已达成：任务队列管理器已实现，当系统繁忙时用户可看到排队位置和预估等待时间，而非直接被拒绝。
+
+#### P12.6 已达成的结果
+
+- 新增 `backend/services/queue_manager.py`
+  - `TaskQueueManager` 类：入队/出队、运行状态跟踪、排队位置查询
+  - 预估等待时间基于历史平均耗时的移动平均（`0.8 * old + 0.2 * actual`）
+  - 支持 quant/qual/long/reference/filter 五种任务类型
+  - 全局实例 `task_queue` 供路由层使用
+- 新增 `backend/tests/test_queue_manager.py`
+  - 30 个单元测试，覆盖全部行为
+  - 测试分组：Enqueue(5) / Dequeue(4) / MarkRunning(3) / MarkCompleted(3) / GetTaskQueueInfo(4) / GetQueueStatus(3) / EstimateWait(5) / Integration(2)
+  - 纯 Python 实现，无外部依赖
+
+#### P12.6 验收
+
+```
+$ .\venv\Scripts\python.exe -m unittest backend.tests.test_queue_manager -v
+Ran 30 tests in 0.001s
+OK
+```
+
+#### P12.6 后续集成
+
+- `backend/routers/reading.py` 中精读启动时接入 `task_queue.enqueue()`，返回排队信息
+- 任务状态查询接口接入 `task_queue.get_task_queue_info()`，返回排队/运行状态
+- 前端 `TaskProgress` 组件展示排队位置、预估等待时间、已等待时间
+
+### 4.18 P13 规划
 
 > 目标：在最终 push / 部署前，补齐从登录到多用户核心链路的 E2E 与手工验收清单，确保 P0-P12 串起来后没有明显断层。
 

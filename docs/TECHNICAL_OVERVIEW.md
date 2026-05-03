@@ -133,6 +133,7 @@
 
 目录：
 
+- `backend/services/queue_manager.py`
 - `backend/prompt_service.py`
 - `backend/cleanup.py`
 - `new_architecture/`
@@ -140,6 +141,7 @@
 
 职责：
 
+- **任务队列管理**（排队位置、预估等待时间、并发控制）
 - 统一提示词解析
 - 长文本对话引擎
 - 清理过期数据
@@ -618,15 +620,31 @@
 1. **场景一（精读时自动提取）**：在 `reading.py` 的三种精读任务完成后，自动调用 `_try_extract_references()` 提取参考文献
 2. **场景二（已有 PDF 手动提取）**：通过 `references.py` 的 API 端点手动触发参考文献梳理任务
 
+文本提取层：
+
+- 使用 `pdfplumber` 提取 PDF 文本（已从 pypdf 迁移）
+- 自动检测双栏布局（`_is_two_column()`），对双栏页面启用 `use_text_flow=True`
+- 解决了 pypdf 对 CJK 自定义编码 PDF 的中文乱码问题
+- 解决了 pypdf 对双栏排版 PDF 的文本顺序错乱问题
+
 关键函数（`deepseek_refs.py`）：
 
 - `extract_references_deepseek(pdf_path)`
   - 从 PDF 尾部提取参考文献
   - 使用 DeepSeek `deepseek-v4-flash` 模型
+  - 文本提取使用 pdfplumber（支持 CJK 编码 + 双栏布局）
   - 返回结构化参考文献列表
 - `trace_citations_deepseek(pdf_path, references)`
   - 追踪每条参考文献在正文中的引用位置
   - 返回带 citations 的参考文献列表
+- `extract_candidate_text(pdf_path)`
+  - 从 PDF 提取参考文献候选文本
+  - 自动检测双栏布局并启用 `use_text_flow=True`
+- `extract_body_text(pdf_path)`
+  - 从 PDF 提取正文文本和段落信息
+  - 自动检测双栏布局并启用 `use_text_flow=True`
+- `_is_two_column(chars)`
+  - 通过字符 x0 分布判断是否为双栏布局
 - `call_deepseek_json(messages, **kwargs)`
   - 封装 DeepSeek API 调用
   - 支持重试和空内容处理
@@ -698,7 +716,49 @@
 - `/api/prompts/my`
 - `/api/prompts/system`
 
-## 5.13 清理与管理员：`backend/cleanup.py` + `backend/routers/admin.py`
+## 5.13 任务队列管理：`backend/services/queue_manager.py`
+
+文件：
+
+- [queue_manager.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/queue_manager.py)
+
+职责：
+
+- 任务入队与排队位置计算
+- 预估等待时间（基于历史平均耗时的移动平均）
+- 并发任务运行状态跟踪
+- 队列状态查询
+
+关键类：`TaskQueueManager`
+
+关键方法：
+
+- `enqueue(task_id, user_id, task_type)`
+  - 将任务加入队列，返回排队位置和预估等待时间
+- `dequeue_next()`
+  - FIFO 取出下一个待执行任务
+- `mark_running(task_id)`
+  - 标记任务为运行中，从队列移除
+- `mark_completed(task_id)`
+  - 标记任务完成，更新该类型任务的平均耗时（移动平均）
+- `get_queue_status()`
+  - 返回队列长度、运行中任务数、详细列表
+- `get_task_queue_info(task_id)`
+  - 查询特定任务的排队/运行状态
+
+默认平均耗时（秒）：
+
+| task_type | 默认耗时 |
+|-----------|---------|
+| quant | 600（10 分钟） |
+| qual | 480（8 分钟） |
+| long | 720（12 分钟） |
+| reference | 300（5 分钟） |
+| filter | 180（3 分钟） |
+
+测试文件：`backend/tests/test_queue_manager.py`（30 个用例，覆盖全部行为）
+
+## 5.14 清理与管理员：`backend/cleanup.py` + `backend/routers/admin.py`
 
 文件：
 
@@ -1189,6 +1249,24 @@
 - API Key 现在按 `用户名` 存储
 - 不同账号互不继承本地 key
 
+### 8.6 任务队列管理器
+
+改动目标：
+
+- 当系统繁忙时，让用户看到排队位置和预估等待时间，而不是直接拒绝
+
+落点文件：
+
+- `backend/services/queue_manager.py`（新建）
+- `backend/tests/test_queue_manager.py`（新建，30 个用例）
+
+当前结果：
+
+- `TaskQueueManager` 支持入队/出队、运行状态跟踪、排队位置查询
+- 预估等待时间基于历史平均耗时的移动平均
+- 支持 quant/qual/long/reference/filter 五种任务类型
+- 全部 30 个单元测试通过（`.\venv\Scripts\python.exe -m unittest backend.tests.test_queue_manager`）
+
 ## 9. 改代码时的推荐查找路径
 
 ## 9.1 要改注册/登录/权限
@@ -1258,6 +1336,14 @@
 - `frontend/src/lib/download.ts`
 - `frontend/src/App.tsx` 中的 `HistoryTab`
 
+## 9.9 要改任务队列、并发控制、排队提醒
+
+先看：
+
+- `backend/services/queue_manager.py`
+- `backend/tests/test_queue_manager.py`
+- `docs/MIGRATION_PLAN_10PLUS_USERS.md` 第 1.3 节
+
 ## 10. 当前仍在规划、未实施的能力
 
 请结合以下文档继续看：
@@ -1271,6 +1357,7 @@
 
 - PDF 元数据在线匹配增强
 - 参考文献梳理标签页与引用关系入库
+- ~~双栏 PDF 参考文献提取修复~~（已完成：pdfplumber + use_text_flow）
 - 参考文献目录兜底修复
 - 文献综述提示词纳入提示词管理
 - 综述引用锚点强化
