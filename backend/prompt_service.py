@@ -79,7 +79,7 @@ async def _get_template_row(
                 PromptTemplate.prompt_key == prompt_key,
                 PromptTemplate.owner_user_id == owner_user_id,
                 PromptTemplate.scope == scope,
-            )
+            ).limit(1)
         )
     ).scalar_one_or_none()
 
