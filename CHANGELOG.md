@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0 - 2026-05-03
+
+### Features
+
+- Add Windows executable packaging with PyInstaller: single-file exe (91MB), auto-config launcher, install script, build automation (`deep-reading-agent.spec`, `build_windows.py`, `launcher.py`, `install.bat`, `build_and_test.ps1`)
+- Multi-user system with JWT authentication, workspace isolation, task archiving, and admin management (P0-P7)
+- Prompt center with user-level prompt overrides
+- Reference tracing: extract and trace citations from papers
+- Compare long reading with multi-select dimensions and cross-dimension synthesis
+- Auto deploy via GitHub webhook
+
+### Fixes
+
+- Pass user-provided API key to reference extraction instead of relying on env var
+- Prevent `MultipleResultsFound` in prompt_templates query
+- Daily cleanup at 00:00 + recover hanging jobs on startup
+- Fix literature filter display showing all items; fix download path mismatch
+- Fix cross-step dimension selection loss and key persistence
+- Remove hardcoded `DEPLOY_SECRET`; require env variable
+
+### Documentation
+
+- Add multi-user concurrency analysis and migration plan for 10+ concurrent users
+- Add API key flow troubleshooting and deployment architecture guide
+
+---
+
 ## 1.2.0 - 2026-02-24
 
 ### Features
