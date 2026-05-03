@@ -8,7 +8,8 @@
 | 优先级 | 事项 | 当前状态 | 前置依赖 | 关联文档 | 备注 |
 |---|---|---|---|---|---|
 | P0 | 参考文献梳理标签页 + 引用关系入库 | **参考文献识别 + 正文引用追踪均已验证通过**，准备进入实施 | 无 | [REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md) | 当前已调整为 `DeepSeek v4 flash` 方案：参考文献识别和正文引用追踪均由 DeepSeek 完成，利用 1M 上下文 + 硬盘缓存降低成本。验证见下方 2.0 节。 |
-| P1 | PDF 题录/元数据在线匹配增强 | 已规划，未实施 | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | 先做题录问题：PDF 前 1-3 页提取、DeepSeek 结构化抽取、在线候选匹配 |
+| P0.5 | 双栏 PDF 参考文献提取修复 | **已完成（2026-05-03）** | 建议在 P0 进入实施前先修 | [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | pypdf 对 CJK 编码双栏 PDF 的文本提取完全失败（中文乱码），需切换为 pdfplumber。影响所有中文学术期刊论文的参考文献提取。 |
+| P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
 | P2 | 参考文献目录兜底修复 | 已规划，未实施 | 建议在题录/元数据补全后进行 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 重点修 `佚名`、`None`、作者缺失、年份缺失的程序化输出 |
 | P3 | 文献综述提示词纳入提示词管理 | 已规划，未实施 | 建议在题录问题优先处理后进行 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 新增 `synthesis` 类型与固定槽位，支持系统默认 + 用户覆盖 |
 | P4 | 综述引用锚点强化 | 已规划，未实施 | 依赖 P2 / P3 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 解决正文出现 `（文献1）`、`（文献2）` 与目录对不上的问题 |
@@ -182,6 +183,35 @@ PDF 结构复杂度：
 4. **硬盘缓存策略可行**——参考文献识别和正文引用追踪共享正文前缀，第二次调用正文部分全部命中缓存
 5. **输出可写入 `bib_reference_citations` 表**——quote 作为精确子串可定位 char_start/char_end
 
+需要关注的点（新增 2026-05-03）：
+
+- 当前验证的 4 个 PDF 均为**单栏排版**或 pypdf 可正常解码的类型
+- **双栏 CJK 字体 PDF** 上 pypdf 文本提取完全失败（中文全部乱码），参考文献提取 0 条
+- 该问题影响所有中文学术期刊双栏排版的 PDF，是 P0 上线的阻塞项
+
+### 2.1 双栏 PDF 参考文献提取修复
+
+**状态：已完成（2026-05-03）**
+
+目标：
+
+- 将 `deepseek_refs.py` 的文本提取层从 pypdf 切换为 pdfplumber
+- 解决 CJK 自定义编码 PDF 的中文乱码问题
+- 解决双栏布局 PDF 的文本阅读顺序问题
+- 后续阶段复用 PaddleOCR 已提取的 markdown 文本，避免重复读取 PDF
+
+实施内容：
+
+- `extract_candidate_text()` 改用 pdfplumber，自动检测双栏并启用 `use_text_flow=True`
+- `extract_body_text()` 同样改用 pdfplumber
+- `extract_references_deepseek()` fallback 逻辑改用 pdfplumber
+- `trace_citations_deepseek()` body_text 提取改用 pdfplumber
+- 新增 `_is_two_column()` 双栏检测辅助函数
+- 新增 `_extract_page_text()` 统一页面文本提取函数
+- 移除 `from pypdf import PdfReader` 依赖
+
+关联文档：[REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md)
+
 ### 2.2 参考文献目录兜底修复
 
 目标：
@@ -246,9 +276,10 @@ PDF 结构复杂度：
 
 建议后续按下面顺序推进：
 
-1. `PDF 题录/元数据在线匹配增强`
-2. `参考文献梳理标签页 + 引用关系入库`
-3. `参考文献目录兜底修复`
+1. ~~`双栏 PDF 参考文献提取修复`~~（已完成 2026-05-03）
+2. `参考文献梳理标签页 + 引用关系入库`（依赖上项已完成，可以进入实施）
+3. `PDF 题录/元数据在线匹配增强`
+4. `参考文献目录兜底修复`
 4. `文献综述提示词纳入提示词管理`
 5. `综述引用锚点强化`
 6. `P13 Playwright E2E + 部署验收`
