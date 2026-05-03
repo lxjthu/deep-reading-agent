@@ -17,6 +17,7 @@ type LibraryEntrySummary = {
   source_file_name: string | null
   tags: string[]
   note: string | null
+  filter_score: number | null
 }
 
 type LibraryArtifact = {
@@ -194,6 +195,8 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [journalFilter, setJournalFilter] = useState('')
   const [readingStatus, setReadingStatus] = useState('')
   const [pinnedOnly, setPinnedOnly] = useState(false)
+  const [sortBy, setSortBy] = useState('updated')
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc')
   const [entries, setEntries] = useState<LibraryEntrySummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<LibraryEntryDetail | null>(null)
@@ -219,6 +222,8 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       if (journalFilter.trim()) params.set('journal', journalFilter.trim())
       if (readingStatus) params.set('reading_status', readingStatus)
       if (pinnedOnly) params.set('pinned_only', 'true')
+      params.set('sort_by', sortBy)
+      params.set('sort_order', sortOrder)
 
       const query = params.toString()
       const response = await fetch(`/api/library/entries${query ? `?${query}` : ''}`)
@@ -261,7 +266,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   useEffect(() => {
     void loadEntries()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readingStatus, pinnedOnly])
+  }, [readingStatus, pinnedOnly, sortBy, sortOrder])
 
   useEffect(() => {
     if (!selectedId) {
@@ -328,7 +333,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_140px_auto]">
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_140px_auto_auto_auto]">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-500">搜索标题 / DOI / 期刊</span>
             <input
@@ -374,6 +379,35 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               <option value="reading">精读中</option>
               <option value="read">已完成精读</option>
             </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">排序方式</span>
+            <select
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="updated">更新时间</option>
+              <option value="score">筛选评分</option>
+              <option value="year">年份</option>
+              <option value="journal">期刊</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">排序顺序</span>
+            <button
+              type="button"
+              onClick={() => setSortOrder((v) => (v === 'desc' ? 'asc' : 'desc'))}
+              className={`flex w-full items-center justify-center rounded-lg border px-3 py-2 text-sm ${
+                sortOrder === 'desc'
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                  : 'border-gray-300 bg-white text-gray-600'
+              }`}
+            >
+              {sortOrder === 'desc' ? '降序 ↓' : '升序 ↑'}
+            </button>
           </label>
 
           <label className="block">
@@ -439,6 +473,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                         <div className="mt-1 text-xs text-gray-500">
                           {entry.authors.length > 0 ? entry.authors.join(', ') : '作者待补充'}
                           {entry.year ? ` · ${entry.year}` : ''}
+                          {entry.journal ? ` · ${entry.journal}` : ''}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2">
                           <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${statusClass(entry.reading_status)}`}>
@@ -455,6 +490,11 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                         </div>
                       </div>
                       <div className="text-right text-xs text-gray-400">
+                        {entry.filter_score != null && (
+                          <div className="text-[11px] font-medium text-emerald-600">
+                            评分 {entry.filter_score.toFixed(1)}
+                          </div>
+                        )}
                         <div>{entry.tags.length > 0 ? `${entry.tags.length} 个标签` : '无标签'}</div>
                         <div className="mt-1">{entry.source_file_name || '未绑定源文件'}</div>
                       </div>

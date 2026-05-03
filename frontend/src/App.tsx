@@ -870,7 +870,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
   const handleStart = async () => {
     const effectiveKey = promptForApiKey()
     if (!effectiveKey) { alert('请先设置 DeepSeek API Key'); return }
-    if (!file) { alert('请先上传 PDF'); return }
+    if (!file) { alert('请先上传文件'); return }
     if (dims.length === 0 && !customQ.trim()) { alert('请至少选择一个分析维度或输入自定义问题'); return }
 
     setIsRunning(true); setProgress(0); setStage('上传文件中...'); setLogs([]); setPreview(''); setDownloadUrl('')
@@ -919,9 +919,9 @@ function LongTab({ apiKey }: { apiKey: string }) {
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">↗ 上传论文</h3>
           <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-6 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors">
-            <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
+            <input type="file" accept=".pdf,.md,.markdown" onChange={handleFileChange} className="hidden" />
             <span className="text-2xl mb-2">↗</span>
-            <span className="text-sm text-gray-600">点击上传 PDF</span>
+            <span className="text-sm text-gray-600">点击上传 PDF / Markdown</span>
             {file && <span className="mt-2 text-xs text-emerald-600">✓ {file.name}</span>}
           </label>
         </div>
@@ -1041,7 +1041,7 @@ function QuantTab({ apiKey }: { apiKey: string }) {
   const handleStart = async () => {
     const effectiveKey = promptForApiKey()
     if (!effectiveKey) { alert('请先设置 DeepSeek API Key'); return }
-    if (!file) { alert('请先上传 PDF'); return }
+    if (!file) { alert('请先上传文件'); return }
     setIsRunning(true); setProgress(0); setStage('上传文件中...'); setLogs([]); setCurrentStep(0)
     try {
       const formData = new FormData()
@@ -1082,9 +1082,9 @@ function QuantTab({ apiKey }: { apiKey: string }) {
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">↗ 上传论文</h3>
           <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-6 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors">
-            <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
+            <input type="file" accept=".pdf,.md,.markdown" onChange={handleFileChange} className="hidden" />
             <span className="text-2xl mb-2">↗</span>
-            <span className="text-sm text-gray-600">点击上传 PDF</span>
+            <span className="text-sm text-gray-600">点击上传 PDF / Markdown</span>
             {file && <span className="mt-2 text-xs text-emerald-600">✓ {file.name}</span>}
           </label>
         </div>
@@ -1180,7 +1180,7 @@ function QualTab({ apiKey }: { apiKey: string }) {
   const handleStart = async () => {
     const effectiveKey = promptForApiKey()
     if (!effectiveKey) { alert('请先设置 DeepSeek API Key'); return }
-    if (!file) { alert('请先上传 PDF'); return }
+    if (!file) { alert('请先上传文件'); return }
     setIsRunning(true); setProgress(0); setStage('上传文件中...'); setLogs([]); setCurrentStep(0)
     try {
       const formData = new FormData()
@@ -1221,9 +1221,9 @@ function QualTab({ apiKey }: { apiKey: string }) {
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">↗ 上传论文</h3>
           <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-6 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors">
-            <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
+            <input type="file" accept=".pdf,.md,.markdown" onChange={handleFileChange} className="hidden" />
             <span className="text-2xl mb-2">↗</span>
-            <span className="text-sm text-gray-600">点击上传 PDF</span>
+            <span className="text-sm text-gray-600">点击上传 PDF / Markdown</span>
             {file && <span className="mt-2 text-xs text-emerald-600">✓ {file.name}</span>}
           </label>
         </div>

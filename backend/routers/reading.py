@@ -247,6 +247,15 @@ async def get_file_record(db: AsyncSession, user: User, file_id: str) -> File:
     return record
 
 
+def extract_paper_text(file_path: str) -> str:
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in {".md", ".markdown"}:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    from extractor import PDFExtractor
+    return PDFExtractor().extract_content(file_path) or ""
+
+
 def ensure_readable_file_type(file_record: File) -> None:
     if file_record.file_type not in {"pdf", "markdown"}:
         raise HTTPException(
@@ -633,11 +642,11 @@ def run_long_context_task(
     try:
         import asyncio
 
-        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取 PDF...", progress=10))
+        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
-        tasks[task_id]["stage"] = "提取 PDF..."
-        tasks[task_id]["logs"].append("[阶段 1/3] 提取 PDF...")
+        tasks[task_id]["stage"] = "提取文本..."
+        tasks[task_id]["logs"].append("[阶段 1/3] 提取文本...")
         
         # Validate API key first
         if not api_key or not api_key.strip():
@@ -651,17 +660,14 @@ def run_long_context_task(
         
         config = Config.from_key(final_api_key)
         
-        # 3. Read PDF text and create cache
+        # 3. Read file text and create cache
         tasks[task_id]["progress"] = 30
         tasks[task_id]["stage"] = "读取论文内容..."
         tasks[task_id]["logs"].append("[阶段 2/3] 读取论文内容...")
         
-        # Extract PDF text using project extractor
-        from extractor import PDFExtractor
-        extractor = PDFExtractor()
-        paper_text = extractor.extract_content(file_path)
+        paper_text = extract_paper_text(file_path)
         if not paper_text:
-            raise ValueError("无法从 PDF 提取文本。请检查文件是否为扫描件或图片PDF。")
+            raise ValueError("无法提取文本。请检查文件内容是否有效。")
         
         metadata = PaperMetadata(
             title=os.path.basename(file_path),
@@ -828,11 +834,11 @@ def run_quant_task(
     try:
         import asyncio
 
-        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取 PDF...", progress=10))
+        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
-        tasks[task_id]["stage"] = "提取 PDF..."
-        tasks[task_id]["logs"].append("[步骤 1/7] 提取 PDF...")
+        tasks[task_id]["stage"] = "提取文本..."
+        tasks[task_id]["logs"].append("[步骤 1/7] 提取文本...")
         
         if not api_key or not api_key.strip():
             raise ValueError("未提供 API Key。请在前端输入 DeepSeek API Key 后再开始精读。")
@@ -843,12 +849,9 @@ def run_quant_task(
         
         config = Config.from_key(api_key.strip())
         
-        # Extract PDF text using project extractor
-        from extractor import PDFExtractor
-        extractor = PDFExtractor()
-        paper_text = extractor.extract_content(file_path)
+        paper_text = extract_paper_text(file_path)
         if not paper_text:
-            raise ValueError("无法从 PDF 提取文本。请检查文件是否为扫描件或图片PDF。")
+            raise ValueError("无法提取文本。请检查文件内容是否有效。")
         
         metadata = PaperMetadata(title=os.path.basename(file_path), authors=[], source="upload")
         paper_cache = PaperCache(text=paper_text, metadata=metadata)
@@ -957,11 +960,11 @@ def run_qual_task(
     try:
         import asyncio
 
-        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取 PDF...", progress=10))
+        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
-        tasks[task_id]["stage"] = "提取 PDF..."
-        tasks[task_id]["logs"].append("[步骤 1/4] 提取 PDF...")
+        tasks[task_id]["stage"] = "提取文本..."
+        tasks[task_id]["logs"].append("[步骤 1/4] 提取文本...")
         
         if not api_key or not api_key.strip():
             raise ValueError("未提供 API Key。请在前端输入 DeepSeek API Key 后再开始精读。")
@@ -972,12 +975,9 @@ def run_qual_task(
         
         config = Config.from_key(api_key.strip())
         
-        # Extract PDF text using project extractor
-        from extractor import PDFExtractor
-        extractor = PDFExtractor()
-        paper_text = extractor.extract_content(file_path)
+        paper_text = extract_paper_text(file_path)
         if not paper_text:
-            raise ValueError("无法从 PDF 提取文本。请检查文件是否为扫描件或图片PDF。")
+            raise ValueError("无法提取文本。请检查文件内容是否有效。")
         
         metadata = PaperMetadata(title=os.path.basename(file_path), authors=[], source="upload")
         paper_cache = PaperCache(text=paper_text, metadata=metadata)

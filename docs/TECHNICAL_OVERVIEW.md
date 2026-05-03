@@ -78,7 +78,8 @@
 
 ### 2.6 我的文献库
 
-- 查看个人文献列表
+- 查看个人文献列表（显示期刊名称、筛选评分）
+- 多维度排序（更新时间、筛选评分、年份、期刊）
 - 查看和修改题录元数据
 - 查看筛选评价
 - 查看任务时间线与产物
@@ -547,25 +548,33 @@
 
 职责：
 
-- 返回文献列表
+- 返回文献列表（含筛选评分，支持多维度排序）
 - 返回单篇文献详情
 - 更新文献元数据
 
 关键函数：
 
 - `list_entries(...)`
-  - 文献库列表
+  - 文献库列表，支持 `sort_by`（updated/score/year/journal）和 `sort_order`（desc/asc）
+  - 通过子查询关联 `bib_filter_links` 获取最高筛选评分 `filter_score`
 - `get_entry_detail(...)`
   - 单篇详情
 - `update_entry(...)`
   - 修改元数据
 
-详情中包含：
+列表响应 `LibraryEntrySummary` 包含字段：
 
-- 基础题录元数据
-- 筛选评价
-- 时间线
-- 关联产物
+- 基础题录（title, authors, year, doi, journal）
+- 状态（reading_status, metadata_completeness, is_pinned）
+- 来源（source_db, source_file_id, source_file_name）
+- 用户标注（tags, note）
+- 筛选评分（filter_score，取 bib_filter_links 中的最高分）
+
+详情中额外包含：
+
+- 摘要与关键词
+- 筛选评价列表
+- 时间线与关联产物
 
 ## 5.10 历史记录：`backend/routers/history.py`
 
@@ -929,10 +938,11 @@
 
 职责：
 
-- 文献列表
+- 文献列表（卡片式，显示标题、作者、年份、期刊、阅读状态、筛选评分）
 - 文献详情
 - 元数据编辑
 - 时间线与产物下载
+- 多维度排序（更新时间、筛选评分、年份、期刊，升降序）
 
 关键状态变量：
 
@@ -940,6 +950,8 @@
 - `journalFilter`
 - `readingStatus`
 - `pinnedOnly`
+- `sortBy`（updated / score / year / journal）
+- `sortOrder`（desc / asc）
 - `entries`
 - `selectedId`
 - `detail`
@@ -950,7 +962,7 @@
 关键函数：
 
 - `loadEntries()`
-  - 加载列表
+  - 加载列表，传递 sort_by / sort_order 参数
 - `loadDetail(id)`
   - 加载详情
 - `handleSave()`
@@ -1161,6 +1173,8 @@
 ## 7.6 文献库与历史
 
 - 文献库围绕 `BibEntry` 聚合展示
+- 列表查询通过子查询关联 `bib_filter_links` 获取筛选评分
+- 支持按更新时间、筛选评分、年份、期刊排序
 - 历史记录围绕 `Artifact` 和 `Job` 聚合展示
 - 下载与预览统一走鉴权接口
 
@@ -1272,6 +1286,27 @@
 - 预估等待时间基于历史平均耗时的移动平均
 - 支持 quant/qual/long/reference/filter 五种任务类型
 - 全部 30 个单元测试通过（`.\venv\Scripts\python.exe -m unittest backend.tests.test_queue_manager`）
+
+### 8.7 文献库增强：期刊显示、评分排序、MD 精读
+
+改动目标：
+
+- 文献库列表卡片显示期刊名称和筛选评分
+- 支持按筛选评分、年份、期刊、更新时间排序
+- 精读入口支持直接上传 Markdown 文件
+
+落点文件：
+
+- `backend/routers/library.py`（列表接口增加 filter_score 字段和排序参数）
+- `backend/routers/reading.py`（新增 `extract_paper_text` 函数，MD 文件直接读取文本）
+- `frontend/src/LibraryTab.tsx`（卡片增加期刊/评分显示，增加排序控件）
+- `frontend/src/App.tsx`（精读入口 accept 改为 .pdf,.md,.markdown）
+
+当前结果：
+
+- 文献库列表卡片显示 `作者 · 年份 · 期刊` 和评分徽章
+- 排序支持 updated/score/year/journal + 升降序
+- 精读三种模式均支持上传 PDF 和 Markdown
 
 ## 9. 改代码时的推荐查找路径
 

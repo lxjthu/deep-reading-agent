@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, func, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
@@ -40,6 +40,7 @@ class LibraryEntrySummary(BaseModel):
     source_file_name: Optional[str]
     tags: list[str]
     note: Optional[str]
+    filter_score: Optional[float] = None
 
 
 class LibraryArtifactResponse(BaseModel):
@@ -154,7 +155,7 @@ def _load_abstract_translation_from_artifact(entry: BibEntry, artifact: Artifact
     return None
 
 
-def build_entry_summary(entry: BibEntry, source_file: File | None) -> LibraryEntrySummary:
+def build_entry_summary(entry: BibEntry, source_file: File | None, filter_score: Optional[float] = None) -> LibraryEntrySummary:
     return LibraryEntrySummary(
         id=entry.id,
         title=entry.title,
@@ -170,6 +171,7 @@ def build_entry_summary(entry: BibEntry, source_file: File | None) -> LibraryEnt
         source_file_name=source_file.original_name if source_file else None,
         tags=_json_list(entry.user_tags_json),
         note=entry.user_note,
+        filter_score=filter_score,
     )
 
 
@@ -190,14 +192,22 @@ async def list_entries(
     journal: str = Query(default=""),
     reading_status: str = Query(default=""),
     pinned_only: bool = Query(default=False),
+    sort_by: str = Query(default="updated"),
+    sort_order: str = Query(default="desc"),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[LibraryEntrySummary]:
+    score_subq = (
+        select(BibFilterLink.bib_entry_id, func.max(BibFilterLink.score).label("max_score"))
+        .group_by(BibFilterLink.bib_entry_id)
+        .subquery()
+    )
+
     stmt = (
-        select(BibEntry, File)
+        select(BibEntry, File, score_subq.c.max_score)
         .outerjoin(File, File.id == BibEntry.source_file_id)
+        .outerjoin(score_subq, score_subq.c.bib_entry_id == BibEntry.id)
         .where(BibEntry.owner_user_id == user.id)
-        .order_by(BibEntry.is_pinned.desc(), BibEntry.updated_at.desc(), BibEntry.created_at.desc())
     )
     if search.strip():
         like = f"%{search.strip()}%"
@@ -215,8 +225,22 @@ async def list_entries(
     if pinned_only:
         stmt = stmt.where(BibEntry.is_pinned == 1)
 
+    order_cols = []
+    if sort_by == "score":
+        order_cols.append(func.coalesce(score_subq.c.max_score, 0))
+    elif sort_by == "year":
+        order_cols.append(BibEntry.year)
+    elif sort_by == "journal":
+        order_cols.append(func.coalesce(BibEntry.journal, ""))
+    else:
+        order_cols.append(BibEntry.is_pinned.desc())
+        order_cols.append(BibEntry.updated_at)
+
+    direction = desc if sort_order == "desc" else asc
+    stmt = stmt.order_by(*(direction(c) for c in order_cols), BibEntry.created_at.desc())
+
     rows = (await db.execute(stmt)).all()
-    return [build_entry_summary(entry, source_file) for entry, source_file in rows]
+    return [build_entry_summary(entry, source_file, max_score) for entry, source_file, max_score in rows]
 
 
 @router.get("/entries/{entry_id}", response_model=LibraryEntryDetail)
