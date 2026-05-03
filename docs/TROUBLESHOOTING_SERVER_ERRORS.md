@@ -313,6 +313,126 @@ git push origin online
 
 ---
 
+## 问题 4：文献库页面返回 500 Internal Server Error（`DESC DESC` SQL 语法错误）
+
+### 错误现象
+
+前端打开"我的文献库"标签页时，`GET /api/library/entries` 返回 `500 Internal Server Error`，页面空白无数据。其他接口（`/api/auth/me`、`/api/history/`、`/api/prompts/catalog`）均正常。
+
+### 排查过程
+
+#### 1. 确认数据库和连接正常
+
+```python
+# 检查数据库文件和表
+import sqlite3
+conn = sqlite3.connect('db/app.sqlite')
+cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+# → 15 张表全部存在，alembic_version = 005_add_reference_trace_tables
+
+# 检查用户数据
+cur.execute("SELECT id, username, role FROM users")
+# → (1, 'admin', 'admin'), (2, 'usercheck001', 'normal'), (3, 'lxj', 'normal')
+```
+
+数据库迁移完整，用户数据完好。
+
+#### 2. 确认前后端通信正常
+
+```
+Frontend (localhost:5173) → Vite proxy /api → Backend (localhost:8000) ✅
+Backend /health → 200 OK ✅
+Backend /api/auth/login → 200 OK ✅
+Backend /api/auth/me → 200 OK ✅
+Backend /api/library/entries → 500 Internal Server Error ❌
+```
+
+#### 3. 定位 SQL 错误
+
+直接用 Python 复现 `list_entries` 查询，捕获完整 traceback：
+
+```
+sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) near "DESC": syntax error
+[SQL: ... ORDER BY bib_entries.is_pinned DESC DESC, bib_entries.updated_at DESC, ...]
+```
+
+关键发现：**`DESC DESC`** —— 双重降序关键字，SQLite 无法解析。
+
+### 根因分析
+
+`backend/routers/library.py` 的 `list_entries` 函数中，排序逻辑存在 bug：
+
+```python
+# 旧代码（有 BUG）
+order_cols = []
+if sort_by == "score":
+    order_cols.append(func.coalesce(score_subq.c.max_score, 0))
+elif sort_by == "year":
+    order_cols.append(BibEntry.year)
+elif sort_by == "journal":
+    order_cols.append(func.coalesce(BibEntry.journal, ""))
+else:
+    order_cols.append(BibEntry.is_pinned.desc())  # ← 已经调用了 .desc()
+    order_cols.append(BibEntry.updated_at)
+
+direction = desc if sort_order == "desc" else asc
+stmt = stmt.order_by(*(direction(c) for c in order_cols), ...)  # ← 又包了一层 desc()
+```
+
+当 `sort_by == "updated"`（默认值）且 `sort_order == "desc"`（默认值）时：
+
+1. `BibEntry.is_pinned.desc()` 已经返回一个 `DESC` 列对象
+2. `direction(c)` 即 `desc(c)` 再次对它调用 `desc()`，产生 `DESC DESC`
+
+SQLite 不支持 `DESC DESC` 语法，直接报错。
+
+**影响范围**：只要 `sort_by` 为默认值 `"updated"`（即进入 `else` 分支），必然触发此 bug。这是文献库的默认排序参数，所以用户每次打开文献库都会 500。
+
+### 解决方案
+
+将排序逻辑改为显式的 `if/else` 分支，每种 `sort_by` 单独处理排序方向：
+
+```python
+# 新代码（已修复）
+if sort_by == "score":
+    if sort_order == "desc":
+        stmt = stmt.order_by(desc(func.coalesce(score_subq.c.max_score, 0)), BibEntry.created_at.desc())
+    else:
+        stmt = stmt.order_by(asc(func.coalesce(score_subq.c.max_score, 0)), BibEntry.created_at.desc())
+elif sort_by == "year":
+    if sort_order == "desc":
+        stmt = stmt.order_by(desc(BibEntry.year), BibEntry.created_at.desc())
+    else:
+        stmt = stmt.order_by(asc(BibEntry.year), BibEntry.created_at.desc())
+elif sort_by == "journal":
+    if sort_order == "desc":
+        stmt = stmt.order_by(desc(func.coalesce(BibEntry.journal, "")), BibEntry.created_at.desc())
+    else:
+        stmt = stmt.order_by(asc(func.coalesce(BibEntry.journal, "")), BibEntry.created_at.desc())
+else:
+    # 默认排序：置顶优先 → 更新时间倒序 → 创建时间倒序
+    stmt = stmt.order_by(BibEntry.is_pinned.desc(), BibEntry.updated_at.desc(), BibEntry.created_at.desc())
+```
+
+修改文件：`backend/routers/library.py`
+
+### 验证
+
+```python
+# 本地直接查询验证
+async with AsyncSessionLocal() as db:
+    rows = (await db.execute(stmt)).all()
+    # → 338 rows, 无报错
+```
+
+### 经验总结
+
+- SQLAlchemy 的 `.desc()` 方法返回的是**已标记方向的列对象**，不应再用 `desc()` / `asc()` 二次包装
+- `order_cols` 列表混用原始列和 `.desc()` 列对象，再用 generator 统一包装方向，是错误的模式
+- 排序逻辑应显式处理，避免隐式的双重方向调用
+
+---
+
 ## 服务器架构总结
 
 ```
@@ -361,3 +481,4 @@ git push origin online
 3. **代码层面**：查询时使用 `LIMIT 1` 或 `first()` 代替 `scalar_one_or_none()`，避免多行结果导致异常
 4. **API Key 层面**：所有使用 API Key 的模块都应优先使用用户提供的 Key，环境变量仅作为回退选项
 5. **前端层面**：所有需要 API Key 的页面组件都应接收并传递 `apiKey` 参数
+6. **SQLAlchemy 排序层面**：不要对已调用 `.desc()` / `.asc()` 的列对象再用 `desc()` / `asc()` 二次包装；排序逻辑应显式处理每种 `sort_by` 分支，避免混用原始列和方向化列对象后统一包装

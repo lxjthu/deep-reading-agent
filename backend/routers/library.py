@@ -225,19 +225,23 @@ async def list_entries(
     if pinned_only:
         stmt = stmt.where(BibEntry.is_pinned == 1)
 
-    order_cols = []
     if sort_by == "score":
-        order_cols.append(func.coalesce(score_subq.c.max_score, 0))
+        if sort_order == "desc":
+            stmt = stmt.order_by(desc(func.coalesce(score_subq.c.max_score, 0)), BibEntry.created_at.desc())
+        else:
+            stmt = stmt.order_by(asc(func.coalesce(score_subq.c.max_score, 0)), BibEntry.created_at.desc())
     elif sort_by == "year":
-        order_cols.append(BibEntry.year)
+        if sort_order == "desc":
+            stmt = stmt.order_by(desc(BibEntry.year), BibEntry.created_at.desc())
+        else:
+            stmt = stmt.order_by(asc(BibEntry.year), BibEntry.created_at.desc())
     elif sort_by == "journal":
-        order_cols.append(func.coalesce(BibEntry.journal, ""))
+        if sort_order == "desc":
+            stmt = stmt.order_by(desc(func.coalesce(BibEntry.journal, "")), BibEntry.created_at.desc())
+        else:
+            stmt = stmt.order_by(asc(func.coalesce(BibEntry.journal, "")), BibEntry.created_at.desc())
     else:
-        order_cols.append(BibEntry.is_pinned.desc())
-        order_cols.append(BibEntry.updated_at)
-
-    direction = desc if sort_order == "desc" else asc
-    stmt = stmt.order_by(*(direction(c) for c in order_cols), BibEntry.created_at.desc())
+        stmt = stmt.order_by(BibEntry.is_pinned.desc(), BibEntry.updated_at.desc(), BibEntry.created_at.desc())
 
     rows = (await db.execute(stmt)).all()
     return [build_entry_summary(entry, source_file, max_score) for entry, source_file, max_score in rows]
