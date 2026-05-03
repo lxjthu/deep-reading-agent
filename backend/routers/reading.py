@@ -534,17 +534,18 @@ def _try_extract_references(
     task_id: str,
     source_title: str,
     bib_entry_id: str,
+    api_key: Optional[str] = None,
 ) -> list[dict]:
     """Try to extract references during reading. Returns artifact files on success, empty on failure."""
     try:
         from routers.references import write_trace_outputs, persist_trace_success
         from services.deepseek_refs import extract_references_deepseek, trace_citations_deepseek
 
-        references = extract_references_deepseek(file_path)
+        references = extract_references_deepseek(file_path, api_key=api_key)
         if not references:
             return []
 
-        references = trace_citations_deepseek(file_path, references)
+        references = trace_citations_deepseek(file_path, references, api_key=api_key)
 
         for ref in references:
             ref["dedup_key"] = compute_dedup_key(
@@ -777,7 +778,7 @@ def run_long_context_task(
         tasks[task_id]["logs"].append("尝试提取参考文献...")
         original_name = get_original_filename(file_path)
         ref_artifacts = _try_extract_references(
-            file_path, user_id, task_id, original_name, bib_entry_id,
+            file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
         if ref_artifacts:
             tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")
@@ -906,7 +907,7 @@ def run_quant_task(
         tasks[task_id]["logs"].append("尝试提取参考文献...")
         original_name = get_original_filename(file_path)
         ref_artifacts = _try_extract_references(
-            file_path, user_id, task_id, original_name, bib_entry_id,
+            file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
         if ref_artifacts:
             tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")
@@ -1025,7 +1026,7 @@ def run_qual_task(
         tasks[task_id]["logs"].append("尝试提取参考文献...")
         original_name = get_original_filename(file_path)
         ref_artifacts = _try_extract_references(
-            file_path, user_id, task_id, original_name, bib_entry_id,
+            file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
         if ref_artifacts:
             tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")

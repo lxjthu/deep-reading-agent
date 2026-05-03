@@ -721,7 +721,7 @@ def write_trace_outputs(
     ]
 
 
-def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: str, file_path: str, source_title: str) -> None:
+def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: str, file_path: str, source_title: str, api_key: Optional[str] = None) -> None:
     try:
         asyncio.run(mark_trace_started(task_id, source_bib_entry_id, stage="读取 PDF...", progress=10))
         tasks[task_id]["status"] = "running"
@@ -733,7 +733,7 @@ def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: st
         tasks[task_id]["stage"] = "DeepSeek 识别参考文献..."
         tasks[task_id]["logs"].append("调用 DeepSeek 识别参考文献")
 
-        references = extract_references_deepseek(file_path)
+        references = extract_references_deepseek(file_path, api_key=api_key)
         if not references:
             raise ValueError("DeepSeek 未识别到任何参考文献。")
 
@@ -741,7 +741,7 @@ def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: st
         tasks[task_id]["stage"] = "DeepSeek 追踪正文引用..."
         tasks[task_id]["logs"].append(f"识别到 {len(references)} 条参考文献，开始追踪正文引用")
 
-        references = trace_citations_deepseek(file_path, references)
+        references = trace_citations_deepseek(file_path, references, api_key=api_key)
 
         for ref in references:
             ref["dedup_key"] = compute_dedup_key(
@@ -904,7 +904,7 @@ async def start_reference_trace(
     tasks[task_id] = init_task_payload(task_id, user.id, entry.id)
     thread = threading.Thread(
         target=run_reference_trace_task,
-        args=(task_id, user.id, entry.id, str(source_path), entry.title),
+        args=(task_id, user.id, entry.id, str(source_path), entry.title, _request.api_key),
         daemon=True,
     )
     thread.start()

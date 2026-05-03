@@ -290,8 +290,10 @@ def call_deepseek_json(
     *,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = 0.1,
+    api_key: Optional[str] = None,
 ) -> Optional[dict]:
-    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key or not api_key.strip():
+        api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         raise RuntimeError("DEEPSEEK_API_KEY not set")
     client = OpenAI(api_key=api_key, base_url=BASE_URL)
@@ -318,7 +320,7 @@ def call_deepseek_json(
     return None
 
 
-def extract_references_deepseek(pdf_path: str) -> list[dict]:
+def extract_references_deepseek(pdf_path: str, api_key: Optional[str] = None) -> list[dict]:
     logger.info("Extracting references from %s", pdf_path)
     candidate_text = extract_candidate_text(pdf_path)
     if len(candidate_text.strip()) < 80:
@@ -343,7 +345,7 @@ def extract_references_deepseek(pdf_path: str) -> list[dict]:
         )},
     ]
 
-    result = call_deepseek_json(messages)
+    result = call_deepseek_json(messages, api_key=api_key)
     if result is None:
         logger.error("DeepSeek returned no valid JSON after %d retries", MAX_RETRIES)
         return []
@@ -382,6 +384,7 @@ def extract_references_deepseek(pdf_path: str) -> list[dict]:
 def trace_citations_deepseek(
     pdf_path: str,
     references: list[dict],
+    api_key: Optional[str] = None,
 ) -> list[dict]:
     if not references:
         return references
@@ -423,7 +426,7 @@ def trace_citations_deepseek(
         {"role": "user", "content": user_content},
     ]
 
-    result = call_deepseek_json(messages, max_tokens=DEFAULT_MAX_TOKENS)
+    result = call_deepseek_json(messages, max_tokens=DEFAULT_MAX_TOKENS, api_key=api_key)
     if result is None:
         logger.warning("Citation tracing failed, returning references without citations")
         for ref in references:
