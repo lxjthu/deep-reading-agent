@@ -23,8 +23,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "_gui_uploads")
+def get_resource_path(relative_path):
+    """获取资源文件路径（支持打包后的路径）"""
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+BASE_DIR = get_resource_path('')
+REAL_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(REAL_BASE_DIR, "_gui_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
@@ -376,7 +385,7 @@ def run_long_context(pdf_file, selected_dims, custom_question, progress=gr.Progr
                 _check_cancel()
 
                 from paddleocr_pipeline import extract_with_fallback
-                paddleocr_md_dir = os.path.join(BASE_DIR, "paddleocr_md")
+                paddleocr_md_dir = os.path.join(REAL_BASE_DIR, "paddleocr_md")
                 os.makedirs(paddleocr_md_dir, exist_ok=True)
                 md_path, metadata = extract_with_fallback(pdf_path, out_dir=paddleocr_md_dir)
                 
@@ -440,7 +449,7 @@ def run_long_context(pdf_file, selected_dims, custom_question, progress=gr.Progr
 
                 # 合成报告
                 log_q.put("正在合成最终报告...")
-                report_path = os.path.join(BASE_DIR, "deep_reading_results", 
+                report_path = os.path.join(REAL_BASE_DIR, "deep_reading_results", 
                                            f"long_context_{paper_meta.title}.md")
                 os.makedirs(os.path.dirname(report_path), exist_ok=True)
                 
@@ -552,7 +561,7 @@ def run_deep_reading(pdf_file, extraction_method, progress=gr.Progress()):
                 _check_cancel()
 
                 from paddleocr_pipeline import extract_with_fallback, extract_pdf_legacy
-                paddleocr_md_dir = os.path.join(BASE_DIR, "paddleocr_md")
+                paddleocr_md_dir = os.path.join(REAL_BASE_DIR, "paddleocr_md")
                 os.makedirs(paddleocr_md_dir, exist_ok=True)
 
                 if extraction_method == "PaddleOCR (本地GPU)":
@@ -588,7 +597,7 @@ def run_deep_reading(pdf_file, extraction_method, progress=gr.Progress()):
                 log_q.put("✓ 引擎就绪 (论文全文已缓存)")
 
                 log_q.put("[阶段 3/3] 七步深度阅读...")
-                paper_output_dir = os.path.join(BASE_DIR, "deep_reading_results", basename)
+                paper_output_dir = os.path.join(REAL_BASE_DIR, "deep_reading_results", basename)
                 os.makedirs(paper_output_dir, exist_ok=True)
                 result["output_dir"] = paper_output_dir
 
@@ -751,7 +760,7 @@ def run_qual_analysis(pdf_file, extraction_method, progress=gr.Progress()):
                 _check_cancel()
 
                 from paddleocr_pipeline import extract_with_fallback, extract_pdf_legacy
-                paddleocr_md_dir = os.path.join(BASE_DIR, "paddleocr_md")
+                paddleocr_md_dir = os.path.join(REAL_BASE_DIR, "paddleocr_md")
                 os.makedirs(paddleocr_md_dir, exist_ok=True)
 
                 if extraction_method == "PaddleOCR (本地GPU)":
@@ -787,7 +796,7 @@ def run_qual_analysis(pdf_file, extraction_method, progress=gr.Progress()):
                 log_q.put("✓ 引擎就绪 (论文全文已缓存)")
 
                 log_q.put("[阶段 3/3] 四步深度阅读...")
-                paper_output_dir = os.path.join(BASE_DIR, "deep_reading_results", basename)
+                paper_output_dir = os.path.join(REAL_BASE_DIR, "deep_reading_results", basename)
                 os.makedirs(paper_output_dir, exist_ok=True)
                 result["output_dir"] = paper_output_dir
 
@@ -1001,7 +1010,7 @@ def _run_literature_filter(txt_file, mode, topic, min_year, keywords, progress=g
                 progress(0.9, desc="导出结果")
                 _check_cancel()
 
-                out_dir = os.path.join(BASE_DIR, "deep_reading_results", "literature_filter")
+                out_dir = os.path.join(REAL_BASE_DIR, "deep_reading_results", "literature_filter")
                 os.makedirs(out_dir, exist_ok=True)
                 out_path = os.path.join(out_dir, f"filtered_{mode}_{int(time.time())}.xlsx")
 
