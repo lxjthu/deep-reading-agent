@@ -143,36 +143,327 @@ async def start_quant(request, user, db):
 - 防止单个用户占用过多资源
 - 避免系统过载
 
-#### 1.3 添加任务超时机制
+#### 1.3 队列位置与预估等待时间
 
-**文件**：`backend/routers/reading.py`
+**设计目标**：当系统繁忙时，让用户看到自己的排队位置和预估等待时间，而不是直接拒绝。
+
+**文件**：`backend/services/queue_manager.py`（新建）
 
 ```python
-import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Optional
+import logging
 
-TASK_TIMEOUT_MINUTES = 30  # 任务超时时间
+logger = logging.getLogger(__name__)
 
-async def run_quant_task(task_id, user_id, ...):
-    start_time = datetime.now()
+class TaskQueueManager:
+    """任务队列管理器"""
     
-    try:
-        # 执行任务...
+    def __init__(self):
+        # 队列: [(task_id, user_id, created_at, task_type), ...]
+        self._queue: list[dict] = []
+        # 正在运行的任务: {task_id: {start_time, task_type, ...}}
+        self._running: dict[str, dict] = {}
+        # 历史任务平均耗时（秒）
+        self._avg_duration: dict[str, float] = {
+            "quant": 600,      # 七步精读约 10 分钟
+            "qual": 480,       # 四步精读约 8 分钟
+            "long": 720,       # 长文本精读约 12 分钟
+            "reference": 300,  # 参考文献梳理约 5 分钟
+            "filter": 180,     # 文献筛选约 3 分钟
+        }
+    
+    def enqueue(self, task_id: str, user_id: int, task_type: str) -> dict:
+        """将任务加入队列，返回队列信息"""
+        entry = {
+            "task_id": task_id,
+            "user_id": user_id,
+            "task_type": task_type,
+            "created_at": datetime.now(),
+        }
+        self._queue.append(entry)
         
-        # 检查超时
-        if datetime.now() - start_time > timedelta(minutes=TASK_TIMEOUT_MINUTES):
-            tasks[task_id]["status"] = "failed"
-            tasks[task_id]["error"] = "任务执行超时"
-            return
+        position = self._get_position(task_id)
+        estimated_wait = self._estimate_wait_seconds(position, task_type)
+        
+        logger.info(f"Task {task_id} enqueued at position {position}, "
+                    f"estimated wait: {estimated_wait}s")
+        
+        return {
+            "queue_position": position,
+            "estimated_wait_seconds": estimated_wait,
+            "estimated_wait_minutes": round(estimated_wait / 60, 1),
+        }
+    
+    def dequeue_next(self) -> Optional[dict]:
+        """从队列取出下一个任务"""
+        if self._queue:
+            return self._queue.pop(0)
+        return None
+    
+    def mark_running(self, task_id: str):
+        """标记任务为运行中"""
+        self._running[task_id] = {
+            "start_time": datetime.now(),
+        }
+        # 从队列中移除（如果还在）
+        self._queue = [t for t in self._queue if t["task_id"] != task_id]
+    
+    def mark_completed(self, task_id: str):
+        """标记任务完成"""
+        if task_id in self._running:
+            start_time = self._running[task_id]["start_time"]
+            duration = (datetime.now() - start_time).total_seconds()
             
-    except Exception as e:
-        tasks[task_id]["status"] = "failed"
-        tasks[task_id]["error"] = str(e)
+            # 更新平均耗时（移动平均）
+            task_type = self._running[task_id].get("task_type", "quant")
+            if task_type in self._avg_duration:
+                old_avg = self._avg_duration[task_type]
+                self._avg_duration[task_type] = old_avg * 0.8 + duration * 0.2
+            
+            del self._running[task_id]
+            logger.info(f"Task {task_id} completed, duration: {duration}s")
+    
+    def _get_position(self, task_id: str) -> int:
+        """获取任务在队列中的位置"""
+        for i, entry in enumerate(self._queue):
+            if entry["task_id"] == task_id:
+                return i + 1
+        return 0
+    
+    def _estimate_wait_seconds(self, position: int, task_type: str) -> int:
+        """预估等待时间（秒）"""
+        if position <= 0:
+            return 0
+        
+        avg_duration = self._avg_duration.get(task_type, 600)
+        running_count = len(self._running)
+        
+        # 假设所有运行中的任务平均剩余时间
+        avg_remaining = avg_duration / 2
+        
+        # 等待时间 = 队列前面的任务数 * 平均耗时 / 并发数 + 运行中任务的剩余时间
+        if running_count > 0:
+            estimated = (position - 1) * avg_duration / max(running_count, 1) + avg_remaining
+        else:
+            estimated = (position - 1) * avg_duration
+        
+        return int(estimated)
+    
+    def get_queue_status(self) -> dict:
+        """获取队列状态"""
+        return {
+            "queue_length": len(self._queue),
+            "running_count": len(self._running),
+            "running_tasks": [
+                {
+                    "task_id": tid,
+                    "start_time": info["start_time"].isoformat(),
+                    "running_seconds": int((datetime.now() - info["start_time"]).total_seconds()),
+                }
+                for tid, info in self._running.items()
+            ],
+            "queue_tasks": [
+                {
+                    "task_id": entry["task_id"],
+                    "position": i + 1,
+                    "task_type": entry["task_type"],
+                    "waiting_seconds": int((datetime.now() - entry["created_at"]).total_seconds()),
+                }
+                for i, entry in enumerate(self._queue)
+            ],
+        }
+    
+    def get_task_queue_info(self, task_id: str) -> Optional[dict]:
+        """获取特定任务的队列信息"""
+        # 检查是否在队列中
+        position = self._get_position(task_id)
+        if position > 0:
+            entry = self._queue[position - 1]
+            estimated_wait = self._estimate_wait_seconds(position, entry["task_type"])
+            return {
+                "status": "queued",
+                "queue_position": position,
+                "estimated_wait_seconds": estimated_wait,
+                "estimated_wait_minutes": round(estimated_wait / 60, 1),
+                "waiting_seconds": int((datetime.now() - entry["created_at"]).total_seconds()),
+            }
+        
+        # 检查是否在运行中
+        if task_id in self._running:
+            start_time = self._running[task_id]["start_time"]
+            return {
+                "status": "running",
+                "running_seconds": int((datetime.now() - start_time).total_seconds()),
+            }
+        
+        return None
+
+# 全局实例
+task_queue = TaskQueueManager()
+```
+
+**文件**：`backend/routers/reading.py`（修改）
+
+```python
+from services.queue_manager import task_queue
+
+MAX_CONCURRENT_TASKS = 5  # 最大并发任务数
+MAX_QUEUE_SIZE = 10       # 最大队列长度
+
+async def start_quant(request, user, db):
+    """启动七步精读"""
+    # 检查并发任务数
+    running_count = sum(
+        1 for t in tasks.values() 
+        if t.get("status") == "running" 
+        and t.get("owner_user_id") == user.id
+    )
+    
+    # 检查队列长度
+    queue_status = task_queue.get_queue_status()
+    
+    if running_count >= MAX_CONCURRENT_TASKS:
+        if queue_status["queue_length"] >= MAX_QUEUE_SIZE:
+            raise HTTPException(
+                status_code=503, 
+                detail={
+                    "message": "系统繁忙，队列已满，请稍后再试。",
+                    "queue_length": queue_status["queue_length"],
+                    "running_count": queue_status["running_count"],
+                }
+            )
+        
+        # 加入队列而不是直接拒绝
+        queue_info = task_queue.enqueue(task_id, user.id, "quant")
+        
+        # 返回排队信息
+        return {
+            "task_id": task_id,
+            "status": "queued",
+            "queue_position": queue_info["queue_position"],
+            "estimated_wait_seconds": queue_info["estimated_wait_seconds"],
+            "estimated_wait_minutes": queue_info["estimated_wait_minutes"],
+            "message": f"您排在第 {queue_info['queue_position']} 位，"
+                      f"预计等待 {queue_info['estimated_wait_minutes']} 分钟"
+        }
+    
+    # 直接执行...
+```
+
+**文件**：`backend/routers/reading.py`（查询状态）
+
+```python
+async def get_task_status(task_id: str, user):
+    """查询任务状态"""
+    # 先从队列管理器获取信息
+    queue_info = task_queue.get_task_queue_info(task_id)
+    
+    if queue_info:
+        if queue_info["status"] == "queued":
+            return {
+                "status": "queued",
+                "progress": 0,
+                "stage": f"排队中 (第 {queue_info['queue_position']} 位)",
+                "queue_position": queue_info["queue_position"],
+                "estimated_wait_seconds": queue_info["estimated_wait_seconds"],
+                "estimated_wait_minutes": queue_info["estimated_wait_minutes"],
+                "waiting_seconds": queue_info["waiting_seconds"],
+                "logs": [
+                    f"任务已加入队列",
+                    f"排队位置: 第 {queue_info['queue_position']} 位",
+                    f"预计等待: {queue_info['estimated_wait_minutes']} 分钟",
+                    f"已等待: {queue_info['waiting_seconds']} 秒",
+                ],
+            }
+        elif queue_info["status"] == "running":
+            # 继续获取详细的任务进度
+            task_data = tasks.get(task_id, {})
+            return {
+                "status": "running",
+                "progress": task_data.get("progress", 0),
+                "stage": task_data.get("stage", "处理中..."),
+                "logs": task_data.get("logs", []),
+                "running_seconds": queue_info["running_seconds"],
+            }
+    
+    # 任务已完成或不存在
+    task_data = tasks.get(task_id)
+    if not task_data:
+        raise HTTPException(404, "任务不存在")
+    
+    return task_data
+```
+
+**前端展示**（`frontend/src/components/TaskProgress.tsx`）：
+
+```tsx
+function TaskProgress({ taskStatus }) {
+  if (taskStatus.status === "queued") {
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <ClockIcon className="w-5 h-5 text-blue-500" />
+          <span className="font-medium text-blue-700">排队中</span>
+        </div>
+        <div className="space-y-2 text-sm text-blue-600">
+          <div className="flex justify-between">
+            <span>排队位置</span>
+            <span className="font-medium">第 {taskStatus.queue_position} 位</span>
+          </div>
+          <div className="flex justify-between">
+            <span>预计等待</span>
+            <span className="font-medium">{taskStatus.estimated_wait_minutes} 分钟</span>
+          </div>
+          <div className="flex justify-between">
+            <span>已等待</span>
+            <span className="font-medium">{taskStatus.waiting_seconds} 秒</span>
+          </div>
+        </div>
+        {/* 进度条显示队列进度 */}
+        <div className="mt-3">
+          <div className="h-2 bg-blue-100 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-blue-500 transition-all"
+              style={{ width: `${Math.max(10, 100 - taskStatus.queue_position * 20)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  if (taskStatus.status === "running") {
+    return (
+      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <PlayIcon className="w-5 h-5 text-green-500" />
+          <span className="font-medium text-green-700">执行中</span>
+        </div>
+        <div className="text-sm text-green-600 mb-2">{taskStatus.stage}</div>
+        {/* 进度条 */}
+        <div className="h-2 bg-green-100 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-green-500 transition-all"
+            style={{ width: `${taskStatus.progress}%` }}
+          />
+        </div>
+        <div className="mt-2 text-xs text-green-500 text-right">
+          {taskStatus.progress}%
+        </div>
+      </div>
+    );
+  }
+  
+  // ... 其他状态
+}
 ```
 
 **效果**：
-- 防止任务长时间占用资源
-- 自动清理失败任务
+- 用户可以看到自己在队列中的位置
+- 用户可以预估需要等待多长时间
+- 用户可以实时看到已等待的时间
+- 系统繁忙时不是直接拒绝，而是给用户明确的预期
 
 #### 1.4 内存监控和限制
 
