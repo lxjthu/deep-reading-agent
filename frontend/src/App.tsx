@@ -593,42 +593,54 @@ function FilterTab({ apiKey }: { apiKey: string }) {
       addLog(`✓ 任务已创建: ${taskId}`)
 
       // Step 3: Poll for progress
+      let pollInProgress = false
       const pollInterval = setInterval(async () => {
-        const statusRes = await fetch(`/api/filter/task/${taskId}/status`)
-        const statusData = await statusRes.json()
+        if (pollInProgress) return
+        pollInProgress = true
+        try {
+          const controller = new AbortController()
+          const timer = setTimeout(() => controller.abort(), 15000)
+          const statusRes = await fetch(`/api/filter/task/${taskId}/status`, { signal: controller.signal })
+          clearTimeout(timer)
+          const statusData = await statusRes.json()
 
-        setProgress(statusData.progress || 0)
-        setStage(statusData.stage || '处理中...')
+          setProgress(statusData.progress || 0)
+          setStage(statusData.stage || '处理中...')
 
-        if (statusData.logs && statusData.logs.length > 0) {
-          setLogs(statusData.logs)
-        }
-
-        if (statusData.status === 'completed') {
-          clearInterval(pollInterval)
-          setIsRunning(false)
-          setProgress(100)
-          setStage('完成')
-          addLog('✅ 全部完成！')
-
-          if (statusData.result?.preview) {
-            setResults(statusData.result.preview)
+          if (statusData.logs && statusData.logs.length > 0) {
+            setLogs(statusData.logs)
           }
-          if (statusData.result?.output_path) {
-            setDownloadUrl(statusData.result.output_path)
+
+          if (statusData.status === 'completed') {
+            clearInterval(pollInterval)
+            setIsRunning(false)
+            setProgress(100)
+            setStage('完成')
+            addLog('✅ 全部完成！')
+
+            if (statusData.result?.preview) {
+              setResults(statusData.result.preview)
+            }
+            if (statusData.result?.output_path) {
+              setDownloadUrl(statusData.result.output_path)
+            }
+          } else if (statusData.status === 'failed') {
+            clearInterval(pollInterval)
+            setIsRunning(false)
+            setStage('错误')
+            addLog(`❌ ${statusData.error || '任务失败'}`)
+          } else if (statusData.status === 'cancelled') {
+            clearInterval(pollInterval)
+            setIsRunning(false)
+            setStage('已取消')
+            addLog('⚠ 用户取消了筛选')
           }
-        } else if (statusData.status === 'failed') {
-          clearInterval(pollInterval)
-          setIsRunning(false)
-          setStage('错误')
-          addLog(`❌ ${statusData.error || '任务失败'}`)
-        } else if (statusData.status === 'cancelled') {
-          clearInterval(pollInterval)
-          setIsRunning(false)
-          setStage('已取消')
-          addLog('⚠ 用户取消了筛选')
+        } catch {
+          // skip this poll, will retry next interval
+        } finally {
+          pollInProgress = false
         }
-      }, 1000)
+      }, 2000)
 
     } catch (error: any) {
       setIsRunning(false)

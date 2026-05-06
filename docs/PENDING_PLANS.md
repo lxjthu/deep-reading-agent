@@ -7,13 +7,12 @@
 
 | 优先级 | 事项 | 当前状态 | 前置依赖 | 关联文档 | 备注 |
 |---|---|---|---|---|---|
-| P0 | 参考文献梳理标签页 + 引用关系入库 | **参考文献识别 + 正文引用追踪均已验证通过**，准备进入实施 | 无 | [REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md) | 当前已调整为 `DeepSeek v4 flash` 方案：参考文献识别和正文引用追踪均由 DeepSeek 完成，利用 1M 上下文 + 硬盘缓存降低成本。验证见下方 2.0 节。 |
+| ~~P0~~ | ~~参考文献梳理标签页 + 引用关系入库~~ | **已完成（2026-05）** | 无 | [REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md) | 全链路已实现：后端 7 个 API 端点（`/api/references/*`）、DeepSeek v4-flash 提取+追踪服务、`bib_references` + `bib_reference_citations` 表+迁移、前端 `ReferenceTraceTab` 组件。 |
 | P0.5 | 双栏 PDF 参考文献提取修复 | **已完成（2026-05-03）** | 建议在 P0 进入实施前先修 | [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | pypdf 对 CJK 编码双栏 PDF 的文本提取完全失败（中文乱码），需切换为 pdfplumber。影响所有中文学术期刊论文的参考文献提取。 |
 | P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
-| P2 | 参考文献目录兜底修复 | 已规划，未实施 | 建议在题录/元数据补全后进行 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 重点修 `佚名`、`None`、作者缺失、年份缺失的程序化输出 |
-| P3 | 文献综述提示词纳入提示词管理 | 已规划，未实施 | 建议在题录问题优先处理后进行 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 新增 `synthesis` 类型与固定槽位，支持系统默认 + 用户覆盖 |
-| P4 | 综述引用锚点强化 | 已规划，未实施 | 依赖 P2 / P3 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 解决正文出现 `（文献1）`、`（文献2）` 与目录对不上的问题 |
-| P5 | 任务队列接入路由层 + 前端排队提示 | **后端 TaskQueueManager 已实现（30 测试通过），但未接入路由和前端** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | 见下方 2.6 节 |
+| P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **部分完成**，核心 bug 未修 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 合并为独立模块，不侵入现有代码。详见下方 2.2 节。 |
+
+| ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
 | P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
 | P7 | P13 Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
 
@@ -214,83 +213,68 @@ PDF 结构复杂度：
 
 关联文档：[REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md)
 
-### 2.2 参考文献目录兜底修复
+### 2.2 AI 综述模块重构（P2 参考文献兜底 + P3 提示词管理 + P4 引用锚点）
 
-目标：
+**状态：部分完成，核心问题未修。决定合并为独立模块，不侵入现有代码。**
 
-- 修正 `None` 直接出现在年份位置
-- 优化作者缺失时的兜底格式
-- 保持参考文献目录继续由系统程序生成，而不是交给模型
+> 设计意图：将 P2（参考文献目录兜底）、P3（综述提示词管理）、P4（引用锚点强化）合并为一个独立模块。
+> 不修改 `compare.py` 现有函数，而是新建独立模块接管综述流程，确保改动隔离、可回退。
 
-当前判断：
+#### 待解决的问题
 
-- 这是程序逻辑问题 + 元数据问题
-- 不能只靠改综述提示词解决
+**P2 — 参考文献目录兜底修复（AI 综述场景）**
 
-建议前置：
+已完成：
 
-- 先尽量补齐元数据，再修兜底输出
+- `compare.py` 的 `build_reference_list()` 已有作者缺失 → `"佚名"` 兜底（line 409-410）
+- `compare.py` 的 `format_inline_citation()` 已有无作者 → `"(佚名, {year})"` 兜底（line 369-370）
+- `compare.py` 的 `build_reference_list()` 和 `build_paper_header()` 已有 `dict.get('year', 'n.d.')` 兜底
 
-### 2.3 文献综述提示词纳入提示词管理
+未修复的核心 bug（均为 AI 综述生成时的问题）：
 
-目标：
+1. **`None` 年份穿透**：`bib_entry.year` 为 `None` 时 `dict.get('year', 'n.d.')` 返回 `None`（键存在但值为 `None`），输出显示 `佚名 (None). 标题...`
+2. **行内引用 `None` 年份**：`format_inline_citation()` 中 `f"(佚名, {year})"` 当 `year=None` 时输出 `"(佚名, None)"`
+3. **中英文不一致**：代码使用英文 `"n.d."`，应统一为中文
+
+**P3 — 文献综述提示词纳入提示词管理**
 
 - 将当前 `compare.py` 中硬编码的综述 prompt 迁入提示词管理
-- 新增 `synthesis` 类型
-- 支持系统默认与用户个人覆盖
+- 新增 `synthesis` 类型，支持系统默认 + 用户覆盖
+- 建议槽位：`synthesis.system` / `synthesis.citation_guard` / `synthesis.compare_single` / `synthesis.compare_multi` / `synthesis.compare_cross` / `synthesis.long_single` / `synthesis.long_multi`
 
-建议槽位：
-
-- `synthesis.system`
-- `synthesis.citation_guard`
-- `synthesis.compare_single`
-- `synthesis.compare_multi`
-- `synthesis.compare_cross`
-- `synthesis.long_single`
-- `synthesis.long_multi`
-
-### 2.4 综述引用锚点强化
-
-目标：
+**P4 — 综述引用锚点强化**
 
 - 为每篇文献生成明确 `citation_label`
 - 强约束模型正文引用必须复用系统给定标签
 - 禁止 `文献1 / 文献2 / 第一篇文献 / 上述研究`
 
-当前判断：
+#### 实施策略
 
-- 这是“提示词层 + 数据输入层”联合改造
-- 不是单改一句提示词就能稳定解决
+- **新建独立模块**（如 `backend/services/synthesis_builder.py`），封装：引用列表构建（含兜底）、提示词组装、引用锚点注入
+- **不修改 `compare.py` 现有函数**，新模块作为上游数据准备层被 compare 流程调用
+- 保证现有功能不受影响，新模块可独立测试和回退
+
+### ~~2.3 文献综述提示词纳入提示词管理~~
+
+> 已合并至 2.2 节。
+
+### ~~2.4 综述引用锚点强化~~
+
+> 已合并至 2.2 节。
 
 ### 2.5 任务队列接入路由层 + 前端排队提示
 
-**状态：后端核心已实现，路由层和前端未接入**
+**状态：已完成（2026-05）**
 
 已完成：
 
-- `backend/services/queue_manager.py`：`TaskQueueManager` 类（入队/出队/排队位置/预估等待/并发跟踪）
+- `backend/services/queue_manager.py`：`TaskQueueManager` 类（入队/出队/排队位置/预估等待/并发跟踪）+ `mark_running` 保留 `task_type`
 - `backend/tests/test_queue_manager.py`：30 个单元测试全通过
 - 支持 quant/qual/long/reference/filter 五种任务类型
-
-未完成（本次实施范围）：
-
-1. **`backend/routers/reading.py` 接入队列**
-   - 精读启动（long/quant/qual）时调用 `task_queue.enqueue(task_id, user_id, task_type)`
-   - 并发任务超限时返回排队信息（`queue_position / estimated_wait_seconds`）而非直接拒绝
-   - 任务开始执行时调用 `task_queue.mark_running(task_id)`
-   - 任务完成/失败时调用 `task_queue.mark_completed(task_id)`
-
-2. **`backend/routers/reading.py` 状态查询接入队列**
-   - `GET /api/reading/task/{task_id}/status` 先查 `task_queue.get_task_queue_info(task_id)`
-   - 排队中返回：`status=queued / queue_position / estimated_wait_seconds / waiting_seconds`
-   - 运行中返回：`status=running` + 原有进度信息
-
-3. **前端排队提示组件**
-   - `TaskProgress` 组件：排队中显示排队位置、预估等待时间、已等待时间
-   - 接入现有 `useReadingTaskTracker` 的状态轮询逻辑
-   - 排队中时进度条显示蓝色（区别于运行中的绿色）
-
-参考设计：`docs/MIGRATION_PLAN_10PLUS_USERS.md` 第 1.3 节
+- `backend/routers/reading.py`：三个 start 函数（long/quant/qual）已调用 `task_queue.enqueue()`，三个 worker 函数首尾调用 `mark_running()` / `mark_completed()`，`cancel_task` 亦调用 `mark_completed()`
+- `backend/routers/reading.py`：`get_task_status` 已先查 `task_queue.get_task_queue_info(task_id)`，排队中返回 `status=queued` + `queue_position` + `estimated_wait_seconds/minutes`
+- 前端 `App.tsx`：`applyStatus` 已处理 `status=queued`（progress=0、stage 显示排队信息、继续轮询）
+- 前端 LongTab / QuantTab / QualTab：三个 Tab 均已添加蓝色排队 UI（`bg-blue-50` + `animate-pulse` 进度条）
 
 ### 2.6 用户数据一键导出/导入
 
@@ -323,14 +307,12 @@ PDF 结构复杂度：
 建议后续按下面顺序推进：
 
 1. ~~`双栏 PDF 参考文献提取修复`~~（已完成 2026-05-03）
-2. `参考文献梳理标签页 + 引用关系入库`（依赖上项已完成，可以进入实施）
-3. `PDF 题录/元数据在线匹配增强`
-4. `任务队列接入路由层 + 前端排队提示`（后端已就绪，接入工作量约半天）
-5. `用户数据一键导出/导入`（设计已完成，实施工作量约 2-3 天）
-6. `参考文献目录兜底修复`
-7. `文献综述提示词纳入提示词管理`
-8. `综述引用锚点强化`
-9. `P13 Playwright E2E + 部署验收`
+2. ~~`参考文献梳理标签页 + 引用关系入库`~~（已完成 2026-05）
+3. ~~`PDF 题录/元数据在线匹配增强`~~（已完成 2026-05-03）
+4. ~~`任务队列接入路由层 + 前端排队提示`~~（已完成 2026-05）
+5. `AI 综述模块重构`（P2 兜底 + P3 提示词 + P4 锚点，合并为独立模块，不侵入现有代码）
+6. `用户数据一键导出/导入`（设计已完成，实施工作量约 2-3 天）
+7. `P13 Playwright E2E + 部署验收`
 
 ## 4. 待补充区域
 
