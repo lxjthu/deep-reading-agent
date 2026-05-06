@@ -723,11 +723,11 @@ def write_trace_outputs(
 
 def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: str, file_path: str, source_title: str, api_key: Optional[str] = None) -> None:
     try:
-        asyncio.run(mark_trace_started(task_id, source_bib_entry_id, stage="读取 PDF...", progress=10))
+        asyncio.run(mark_trace_started(task_id, source_bib_entry_id, stage="读取文档...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
-        tasks[task_id]["stage"] = "读取 PDF..."
-        tasks[task_id]["logs"].append("开始读取 PDF 文本")
+        tasks[task_id]["stage"] = "读取文档..."
+        tasks[task_id]["logs"].append("开始读取文档文本")
 
         tasks[task_id]["progress"] = 20
         tasks[task_id]["stage"] = "DeepSeek 识别参考文献..."
@@ -789,7 +789,7 @@ def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: st
         asyncio.run(persist_trace_failure(task_id, str(exc)))
 
 
-async def get_owned_entry_with_pdf(db: AsyncSession, user: User, entry_id: str) -> tuple[BibEntry, File]:
+async def get_owned_entry_with_file(db: AsyncSession, user: User, entry_id: str) -> tuple[BibEntry, File]:
     row = (
         await db.execute(
             select(BibEntry, File)
@@ -797,12 +797,12 @@ async def get_owned_entry_with_pdf(db: AsyncSession, user: User, entry_id: str) 
             .where(
                 BibEntry.id == entry_id,
                 BibEntry.owner_user_id == user.id,
-                File.file_type == "pdf",
+                File.file_type.in_(["pdf", "markdown"]),
             )
         )
     ).first()
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到带 PDF 的源文献。")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到带 PDF/Markdown 的源文献。")
     return row
 
 
@@ -839,7 +839,7 @@ async def list_reference_trace_entries(
         await db.execute(
             select(BibEntry, File)
             .join(File, File.id == BibEntry.source_file_id)
-            .where(BibEntry.owner_user_id == user.id, File.file_type == "pdf")
+            .where(BibEntry.owner_user_id == user.id, File.file_type.in_(["pdf", "markdown"]))
             .order_by(BibEntry.updated_at.desc(), BibEntry.created_at.desc())
         )
     ).all()
@@ -873,10 +873,10 @@ async def start_reference_trace(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    entry, source_file = await get_owned_entry_with_pdf(db, user, entry_id)
+    entry, source_file = await get_owned_entry_with_file(db, user, entry_id)
     source_path = resolve_storage_path(source_file.storage_path)
     if not source_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="源 PDF 文件不存在。")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="源文件不存在。")
 
     task_id = str(uuid.uuid4())
     job = Job(
@@ -930,7 +930,7 @@ async def get_reference_trace_summary(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReferenceTraceSummaryResponse:
-    await get_owned_entry_with_pdf(db, user, entry_id)
+    await get_owned_entry_with_file(db, user, entry_id)
     references = (
         await db.execute(
             select(BibReference).where(BibReference.source_bib_entry_id == entry_id).order_by(BibReference.reference_order)
@@ -975,7 +975,7 @@ async def list_references_for_entry(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ReferenceListItem]:
-    await get_owned_entry_with_pdf(db, user, entry_id)
+    await get_owned_entry_with_file(db, user, entry_id)
     references = (
         await db.execute(
             select(BibReference).where(BibReference.source_bib_entry_id == entry_id).order_by(BibReference.reference_order)

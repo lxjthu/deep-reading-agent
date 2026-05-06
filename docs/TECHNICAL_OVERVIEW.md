@@ -1308,6 +1308,22 @@
 - 排序支持 updated/score/year/journal + 升降序
 - 精读三种模式均支持上传 PDF 和 Markdown
 
+### 8.8 Markdown 参考文献梳理支持
+
+改动目标：
+
+- 让参考文献梳理功能不仅支持 PDF，也支持 Markdown 文件
+
+落点文件：
+
+- `backend/services/deepseek_refs.py`（新增 `extract_candidate_text_md`、`extract_body_text_md`，`extract_references_deepseek` / `trace_citations_deepseek` 自动根据后缀选择提取逻辑）
+- `backend/routers/references.py`（`get_owned_entry_with_pdf` → `get_owned_entry_with_file`，所有查询条件放宽为 `file_type.in_(["pdf", "markdown"])`）
+
+当前结果：
+
+- 上传 `.md`/`.markdown` 文件并绑定 BibEntry 后，参考文献梳理页面可正常识别和梳理
+- 修复了残留的旧函数名引用导致的 500 错误
+
 ## 9. 改代码时的推荐查找路径
 
 ## 9.1 要改注册/登录/权限

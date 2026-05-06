@@ -290,26 +290,37 @@ def call_deepseek_json(
     return None
 
 
-def extract_references_deepseek(pdf_path: str, api_key: Optional[str] = None) -> list[dict]:
-    logger.info("Extracting references from %s", pdf_path)
-    candidate_text = extract_candidate_text(pdf_path)
+def extract_references_deepseek(file_path: str, api_key: Optional[str] = None) -> list[dict]:
+    logger.info("Extracting references from %s", file_path)
+    is_md = _is_markdown(file_path)
+
+    if is_md:
+        candidate_text = extract_candidate_text_md(file_path)
+    else:
+        candidate_text = extract_candidate_text(file_path)
+
     if len(candidate_text.strip()) < 80:
         logger.warning("Candidate text too short (%d chars), falling back to full tail", len(candidate_text))
-        with pdfplumber.open(pdf_path) as pdf:
-            n = len(pdf.pages)
-            start = max(0, n - 5)
-            tail_pages = []
-            for i in range(start, n):
-                text = pdf.pages[i].extract_text() or ""
-                tail_pages.append(text)
-        candidate_text = "\n\n".join(tail_pages)
+        if is_md:
+            with open(file_path, "r", encoding="utf-8") as f:
+                candidate_text = f.read()
+        else:
+            with pdfplumber.open(file_path) as pdf:
+                n = len(pdf.pages)
+                start = max(0, n - 5)
+                tail_pages = []
+                for i in range(start, n):
+                    text = pdf.pages[i].extract_text() or ""
+                    tail_pages.append(text)
+            candidate_text = "\n\n".join(tail_pages)
 
     n_lines = len(candidate_text.splitlines())
+    page_break_hint = "文本中 PAGE BREAK 分隔不同页面。请合并断行，提取所有参考文献。" if not is_md else ""
     messages = [
         {"role": "system", "content": PROMPT_EXTRACT},
         {"role": "user", "content": (
             f"## 候选参考文献文本（共 {n_lines} 行）\n\n"
-            "文本中 PAGE BREAK 分隔不同页面。请合并断行，提取所有参考文献。\n\n"
+            f"{page_break_hint}\n\n"
             + candidate_text
         )},
     ]
@@ -351,7 +362,7 @@ def extract_references_deepseek(pdf_path: str, api_key: Optional[str] = None) ->
 
 
 def trace_citations_deepseek(
-    pdf_path: str,
+    file_path: str,
     references: list[dict],
     api_key: Optional[str] = None,
 ) -> list[dict]:
@@ -359,25 +370,47 @@ def trace_citations_deepseek(
         return references
 
     logger.info("Tracing citations for %d references", len(references))
-    paragraphs, _ref_text = extract_body_text(pdf_path)
+    is_md = _is_markdown(file_path)
+
+    if is_md:
+        paragraphs, _ref_text = extract_body_text_md(file_path)
+    else:
+        paragraphs, _ref_text = extract_body_text(file_path)
 
     body_text_parts: list[str] = []
     in_ref = False
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text() or ""
-            for line in text.splitlines():
-                s = _normalize_ws(line)
-                if not s:
+
+    if is_md:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        for line in content.splitlines():
+            s = _normalize_ws(line)
+            if not s:
+                continue
+            if not in_ref:
+                if _is_ref_heading(s):
+                    in_ref = True
                     continue
-                if not in_ref:
-                    if _is_ref_heading(s):
-                        in_ref = True
+                body_text_parts.append(s)
+            else:
+                if _is_ref_heading(s):
+                    continue
+    else:
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                for line in text.splitlines():
+                    s = _normalize_ws(line)
+                    if not s:
                         continue
-                    body_text_parts.append(s)
-                else:
-                    if _is_ref_heading(s):
-                        continue
+                    if not in_ref:
+                        if _is_ref_heading(s):
+                            in_ref = True
+                            continue
+                        body_text_parts.append(s)
+                    else:
+                        if _is_ref_heading(s):
+                            continue
     body_text = "\n".join(body_text_parts)
 
     ref_list_text = "\n".join(
@@ -445,6 +478,87 @@ def _locate_paragraph(paragraphs: list[dict], body_text: str, char_pos: int) -> 
             return {"page_label": p["page_label"], "paragraph_label": p["paragraph_label"]}
         offset += p_len + 2  # +2 for \n\n separator
     return {}
+
+
+def extract_candidate_text_md(md_path: str) -> str:
+    with open(md_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    lines = content.splitlines()
+    found_heading = False
+    ref_lines: list[str] = []
+
+    for line in lines:
+        s = _normalize_ws(line)
+        if not s:
+            continue
+        if not found_heading:
+            if _is_ref_heading(s):
+                found_heading = True
+            continue
+        if s.lower().startswith("summary") and len(s) < 100:
+            continue
+        cleaned = CONTINUATION_RE.sub("", s).strip()
+        if not cleaned:
+            continue
+        if _is_ref_heading(cleaned):
+            continue
+        if not _is_noise_line(cleaned):
+            ref_lines.append(cleaned)
+
+    return "\n".join(ref_lines)
+
+
+def extract_body_text_md(md_path: str) -> tuple[list[dict], str]:
+    with open(md_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    body_parts: list[str] = []
+    ref_lines: list[str] = []
+    in_ref = False
+
+    for line in content.splitlines():
+        s = _normalize_ws(line)
+        if not s:
+            continue
+        if not in_ref:
+            if _is_ref_heading(s):
+                in_ref = True
+                continue
+            body_parts.append(s)
+        else:
+            if _is_ref_heading(s):
+                continue
+            cleaned = CONTINUATION_RE.sub("", s).strip()
+            if cleaned:
+                ref_lines.append(cleaned)
+
+    body_text = "\n".join(body_parts)
+    ref_text = "\n".join(ref_lines)
+
+    paragraphs: list[dict] = []
+    pid = 0
+    blocks = re.split(r"\n\s*\n", body_text)
+    for block_index, block in enumerate(blocks, start=1):
+        lines = [_normalize_ws(l) for l in block.splitlines() if _normalize_ws(l)]
+        if not lines:
+            continue
+        joined = " ".join(lines)
+        if len(joined) < 30:
+            continue
+        pid += 1
+        paragraphs.append({
+            "id": pid,
+            "page_label": None,
+            "paragraph_label": f"P{block_index}",
+            "text": joined,
+        })
+
+    return paragraphs, ref_text
+
+
+def _is_markdown(file_path: str) -> bool:
+    return file_path.lower().endswith((".md", ".markdown"))
 
 
 def _expand_excerpt(text: str, start: int, end: int, window: int = 180) -> Optional[str]:
