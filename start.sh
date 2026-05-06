@@ -8,6 +8,9 @@ pkill -f "vite" 2>/dev/null || true
 pkill -f "cloudflared tunnel" 2>/dev/null || true
 sleep 2
 
+echo "=== 启动 Nginx ==="
+systemctl start nginx 2>/dev/null || true
+
 echo "=== 启动后端 (FastAPI) ==="
 cd /root/.openclaw/workspace/deep-reading-agent/backend
 source ../venv/bin/activate
