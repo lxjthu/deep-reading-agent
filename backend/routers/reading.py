@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
 load_dotenv(env_path)
 
+from backend.utils.api_key import validate_deepseek_key
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -26,6 +28,7 @@ from db.utils import compute_dedup_key, title_match_score
 from backend.routers.metadata_extractor import extract_metadata, build_frontmatter
 from prompt_service import get_effective_prompt_map
 from upload_storage import lookup_original_name, lookup_path_by_file_id
+from services.queue_manager import task_queue
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -552,6 +555,8 @@ def _try_extract_references(
 
         references = extract_references_deepseek(file_path, api_key=api_key)
         if not references:
+            logger = logging.getLogger(__name__)
+            logger.warning("Reference extraction returned 0 refs for task %s", task_id)
             return []
 
         references = trace_citations_deepseek(file_path, references, api_key=api_key)
@@ -565,7 +570,6 @@ def _try_extract_references(
 
         artifact_files = write_trace_outputs(user_id, task_id, source_title, references)
 
-        # Create a separate reference_trace job for database persistence
         ref_task_id = str(uuid.uuid4())
         import asyncio
         asyncio.run(_create_ref_trace_job_and_persist(
@@ -574,7 +578,8 @@ def _try_extract_references(
 
         return artifact_files
     except Exception as e:
-        logging.getLogger(__name__).warning("Reference extraction during reading failed: %s", e)
+        logger = logging.getLogger(__name__)
+        logger.error("Reference extraction during reading failed for task %s: %s", task_id, e, exc_info=True)
         return []
 
 
@@ -642,26 +647,23 @@ def run_long_context_task(
     try:
         import asyncio
 
+        task_queue.mark_running(task_id)
         asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取文本..."
         tasks[task_id]["logs"].append("[阶段 1/3] 提取文本...")
         
-        # Validate API key first
-        if not api_key or not api_key.strip():
-            raise ValueError("未提供 API Key。请在前端输入 DeepSeek API Key 后再开始精读。")
-        
-        final_api_key = api_key.strip()
+        api_key = validate_deepseek_key(api_key)
         
         from new_architecture.conversation_engine import ConversationEngine
         from new_architecture.paper_cache import PaperCache, PaperMetadata
         from new_architecture.config import Config
         
-        config = Config.from_key(final_api_key)
+        config = Config.from_key(api_key)
         
         # 3. Read file text and create cache
-        tasks[task_id]["progress"] = 30
+        tasks[task_id]["progress"] = 20
         tasks[task_id]["stage"] = "读取论文内容..."
         tasks[task_id]["logs"].append("[阶段 2/3] 读取论文内容...")
         
@@ -755,7 +757,7 @@ def run_long_context_task(
         # Extract metadata
         tasks[task_id]["stage"] = "提取论文元数据..."
         tasks[task_id]["logs"].append("提取论文元数据...")
-        metadata = extract_metadata(paper_text, final_api_key)
+        metadata = extract_metadata(paper_text, api_key)
         tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
         
         # Build frontmatter
@@ -787,7 +789,9 @@ def run_long_context_task(
             file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
         if ref_artifacts:
-            tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")
+            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
+        else:
+            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
         
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
@@ -811,6 +815,7 @@ def run_long_context_task(
                 reading_items=reading_items,
             )
         )
+        task_queue.mark_completed(task_id)
         
     except Exception as e:
         tasks[task_id]["status"] = "failed"
@@ -819,6 +824,7 @@ def run_long_context_task(
         tasks[task_id]["error"] = str(e)
         import asyncio
 
+        task_queue.mark_completed(task_id)
         asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
 
 
@@ -834,20 +840,20 @@ def run_quant_task(
     try:
         import asyncio
 
+        task_queue.mark_running(task_id)
         asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取文本..."
         tasks[task_id]["logs"].append("[步骤 1/7] 提取文本...")
         
-        if not api_key or not api_key.strip():
-            raise ValueError("未提供 API Key。请在前端输入 DeepSeek API Key 后再开始精读。")
+        api_key = validate_deepseek_key(api_key)
         
         from new_architecture.conversation_engine import ConversationEngine
         from new_architecture.paper_cache import PaperCache, PaperMetadata
         from new_architecture.config import Config
         
-        config = Config.from_key(api_key.strip())
+        config = Config.from_key(api_key)
         
         paper_text = extract_paper_text(file_path)
         if not paper_text:
@@ -891,7 +897,7 @@ def run_quant_task(
         # Extract metadata
         tasks[task_id]["stage"] = "提取论文元数据..."
         tasks[task_id]["logs"].append("提取论文元数据...")
-        metadata = extract_metadata(paper_text, api_key.strip())
+        metadata = extract_metadata(paper_text, api_key)
         tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
         
         # Build frontmatter
@@ -913,7 +919,9 @@ def run_quant_task(
             file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
         if ref_artifacts:
-            tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")
+            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
+        else:
+            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
         
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
@@ -937,6 +945,7 @@ def run_quant_task(
                 reading_items=reading_items,
             )
         )
+        task_queue.mark_completed(task_id)
         
     except Exception as e:
         tasks[task_id]["status"] = "failed"
@@ -945,6 +954,7 @@ def run_quant_task(
         tasks[task_id]["error"] = str(e)
         import asyncio
 
+        task_queue.mark_completed(task_id)
         asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
 
 
@@ -960,20 +970,20 @@ def run_qual_task(
     try:
         import asyncio
 
+        task_queue.mark_running(task_id)
         asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取文本..."
         tasks[task_id]["logs"].append("[步骤 1/4] 提取文本...")
         
-        if not api_key or not api_key.strip():
-            raise ValueError("未提供 API Key。请在前端输入 DeepSeek API Key 后再开始精读。")
+        api_key = validate_deepseek_key(api_key)
         
         from new_architecture.conversation_engine import ConversationEngine
         from new_architecture.paper_cache import PaperCache, PaperMetadata
         from new_architecture.config import Config
         
-        config = Config.from_key(api_key.strip())
+        config = Config.from_key(api_key)
         
         paper_text = extract_paper_text(file_path)
         if not paper_text:
@@ -1029,7 +1039,9 @@ def run_qual_task(
             file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
         if ref_artifacts:
-            tasks[task_id]["logs"].append(f"✓ 识别到参考文献，已生成参考文献报告")
+            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
+        else:
+            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
         
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
@@ -1053,6 +1065,7 @@ def run_qual_task(
                 reading_items=reading_items,
             )
         )
+        task_queue.mark_completed(task_id)
         
     except Exception as e:
         tasks[task_id]["status"] = "failed"
@@ -1061,6 +1074,7 @@ def run_qual_task(
         tasks[task_id]["error"] = str(e)
         import asyncio
 
+        task_queue.mark_completed(task_id)
         asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
 
 
@@ -1092,6 +1106,7 @@ async def start_long_context(
     )
     await db.commit()
     tasks[task_id] = init_task_payload(task_id, "long_context", user.id, request.file_id, bib_entry.id)
+    task_queue.enqueue(task_id, user.id, "long")
     
     thread = threading.Thread(
         target=run_long_context_task,
@@ -1137,6 +1152,7 @@ async def start_quant(
     )
     await db.commit()
     tasks[task_id] = init_task_payload(task_id, "quant", user.id, request.file_id, bib_entry.id)
+    task_queue.enqueue(task_id, user.id, "quant")
     
     thread = threading.Thread(
         target=run_quant_task,
@@ -1172,6 +1188,7 @@ async def start_qual(
     )
     await db.commit()
     tasks[task_id] = init_task_payload(task_id, "qual", user.id, request.file_id, bib_entry.id)
+    task_queue.enqueue(task_id, user.id, "qual")
     
     thread = threading.Thread(
         target=run_qual_task,
@@ -1188,6 +1205,25 @@ async def get_task_status(
     task_id: str,
     user: User = Depends(current_user),
 ):
+    queue_info = task_queue.get_task_queue_info(task_id)
+    if queue_info and queue_info.get("status") == "queued":
+        return {
+            "status": "queued",
+            "progress": 0,
+            "stage": (
+                f"排队中 (第 {queue_info['queue_position']} 位，"
+                f"预计等待 {queue_info['estimated_wait_minutes']} 分钟)"
+            ),
+            "logs": [
+                "任务已加入队列",
+                f"排队位置: 第 {queue_info['queue_position']} 位",
+                f"预计等待: {queue_info['estimated_wait_minutes']} 分钟",
+            ],
+            "queue_position": queue_info["queue_position"],
+            "estimated_wait_seconds": queue_info["estimated_wait_seconds"],
+            "estimated_wait_minutes": queue_info["estimated_wait_minutes"],
+        }
+
     if task_id in tasks and tasks[task_id].get("owner_user_id") == user.id:
         return tasks[task_id]
     payload = await build_task_status_from_db(task_id, user.id)
@@ -1210,6 +1246,7 @@ async def cancel_task(
     if task_id in tasks:
         tasks[task_id]["status"] = "cancelled"
         tasks[task_id]["stage"] = "已取消"
+    task_queue.mark_completed(task_id)
     target_link = (
         await db.execute(
             select(JobBibEntry).where(JobBibEntry.job_id == task_id, JobBibEntry.role == "target")

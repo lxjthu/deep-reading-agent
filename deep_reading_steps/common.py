@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
+from backend.utils.api_key import validate_deepseek_key
 import re
 import difflib
 
@@ -22,10 +23,12 @@ DEEPSEEK_MODEL = "deepseek-v4-flash" # Using reasoner for Acemoglu-level thinkin
 DEEP_READING_DIR = os.getenv("DEEP_READING_OUTPUT_DIR", os.path.join(os.getcwd(), "deep_reading_results"))
 
 def get_deepseek_client():
-    if not DEEPSEEK_API_KEY:
-        logger.error("DEEPSEEK_API_KEY not found in environment variables.")
+    try:
+        key = validate_deepseek_key(DEEPSEEK_API_KEY, source="环境变量或 .env 文件")
+    except ValueError as e:
+        logger.error(str(e))
         return None
-    return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+    return OpenAI(api_key=key, base_url=DEEPSEEK_BASE_URL)
 
 
 def load_prompt_from_file(step_name: str, prompt_type: str = "quant") -> str:

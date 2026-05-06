@@ -7,6 +7,7 @@ import concurrent.futures
 from tqdm import tqdm
 from openai import OpenAI
 from dotenv import load_dotenv
+from backend.utils.api_key import validate_deepseek_key
 import re
 
 # Import the new parser factory
@@ -50,10 +51,7 @@ class AIEvaluator:
         self.model = model
         
         # Use provided key first, fallback to env
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
-        
-        if not self.api_key:
-            raise ValueError("DEEPSEEK_API_KEY not found. Please provide an API key.")
+        self.api_key = validate_deepseek_key(api_key)
 
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 

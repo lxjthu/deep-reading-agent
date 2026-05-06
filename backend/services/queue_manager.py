@@ -50,7 +50,15 @@ class TaskQueueManager:
         return None
 
     def mark_running(self, task_id: str):
-        self._running[task_id] = {"start_time": datetime.now()}
+        task_type = None
+        for entry in self._queue:
+            if entry["task_id"] == task_id:
+                task_type = entry.get("task_type")
+                break
+        self._running[task_id] = {
+            "start_time": datetime.now(),
+            "task_type": task_type,
+        }
         self._queue = [t for t in self._queue if t["task_id"] != task_id]
 
     def mark_completed(self, task_id: str):

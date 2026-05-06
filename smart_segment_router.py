@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
+from backend.utils.api_key import validate_deepseek_key
 import json_repair
 
 load_dotenv()
@@ -59,10 +60,8 @@ class SmartSegmentRouter:
     }
     
     def __init__(self, api_key: str = None):
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
-        self.client = None
-        if self.api_key:
-            self.client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com")
+        self.api_key = validate_deepseek_key(api_key)
+        self.client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com")
     
     def extract_headings(self, content: str) -> List[Heading]:
         """

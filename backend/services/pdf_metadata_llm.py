@@ -9,6 +9,7 @@ from typing import Optional
 
 import json_repair
 from openai import OpenAI
+from backend.utils.api_key import validate_deepseek_key
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +76,7 @@ def extract_metadata_with_llm(
     Returns:
         Dict with title, authors, year, journal, doi, volume, issue, pages, language, confidence
     """
-    if not api_key or not api_key.strip():
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY not set")
-
+    api_key = validate_deepseek_key(api_key)
     client = OpenAI(api_key=api_key, base_url=BASE_URL)
 
     prompt = PROMPT.format(

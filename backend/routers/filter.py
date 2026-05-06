@@ -21,6 +21,7 @@ from db.models import Artifact, BibEntry, BibFilterLink, File, Job, User
 from db.utils import compute_dedup_key
 from prompt_service import get_effective_prompt_text
 from upload_storage import lookup_path_by_file_id
+from backend.utils.api_key import validate_deepseek_key
 
 # Add parent directory to path to import existing modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -343,9 +344,7 @@ def run_filter_task(
         import asyncio
         asyncio.run(start_job())
 
-        # Validate API key first
-        if not api_key or not api_key.strip():
-            raise ValueError("未提供 API Key。请在前端输入 DeepSeek API Key 后再开始筛选。")
+        api_key = validate_deepseek_key(api_key)
 
         tasks[task_id]["owner_user_id"] = user_id
         tasks[task_id]["input_file_id"] = file_id

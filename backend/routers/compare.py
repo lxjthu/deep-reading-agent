@@ -19,6 +19,7 @@ from auth.dependencies import current_user
 from db import PROJECT_ROOT, get_db
 from db.models import Artifact, BibEntry, Job, JobBibEntry, ReadingItem, User
 from db.utils import compute_dedup_key
+from backend.utils.api_key import validate_deepseek_key
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -65,9 +66,10 @@ class StructuredReadingResponse(BaseModel):
 
 
 def get_api_key(provided_key: Optional[str] = None) -> str:
-    if provided_key and provided_key.strip():
-        return provided_key.strip()
-    return os.environ.get("DEEPSEEK_API_KEY", "")
+    try:
+        return validate_deepseek_key(provided_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def utcnow_naive() -> datetime:

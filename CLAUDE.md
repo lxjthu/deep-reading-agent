@@ -16,8 +16,17 @@ Deep Reading Agent is an automated academic paper analysis system that converts 
 pip install -r requirements.txt
 ```
 
-Required in `.env`:
+### Web 模式（前端用户 Key）
+每个用户在前端设置页面保存自己的 DeepSeek API Key，所有后端 API 调用只使用该用户传入的 key，不读取 .env 兜底。Key 无效时返回明确错误提示，引导用户去 https://platform.deepseek.com/api_keys 生成正确的 Key。
+
+统一验证函数：`backend/utils/api_key.py` → `validate_deepseek_key()`
+
+### CLI/离线模式（环境变量）
+CLI 脚本仍从环境变量读取 key，但错误提示已统一。
+
+Optional in `.env` (CLI 模式或可选服务):
 ```
+# CLI 模式用（Web 模式不需要）
 DEEPSEEK_API_KEY=sk-your-key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 
@@ -77,6 +86,7 @@ Default fallback is QUAL when classification is uncertain.
 
 | Layer | Key Files |
 |-------|-----------|
+| API Key | `backend/utils/api_key.py` (统一验证，所有 Web 路由共用) |
 | Extraction | `paddleocr_pipeline.py` (primary), `anthropic_pdf_extract_raw.py` (fallback), `paddleocr_extractor/` |
 | Deep Reading | `deep_read_pipeline.py`, `deep_reading_steps/step_*.py`, `deep_reading_steps/common.py` |
 | Social Science | `social_science_analyzer.py`, `link_social_science_docs.py` |

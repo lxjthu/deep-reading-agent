@@ -40,6 +40,20 @@ function getInitialTab(pathname: string, search: string): string {
   return TAB_IDS.has(fromQuery) && fromQuery !== 'library' ? fromQuery : 'filter'
 }
 
+function promptForApiKey(): string {
+  const username = useAuthStore.getState().user?.username
+  const storageKey = getApiKeyStorageKey(username)
+  const existing = storageKey ? localStorage.getItem(storageKey) : ''
+  if (existing) return existing
+  const key = prompt('请输入 DeepSeek API Key（sk-开头）：')
+  if (!key || !key.trim()) return ''
+  const trimmed = key.trim()
+  if (storageKey) {
+    localStorage.setItem(storageKey, trimmed)
+  }
+  return trimmed
+}
+
 function App() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -104,19 +118,6 @@ function App() {
     }
     localStorage.removeItem(LEGACY_API_KEY_STORAGE)
     setShowKeyInput(false)
-  }
-
-  const promptForApiKey = (): string => {
-    if (apiKey) return apiKey
-    const key = prompt('请输入 DeepSeek API Key（sk-开头）：')
-    if (!key || !key.trim()) return ''
-    const trimmed = key.trim()
-    const storageKey = getApiKeyStorageKey(user?.username)
-    if (storageKey) {
-      localStorage.setItem(storageKey, trimmed)
-    }
-    setApiKey(trimmed)
-    return trimmed
   }
 
   const roleBadgeClass =
@@ -356,6 +357,7 @@ function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
   const [downloadUrl, setDownloadUrl] = useState('')
   const [currentStep, setCurrentStep] = useState(0)
   const pollRef = useRef<number | null>(null)
+  const peakProgressRef = useRef(0)
 
   const stopPolling = () => {
     if (pollRef.current !== null) {
@@ -370,6 +372,7 @@ function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
     setTaskId(null)
     setIsRunning(false)
     setProgress(0)
+    peakProgressRef.current = 0
     setStage('等待上传...')
     setLogs([])
     setPreview('')
@@ -391,7 +394,22 @@ function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
   }
 
   const applyStatus = (statusData: any) => {
-    const nextProgress = statusData.progress || 0
+    const rawProgress = statusData.progress || 0
+    const nextProgress = statusData.status === 'completed'
+      ? 100
+      : Math.max(rawProgress, peakProgressRef.current)
+    peakProgressRef.current = nextProgress
+
+    if (statusData.status === 'queued') {
+      setProgress(0)
+      setStage(statusData.stage || '排队中...')
+      setIsRunning(true)
+      if (Array.isArray(statusData.logs) && statusData.logs.length > 0) {
+        setLogs(statusData.logs)
+      }
+      return
+    }
+
     setProgress(nextProgress)
     setStage(statusData.stage || '处理中...')
     if (Array.isArray(statusData.logs) && statusData.logs.length > 0) {
@@ -895,7 +913,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
       const uploadData = await uploadRes.json()
       if (!uploadData.success) throw new Error(uploadData.message)
 
-      setProgress(10); setStage('解析 PDF...'); addLog('✓ 文件上传成功')
+      setStage('解析 PDF...'); addLog('✓ 文件上传成功')
 
       const startRes = await fetch('/api/reading/long/start', {
         method: 'POST',
@@ -962,6 +980,17 @@ function LongTab({ apiKey }: { apiKey: string }) {
       <div className="space-y-4 min-w-0">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">■ 处理进度</h3>
+          {stage && stage.startsWith('排队中') && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-blue-600 font-medium">⏳ 排队中</span>
+              </div>
+              <div className="text-sm text-blue-600">{stage}</div>
+              <div className="mt-2 h-2 bg-blue-100 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-400 rounded-full animate-pulse" style={{ width: '30%' }} />
+              </div>
+            </div>
+          )}
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm text-gray-600">{stage}</span>
             <span className="text-sm font-medium text-emerald-600">{progress}%</span>
@@ -1062,7 +1091,7 @@ function QuantTab({ apiKey }: { apiKey: string }) {
       }
       const uploadData = await uploadRes.json()
       if (!uploadData.success) throw new Error(uploadData.message)
-      setProgress(10); setStage('解析 PDF...'); addLog('✓ 文件上传成功')
+      setStage('解析 PDF...'); addLog('✓ 文件上传成功')
 
       const startRes = await fetch('/api/reading/quant/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1113,6 +1142,17 @@ function QuantTab({ apiKey }: { apiKey: string }) {
       <div className="space-y-4 min-w-0">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">△ 七步进度</h3>
+          {stage && stage.startsWith('排队中') && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-blue-600 font-medium">⏳ 排队中</span>
+              </div>
+              <div className="text-sm text-blue-600">{stage}</div>
+              <div className="mt-2 h-2 bg-blue-100 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-400 rounded-full animate-pulse" style={{ width: '30%' }} />
+              </div>
+            </div>
+          )}
           <div className="mb-4 overflow-x-auto">
             <div className="flex min-w-max items-center gap-1">
             {STEPS.map((s, i) => (
@@ -1201,7 +1241,7 @@ function QualTab({ apiKey }: { apiKey: string }) {
       }
       const uploadData = await uploadRes.json()
       if (!uploadData.success) throw new Error(uploadData.message)
-      setProgress(10); setStage('解析 PDF...'); addLog('✓ 文件上传成功')
+      setStage('解析 PDF...'); addLog('✓ 文件上传成功')
 
       const startRes = await fetch('/api/reading/qual/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1252,6 +1292,17 @@ function QualTab({ apiKey }: { apiKey: string }) {
       <div className="space-y-4 min-w-0">
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">◉ 四步进度</h3>
+          {stage && stage.startsWith('排队中') && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-blue-600 font-medium">⏳ 排队中</span>
+              </div>
+              <div className="text-sm text-blue-600">{stage}</div>
+              <div className="mt-2 h-2 bg-blue-100 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-400 rounded-full animate-pulse" style={{ width: '30%' }} />
+              </div>
+            </div>
+          )}
           <div className="mb-4 overflow-x-auto">
             <div className="flex min-w-max items-center gap-1">
             {STEPS.map((s, i) => (

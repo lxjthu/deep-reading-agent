@@ -19,11 +19,9 @@ import re
 from typing import Optional
 
 import json_repair
-from dotenv import load_dotenv
+import pdfplumber
 from openai import OpenAI
-from pypdf import PdfReader
-
-load_dotenv()
+from backend.utils.api_key import validate_deepseek_key
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +122,7 @@ PROMPT_CITE = """你是一个学术文献引用追踪专家。
 ```
 
 ## 约束
-- quote 必须是正文的精确子串（可以从 pypdf 提取的文本中找到）
+- quote 必须是正文的精确子串（可以从 PDF 提取的文本中找到）
 - 不确定则不输出，宁缺毋滥
 - confidence 范围 0.0-1.0
 - 如果某条参考文献在正文中没有引用，citations 为空数组"""
@@ -170,32 +168,61 @@ _NON_REF_PATTERNS = [
 ]
 
 
+def _is_two_column(chars: list[dict], threshold: float = 0.2) -> bool:
+    """通过字符 x0 分布判断是否为双栏布局。"""
+    if len(chars) < 100:
+        return False
+    x0s = [c["x0"] for c in chars if isinstance(c.get("x0"), (int, float)) and c["x0"] > 0]
+    if len(x0s) < 50:
+        return False
+
+    sorted_x0s = sorted(x0s)
+    mid_idx = len(sorted_x0s) // 2
+    median = sorted_x0s[mid_idx]
+
+    left = sum(1 for x in x0s if x < median - 50)
+    right = sum(1 for x in x0s if x > median + 50)
+    total = len(x0s)
+
+    return left / total > threshold and right / total > threshold
+
+
+def _extract_page_text(page, force_text_flow: bool = False) -> str:
+    """从 pdfplumber page 提取文本，支持双栏 use_text_flow。"""
+    if force_text_flow:
+        return page.extract_text(use_text_flow=True) or ""
+    return page.extract_text() or ""
+
+
 def extract_candidate_text(pdf_path: str) -> str:
-    reader = PdfReader(pdf_path)
     sections: list[str] = []
     current_lines: list[str] = []
     in_ref = False
 
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        for line in text.splitlines():
-            s = _normalize_ws(line)
-            if not s:
-                continue
-            if not in_ref:
-                if _is_ref_heading(s):
-                    in_ref = True
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            chars = page.chars or []
+            use_flow = _is_two_column(chars)
+            text = _extract_page_text(page, force_text_flow=use_flow)
+
+            for line in text.splitlines():
+                s = _normalize_ws(line)
+                if not s:
                     continue
-            else:
-                cleaned = CONTINUATION_RE.sub("", s).strip()
-                if not cleaned:
-                    continue
-                if _is_ref_heading(cleaned):
-                    if current_lines:
-                        sections.append("\n".join(current_lines))
-                        current_lines = []
-                    continue
-                current_lines.append(cleaned)
+                if not in_ref:
+                    if _is_ref_heading(s):
+                        in_ref = True
+                        continue
+                else:
+                    cleaned = CONTINUATION_RE.sub("", s).strip()
+                    if not cleaned:
+                        continue
+                    if _is_ref_heading(cleaned):
+                        if current_lines:
+                            sections.append("\n".join(current_lines))
+                            current_lines = []
+                        continue
+                    current_lines.append(cleaned)
 
     if current_lines:
         sections.append("\n".join(current_lines))
@@ -229,58 +256,62 @@ def extract_candidate_text(pdf_path: str) -> str:
 
 
 def extract_body_text(pdf_path: str) -> tuple[list[dict], str]:
-    reader = PdfReader(pdf_path)
     body_parts: list[str] = []
     ref_lines: list[str] = []
     in_ref = False
 
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        for line in text.splitlines():
-            s = _normalize_ws(line)
-            if not s:
-                continue
-            if not in_ref:
-                if _is_ref_heading(s):
-                    in_ref = True
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            chars = page.chars or []
+            use_flow = _is_two_column(chars)
+            text = _extract_page_text(page, force_text_flow=use_flow)
+
+            for line in text.splitlines():
+                s = _normalize_ws(line)
+                if not s:
                     continue
-                body_parts.append(s)
-            else:
-                if _is_ref_heading(s):
-                    continue
-                cleaned = CONTINUATION_RE.sub("", s).strip()
-                if cleaned:
-                    ref_lines.append(cleaned)
+                if not in_ref:
+                    if _is_ref_heading(s):
+                        in_ref = True
+                        continue
+                    body_parts.append(s)
+                else:
+                    if _is_ref_heading(s):
+                        continue
+                    cleaned = CONTINUATION_RE.sub("", s).strip()
+                    if cleaned:
+                        ref_lines.append(cleaned)
 
     body_text = "\n".join(body_parts)
     ref_text = "\n".join(ref_lines)
 
     paragraphs = []
     pid = 0
-    current_lines: list[str] = []
-    current_page = ""
 
-    for page_num, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        blocks = re.split(r"\n\s*\n", text)
-        if len(blocks) == 1:
-            blocks = text.splitlines()
-        for block in blocks:
-            lines = [_normalize_ws(l) for l in block.splitlines() if _normalize_ws(l)]
-            if not lines:
-                continue
-            joined = " ".join(lines)
-            if len(joined) < 30:
-                continue
-            if any(_is_ref_heading(l) for l in lines):
-                break
-            pid += 1
-            paragraphs.append({
-                "id": pid,
-                "page_label": f"第{page_num}页",
-                "paragraph_label": f"P{page_num}-{pid}",
-                "text": joined,
-            })
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            chars = page.chars or []
+            use_flow = _is_two_column(chars)
+            text = _extract_page_text(page, force_text_flow=use_flow)
+            blocks = re.split(r"\n\s*\n", text)
+            if len(blocks) == 1:
+                blocks = text.splitlines()
+            for block in blocks:
+                lines = [_normalize_ws(l) for l in block.splitlines() if _normalize_ws(l)]
+                if not lines:
+                    continue
+                joined = " ".join(lines)
+                if len(joined) < 30:
+                    continue
+                if any(_is_ref_heading(l) for l in lines):
+                    break
+                pid += 1
+                paragraphs.append({
+                    "id": pid,
+                    "page_label": f"第{page_num}页",
+                    "paragraph_label": f"P{page_num}-{pid}",
+                    "text": joined,
+                })
 
     return paragraphs, ref_text
 
@@ -292,10 +323,7 @@ def call_deepseek_json(
     temperature: float = 0.1,
     api_key: Optional[str] = None,
 ) -> Optional[dict]:
-    if not api_key or not api_key.strip():
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY not set")
+    api_key = validate_deepseek_key(api_key)
     client = OpenAI(api_key=api_key, base_url=BASE_URL)
 
     for attempt in range(MAX_RETRIES):
@@ -325,13 +353,16 @@ def extract_references_deepseek(pdf_path: str, api_key: Optional[str] = None) ->
     candidate_text = extract_candidate_text(pdf_path)
     if len(candidate_text.strip()) < 80:
         logger.warning("Candidate text too short (%d chars), falling back to full tail", len(candidate_text))
-        reader = PdfReader(pdf_path)
-        n = len(reader.pages)
-        start = max(0, n - 5)
-        tail_pages = []
-        for i in range(start, n):
-            text = reader.pages[i].extract_text() or ""
-            tail_pages.append(text)
+        with pdfplumber.open(pdf_path) as pdf:
+            n = len(pdf.pages)
+            start = max(0, n - 5)
+            tail_pages = []
+            for i in range(start, n):
+                page = pdf.pages[i]
+                chars = page.chars or []
+                use_flow = _is_two_column(chars)
+                text = _extract_page_text(page, force_text_flow=use_flow)
+                tail_pages.append(text)
         candidate_text = "\n\n".join(tail_pages)
 
     n_lines = len(candidate_text.splitlines())
@@ -394,21 +425,23 @@ def trace_citations_deepseek(
 
     body_text_parts: list[str] = []
     in_ref = False
-    reader = PdfReader(pdf_path)
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        for line in text.splitlines():
-            s = _normalize_ws(line)
-            if not s:
-                continue
-            if not in_ref:
-                if _is_ref_heading(s):
-                    in_ref = True
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            chars = page.chars or []
+            use_flow = _is_two_column(chars)
+            text = _extract_page_text(page, force_text_flow=use_flow)
+            for line in text.splitlines():
+                s = _normalize_ws(line)
+                if not s:
                     continue
-                body_text_parts.append(s)
-            else:
-                if _is_ref_heading(s):
-                    continue
+                if not in_ref:
+                    if _is_ref_heading(s):
+                        in_ref = True
+                        continue
+                    body_text_parts.append(s)
+                else:
+                    if _is_ref_heading(s):
+                        continue
     body_text = "\n".join(body_text_parts)
 
     ref_list_text = "\n".join(

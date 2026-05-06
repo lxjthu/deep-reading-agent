@@ -20,6 +20,7 @@ from services.openalex_source import OpenAlexSource
 from services.pdf_metadata_extract import extract_front_matter
 from services.pdf_metadata_llm import extract_metadata_with_llm
 from upload_storage import resolve_storage_path
+from backend.utils.api_key import validate_deepseek_key
 
 router = APIRouter()
 RESULTS_DIR = PROJECT_ROOT / "deep_reading_results"
@@ -397,6 +398,10 @@ async def match_online(
         raise HTTPException(status_code=404, detail="文献不存在。")
 
     api_key = request.get("api_key")
+    try:
+        api_key = validate_deepseek_key(api_key)
+    except ValueError:
+        api_key = None
 
     extracted = {
         "title": entry.title,

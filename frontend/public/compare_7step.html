@@ -358,6 +358,21 @@
         return '';
       }
     }
+
+    function promptForApiKey() {
+      let key = getCurrentApiKey();
+      if (key) return key;
+      key = prompt('请输入 DeepSeek API Key（sk-开头）：');
+      if (!key || !key.trim()) return '';
+      key = key.trim();
+      try {
+        const rawUser = localStorage.getItem('dra_user');
+        const user = rawUser ? JSON.parse(rawUser) : null;
+        const username = typeof user?.username === 'string' ? user.username.trim() : '';
+        if (username) localStorage.setItem(`deepseek_api_key:${username}`, key);
+      } catch (_) {}
+      return key;
+    }
     // Global state
     let allReports = [];        // All 7step reports with parsed content
     let selectedStep = '';      // Currently selected step
@@ -839,6 +854,8 @@
       });
       
       try {
+        const apiKey = promptForApiKey();
+        if (!apiKey) { alert('请先设置 DeepSeek API Key'); return; }
         const response = await authFetch('/api/compare/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -847,7 +864,7 @@
             papers: selectedPapers,
             subQuestions: requestSubQuestions,
             paperData: paperData,
-            api_key: getCurrentApiKey(),
+            api_key: apiKey,
             mode: requestMode
           })
         });
