@@ -13,7 +13,9 @@
 | P2 | 参考文献目录兜底修复 | 已规划，未实施 | 建议在题录/元数据补全后进行 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 重点修 `佚名`、`None`、作者缺失、年份缺失的程序化输出 |
 | P3 | 文献综述提示词纳入提示词管理 | 已规划，未实施 | 建议在题录问题优先处理后进行 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 新增 `synthesis` 类型与固定槽位，支持系统默认 + 用户覆盖 |
 | P4 | 综述引用锚点强化 | 已规划，未实施 | 依赖 P2 / P3 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 解决正文出现 `（文献1）`、`（文献2）` 与目录对不上的问题 |
-| P5 | P13 Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
+| P5 | 任务队列接入路由层 + 前端排队提示 | **后端 TaskQueueManager 已实现（30 测试通过），但未接入路由和前端** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | 见下方 2.6 节 |
+| P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
+| P7 | P13 Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
 
 ## 2. 各事项说明
 
@@ -260,7 +262,51 @@ PDF 结构复杂度：
 - 这是“提示词层 + 数据输入层”联合改造
 - 不是单改一句提示词就能稳定解决
 
-### 2.5 P13 Playwright E2E + 部署验收
+### 2.5 任务队列接入路由层 + 前端排队提示
+
+**状态：后端核心已实现，路由层和前端未接入**
+
+已完成：
+
+- `backend/services/queue_manager.py`：`TaskQueueManager` 类（入队/出队/排队位置/预估等待/并发跟踪）
+- `backend/tests/test_queue_manager.py`：30 个单元测试全通过
+- 支持 quant/qual/long/reference/filter 五种任务类型
+
+未完成（本次实施范围）：
+
+1. **`backend/routers/reading.py` 接入队列**
+   - 精读启动（long/quant/qual）时调用 `task_queue.enqueue(task_id, user_id, task_type)`
+   - 并发任务超限时返回排队信息（`queue_position / estimated_wait_seconds`）而非直接拒绝
+   - 任务开始执行时调用 `task_queue.mark_running(task_id)`
+   - 任务完成/失败时调用 `task_queue.mark_completed(task_id)`
+
+2. **`backend/routers/reading.py` 状态查询接入队列**
+   - `GET /api/reading/task/{task_id}/status` 先查 `task_queue.get_task_queue_info(task_id)`
+   - 排队中返回：`status=queued / queue_position / estimated_wait_seconds / waiting_seconds`
+   - 运行中返回：`status=running` + 原有进度信息
+
+3. **前端排队提示组件**
+   - `TaskProgress` 组件：排队中显示排队位置、预估等待时间、已等待时间
+   - 接入现有 `useReadingTaskTracker` 的状态轮询逻辑
+   - 排队中时进度条显示蓝色（区别于运行中的绿色）
+
+参考设计：`docs/MIGRATION_PLAN_10PLUS_USERS.md` 第 1.3 节
+
+### 2.6 用户数据一键导出/导入
+
+**状态：设计文档已完成，待实施**
+
+设计文档：[2026-05-06-user-data-export-import-design.md](./superpowers/specs/2026-05-06-user-data-export-import-design.md)
+
+方案：JSON + 文件打包为 `.dra`（zip 格式），清空后导入策略。
+
+实施范围：
+
+1. **`backend/services/data_portability.py`**：导出打包 + 导入解包核心逻辑
+2. **`backend/routers/data.py`**：`POST /api/data/export` + `POST /api/data/import`
+3. **前端组件**：用户菜单中"导出我的数据"和"导入数据"入口 + 确认弹窗 + 进度展示
+
+### 2.7 P13 Playwright E2E + 部署验收
 
 目标：
 
@@ -279,10 +325,12 @@ PDF 结构复杂度：
 1. ~~`双栏 PDF 参考文献提取修复`~~（已完成 2026-05-03）
 2. `参考文献梳理标签页 + 引用关系入库`（依赖上项已完成，可以进入实施）
 3. `PDF 题录/元数据在线匹配增强`
-4. `参考文献目录兜底修复`
-4. `文献综述提示词纳入提示词管理`
-5. `综述引用锚点强化`
-6. `P13 Playwright E2E + 部署验收`
+4. `任务队列接入路由层 + 前端排队提示`（后端已就绪，接入工作量约半天）
+5. `用户数据一键导出/导入`（设计已完成，实施工作量约 2-3 天）
+6. `参考文献目录兜底修复`
+7. `文献综述提示词纳入提示词管理`
+8. `综述引用锚点强化`
+9. `P13 Playwright E2E + 部署验收`
 
 ## 4. 待补充区域
 
