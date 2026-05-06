@@ -38,24 +38,27 @@ REFERENCE_HEADINGS = {
 
 PROMPT_EXTRACT = """你是一个学术文献参考文献解析专家。
 
-## 重要背景
-你看到的文本来自一本中文学术期刊的合辑 PDF。这种 PDF 中通常包含多篇论文，因此尾部区域可能混杂多篇论文的参考文献。
+## 输入
+你看到的是一篇学术论文 PDF 尾部提取的原始文本。由于 PDF 文本提取的限制，文本中可能存在以下问题：
+- 每条参考文献可能被拆成多行（断行）
+- 页眉、页码、分隔线等噪音
+- 多个 PAGE BREAK 分隔不同页面的内容
 
-你需要做的是：
-1. **识别出哪些参考文献属于同一篇论文**（通过编号连续性、主题一致性判断）
-2. **只提取编号最连续、数量最多的那组参考文献**（这通常就是目标论文的参考文献）
-3. 忽略属于其他论文的参考文献（编号不连续、主题完全不同）
-4. 忽略所有非参考文献内容（摘要、附录、致谢、作者简介、英文摘要、补充材料、注释等）
+## 参考文献可能使用的格式
+- **编号制**：（1）、[1]、［1］、1. 等
+- **作者-年份制**：作者，年份：《标题》，《期刊》第 X 期。或 Author, Year, "Title", Journal, Vol(Issue): Pages.
+- **GB/T 7714 格式**：作者. 标题 [J]. 期刊, 年, 卷(期): 页码.
+- 中英文参考文献混排
 
-## 关键：续页标记
-中文学术期刊常有"下转第 X 页"和"上接第 X 页"标记，这意味着参考文献**跨越了其他论文的内容**。
-**你必须跨越其他论文的整块内容，继续查找目标论文的后续参考文献。**
+## 特殊情况
+- 合辑 PDF 可能包含多篇论文的参考文献，此时只提取编号最连续、数量最多的那组
+- 续页标记"下转第 X 页"/"上接第 X 页"应忽略，继续提取后续条目
+- 英文摘要（Summary/Abstract）之后的参考文献仍然需要提取
 
-## 识别策略
-1. **编号连续性**：目标论文的编号是最长的连续序列，即使中间被其他论文打断
-2. **主题一致性**：目标论文的参考文献主题应一致
-3. **跨论文检测**：当遇到一个编号范围与当前序列不连续，且主题完全不同，应标记为 ignore 并跳过整个块
-4. **不要遗漏续页后的参考文献**
+## 任务
+1. 将多行合并为完整的参考文献条目
+2. 提取每条参考文献的结构化字段
+3. 忽略非参考文献内容（摘要、附录、致谢、作者简介、补充材料、注释、页眉、页码等）
 
 ## 输出格式
 严格 JSON：
@@ -64,14 +67,14 @@ PROMPT_EXTRACT = """你是一个学术文献参考文献解析专家。
   "references": [
     {
       "reference_order": 1,
-      "raw_text": "完整原文",
+      "raw_text": "完整原文（合并断行后）",
       "authors": ["作者1", "作者2"],
       "year": 2020,
-      "title": "标题",
-      "journal": "期刊",
+      "title": "论文标题",
+      "journal": "期刊名",
       "volume": null,
-      "issue": null,
-      "pages": null,
+      "issue": "期号",
+      "pages": "页码范围",
       "doi": null,
       "language": "zh",
       "ignore": false,
@@ -82,11 +85,11 @@ PROMPT_EXTRACT = """你是一个学术文献参考文献解析专家。
 ```
 
 ## 约束
-- `ignore=true` 时必须给出 `ignore_reason`
-- 不确定字段填 null，不要编造
+- `ignore=true` 时必须给出 `ignore_reason`（用于标记非参考文献内容）
+- 不确定字段填 null，不得编造
 - 保留完整 `raw_text`
-- 目标论文的 `ignore` 必须为 `false`
-- **完整性要求**：必须提取出所有带编号的条目，不要遗漏任何一条"""
+- 必须提取所有参考文献条目，不要遗漏
+- 程序侧会对 `ignore=false` 的条目重新编号"""
 
 PROMPT_CITE = """你是一个学术文献引用追踪专家。
 
@@ -141,118 +144,62 @@ def _is_ref_heading(line: str) -> bool:
     return bool(re.match(r"^\d+(\.\d+)*\s*(references|bibliography|works cited|参考文献)$", stripped))
 
 
-def _looks_like_ref_entry(line: str) -> bool:
-    return bool(re.match(r"^[（(\［[]\s*\d+\s*[）)\］]]", line.strip()))
+_NOISE_LINE_PATTERNS = [
+    re.compile(r"^\d{4}\s*年第\s*\d+\s*期"),
+    re.compile(r"^—+$"),
+]
+
+_ARTICLE_HEADER_RE = re.compile(r"^.{2,10}[等：:].{5,30}$")
 
 
-def _looks_like_table_data(line: str) -> bool:
+def _is_noise_line(line: str) -> bool:
     s = line.strip()
-    if re.match(r"^(变量|样本|均值|标准差|最小值|最大值|中位数|Observations|Adjusted|Panel|Constant|Controls|Yes|No|资料来源|作者整理)", s):
+    if not s:
         return True
-    if re.match(r"^\d+\s*$", s) and len(s) < 5:
-        return True
-    if re.match(r"^\d+\s*\.\d+\s*$", s):
-        return True
-    if re.match(r"^\*{1,3}$", s):
+    for pat in _NOISE_LINE_PATTERNS:
+        if pat.match(s):
+            return True
+    if re.fullmatch(r"\d{1,5}", s):
         return True
     return False
 
 
-_NON_REF_PATTERNS = [
-    re.compile(r"^--\s*\d+"),
-    re.compile(r"^VI-\s*\d+"),
-    re.compile(r"^《\s*管理世界\s*》"),
-    re.compile(r"^\d{4}\s*年第\s*\d+\s*期"),
-    re.compile(r"^(Abstract|Keywords|JEL)\s*[:：]?", re.I),
-    re.compile(r"^\(?\d+\.\d+"),
-]
-
-
-def _is_two_column(chars: list[dict], threshold: float = 0.2) -> bool:
-    """通过字符 x0 分布判断是否为双栏布局。"""
-    if len(chars) < 100:
-        return False
-    x0s = [c["x0"] for c in chars if isinstance(c.get("x0"), (int, float)) and c["x0"] > 0]
-    if len(x0s) < 50:
-        return False
-
-    sorted_x0s = sorted(x0s)
-    mid_idx = len(sorted_x0s) // 2
-    median = sorted_x0s[mid_idx]
-
-    left = sum(1 for x in x0s if x < median - 50)
-    right = sum(1 for x in x0s if x > median + 50)
-    total = len(x0s)
-
-    return left / total > threshold and right / total > threshold
-
-
-def _extract_page_text(page, force_text_flow: bool = False) -> str:
-    """从 pdfplumber page 提取文本，支持双栏 use_text_flow。"""
-    if force_text_flow:
-        return page.extract_text(use_text_flow=True) or ""
-    return page.extract_text() or ""
-
-
 def extract_candidate_text(pdf_path: str) -> str:
-    sections: list[str] = []
-    current_lines: list[str] = []
-    in_ref = False
+    page_sections: list[str] = []
+    found_heading = False
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            chars = page.chars or []
-            use_flow = _is_two_column(chars)
-            text = _extract_page_text(page, force_text_flow=use_flow)
+            text = page.extract_text() or ""
+            lines = text.splitlines()
 
-            for line in text.splitlines():
+            page_lines: list[str] = []
+            for line in lines:
                 s = _normalize_ws(line)
                 if not s:
                     continue
-                if not in_ref:
+
+                if not found_heading:
                     if _is_ref_heading(s):
-                        in_ref = True
-                        continue
-                else:
-                    cleaned = CONTINUATION_RE.sub("", s).strip()
-                    if not cleaned:
-                        continue
-                    if _is_ref_heading(cleaned):
-                        if current_lines:
-                            sections.append("\n".join(current_lines))
-                            current_lines = []
-                        continue
-                    current_lines.append(cleaned)
+                        found_heading = True
+                    continue
 
-    if current_lines:
-        sections.append("\n".join(current_lines))
+                if s.lower().startswith("summary") and len(s) < 100:
+                    continue
 
-    all_text = "\n\n--- SECTION BREAK ---\n\n".join(sections)
+                cleaned = CONTINUATION_RE.sub("", s).strip()
+                if not cleaned:
+                    continue
+                if _is_ref_heading(cleaned):
+                    continue
 
-    filtered: list[str] = []
-    for line in all_text.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        if _looks_like_ref_entry(s):
-            filtered.append(s)
-            continue
-        skip = False
-        for pat in _NON_REF_PATTERNS:
-            if pat.match(s):
-                skip = True
-                break
-        if skip:
-            continue
-        if _looks_like_table_data(s):
-            continue
-        if len(s) < 15 and not _looks_like_ref_entry(s):
-            continue
-        if re.match(r"^(附录|Appendix)\s*(表|图|Table|Figure|\d)", s, re.I):
-            continue
-        filtered.append(s)
+                if not _is_noise_line(cleaned):
+                    page_lines.append(cleaned)
 
-    return "\n".join(filtered)
+            if page_lines and found_heading:
+                page_sections.append("\n".join(page_lines))
+
+    return "\n\n--- PAGE BREAK ---\n\n".join(page_sections)
 
 
 def extract_body_text(pdf_path: str) -> tuple[list[dict], str]:
@@ -262,10 +209,7 @@ def extract_body_text(pdf_path: str) -> tuple[list[dict], str]:
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            chars = page.chars or []
-            use_flow = _is_two_column(chars)
-            text = _extract_page_text(page, force_text_flow=use_flow)
-
+            text = page.extract_text() or ""
             for line in text.splitlines():
                 s = _normalize_ws(line)
                 if not s:
@@ -290,9 +234,7 @@ def extract_body_text(pdf_path: str) -> tuple[list[dict], str]:
 
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
-            chars = page.chars or []
-            use_flow = _is_two_column(chars)
-            text = _extract_page_text(page, force_text_flow=use_flow)
+            text = page.extract_text() or ""
             blocks = re.split(r"\n\s*\n", text)
             if len(blocks) == 1:
                 blocks = text.splitlines()
@@ -358,10 +300,7 @@ def extract_references_deepseek(pdf_path: str, api_key: Optional[str] = None) ->
             start = max(0, n - 5)
             tail_pages = []
             for i in range(start, n):
-                page = pdf.pages[i]
-                chars = page.chars or []
-                use_flow = _is_two_column(chars)
-                text = _extract_page_text(page, force_text_flow=use_flow)
+                text = pdf.pages[i].extract_text() or ""
                 tail_pages.append(text)
         candidate_text = "\n\n".join(tail_pages)
 
@@ -370,8 +309,7 @@ def extract_references_deepseek(pdf_path: str, api_key: Optional[str] = None) ->
         {"role": "system", "content": PROMPT_EXTRACT},
         {"role": "user", "content": (
             f"## 候选参考文献文本（共 {n_lines} 行）\n\n"
-            "注意：文本中有多个 SECTION BREAK 分隔不同的区域。"
-            "请仔细扫描全文，包括续页后的内容。\n\n"
+            "文本中 PAGE BREAK 分隔不同页面。请合并断行，提取所有参考文献。\n\n"
             + candidate_text
         )},
     ]
@@ -427,9 +365,7 @@ def trace_citations_deepseek(
     in_ref = False
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            chars = page.chars or []
-            use_flow = _is_two_column(chars)
-            text = _extract_page_text(page, force_text_flow=use_flow)
+            text = page.extract_text() or ""
             for line in text.splitlines():
                 s = _normalize_ws(line)
                 if not s:
