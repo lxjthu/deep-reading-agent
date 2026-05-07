@@ -64,6 +64,11 @@ function App() {
   const [showKeyInput, setShowKeyInput] = useState(false)
   const [tempKey, setTempKey] = useState('')
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<Record<string, unknown> | null>(null)
+  const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null)
 
   useEffect(() => {
     const storageKey = getApiKeyStorageKey(user?.username)
@@ -136,6 +141,84 @@ function App() {
     navigate('/login', { replace: true })
   }
 
+  const accessToken = useAuthStore((state) => state.accessToken)
+
+  const handleExport = async () => {
+    const confirmed = window.confirm(
+      user?.role === 'normal'
+        ? `将导出您的全部数据（文献库、精读结果、源文件、提示词等），可能需要数分钟。\n\n⚠ 您的数据将在每天 0 点自动清理，建议尽快导出备份。`
+        : '将导出您的全部数据（文献库、精读结果、源文件、提示词等），可能需要数分钟。'
+    )
+    if (!confirmed) return
+    setExporting(true)
+    setShowUserMenu(false)
+    try {
+      const response = await fetch('/api/data/export', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.detail || `导出失败（HTTP ${response.status}）`)
+      }
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+      a.download = `export_${timestamp}_${user?.username}.dra`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    } catch (err: any) {
+      window.alert(err.message || '导出失败')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleImportClick = () => {
+    setShowUserMenu(false)
+    setImportDialogOpen(true)
+    setSelectedImportFile(null)
+    setImportResult(null)
+  }
+
+  const handleImport = async (file: File) => {
+    setImporting(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const response = await fetch('/api/data/import', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      })
+      
+      let data: any = {}
+      const contentType = response.headers.get('content-type')
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json()
+      } else {
+        const text = await response.text()
+        data = { detail: text || `服务器返回非JSON响应（HTTP ${response.status}）` }
+      }
+      
+      if (!response.ok) {
+        throw new Error(data.detail || `导入失败（HTTP ${response.status}）`)
+      }
+      setImportResult(data)
+      window.alert(`导入成功！已恢复 ${data.files_restored || 0} 个文件。页面即将刷新。`)
+      window.location.reload()
+    } catch (err: any) {
+      console.error('[import error]', err)
+      window.alert(err.message || '导入失败')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const isCompareTab =
     activeTab === 'compare-long' || activeTab === 'compare-7step' || activeTab === 'compare-4step'
 
@@ -206,6 +289,22 @@ function App() {
                       <span className={apiKey ? 'text-emerald-600' : 'text-gray-400'}>{apiKey ? '已设置' : '未设置'}</span>
                     </button>
                     <button
+                      onClick={handleExport}
+                      disabled={exporting}
+                      className="flex w-full items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                    >
+                      <span>{exporting ? '正在导出...' : '导出我的数据'}</span>
+                      <span>↓</span>
+                    </button>
+                    <button
+                      onClick={handleImportClick}
+                      disabled={importing}
+                      className="flex w-full items-center justify-between rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-700 hover:bg-teal-100 disabled:opacity-50"
+                    >
+                      <span>{importing ? '正在导入...' : '导入数据'}</span>
+                      <span>↑</span>
+                    </button>
+                    <button
                       onClick={handleLogout}
                       className="flex w-full items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
                     >
@@ -273,6 +372,69 @@ function App() {
           <div className="mx-auto w-full max-w-[1800px] px-3 py-3 text-sm text-red-700 sm:px-4 lg:px-6 xl:px-8">
             <span className="font-semibold">⚠ 试用提醒：</span>
             <span>{user.warning_msg}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Import Dialog */}
+      {importDialogOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-bold text-gray-900">导入数据</h2>
+            <div className="mt-3 space-y-3 text-sm text-gray-600">
+              <p className="rounded-lg bg-red-50 p-3 text-red-700">
+                <span className="font-semibold">⚠ 警告：</span>
+                导入将<span className="font-bold">清空您当前的所有数据</span>，并用导出包中的数据替换。此操作不可撤销。
+              </p>
+              <p>请选择 .dra 格式的导出包文件：</p>
+              <input
+                type="file"
+                accept=".dra"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null
+                  setSelectedImportFile(file)
+                }}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-emerald-700 hover:file:bg-emerald-100"
+              />
+              {selectedImportFile && (
+                <div className="rounded-lg bg-gray-50 p-2 text-sm text-gray-600">
+                  已选择：{selectedImportFile.name}
+                </div>
+              )}
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setImportDialogOpen(false)}
+                className="flex-1 rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (!selectedImportFile) {
+                    window.alert('请先选择 .dra 文件')
+                    return
+                  }
+                  const confirmed = window.confirm(
+                    '确定要导入吗？这将清空您当前的所有数据并用导出包中的数据替换。此操作不可撤销。'
+                  )
+                  if (!confirmed) return
+                  handleImport(selectedImportFile)
+                }}
+                disabled={importing || !selectedImportFile}
+                className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {importing ? '正在导入...' : '确认导入'}
+              </button>
+            </div>
+            {importResult && (
+              <div className="mt-3 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">
+                <div className="font-semibold">导入结果</div>
+                <div className="mt-1">
+                  已恢复 {(importResult.files_restored as number) || 0} 个文件，缺失 {(importResult.files_missing as number) || 0} 个
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -499,7 +661,7 @@ function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
 }
 
 // Tab 0: 文献筛选
-function FilterTab({ apiKey }: { apiKey: string }) {
+function FilterTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [mode, setMode] = useState('explorer')
   const [topic, setTopic] = useState('')
@@ -861,7 +1023,7 @@ function FilterTab({ apiKey }: { apiKey: string }) {
 }
 
 // Tab 1: 长文本精读
-function LongTab({ apiKey }: { apiKey: string }) {
+function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [dims, setDims] = useState<string[]>(["研究问题", "理论框架", "识别策略"])
   const [customQ, setCustomQ] = useState('')
@@ -1047,7 +1209,7 @@ function LongTab({ apiKey }: { apiKey: string }) {
 }
 
 // Tab 2: 七步精读
-function QuantTab({ apiKey }: { apiKey: string }) {
+function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [extraction, setExtraction] = useState('full')
   const {
@@ -1200,7 +1362,7 @@ function QuantTab({ apiKey }: { apiKey: string }) {
 }
 
 // Tab 3: 四步精读
-function QualTab({ apiKey }: { apiKey: string }) {
+function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [extraction, setExtraction] = useState('full')
   const {

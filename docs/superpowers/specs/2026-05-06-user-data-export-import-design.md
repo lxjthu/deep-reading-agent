@@ -207,6 +207,51 @@ Body: file=<.dra 文件>
 8. 记录操作日志
 ```
 
+### 5.2.1 事务管理（关键实现细节）
+
+**重要**：导入操作使用 FastAPI 的 `get_db` 依赖注入，该依赖会在请求开始时创建 session，在请求结束时自动关闭。因此导入操作必须在一次 HTTP 请求内完成所有数据库操作。
+
+**事务边界**：
+- **数据清除和导入**在同一个事务中完成
+- **物理文件恢复**在事务提交后进行（best-effort）
+- 不要在 `_clear_user_data()` 内部调用 `db.commit()`，应由调用方统一控制
+
+**错误的事务写法（会导致"Can't operate on closed transaction"）**：
+```python
+# 错误：在嵌套事务中调用 commit
+async with db.begin_nested():
+    await _clear_user_data(db, user.id)  # 内部调用了 db.commit()
+    await _deserialize_table(db, ...)
+    await db.commit()  # 事务已关闭，报错
+```
+
+**正确的事务写法**：
+```python
+# 正确：在一个事务中完成所有数据操作
+await _clear_user_data(db, user.id)  # 不调用 commit
+await _deserialize_table(db, ...)
+await db.commit()  # 统一提交
+```
+
+### 5.2.2 清空策略
+
+**当前实现**：清空**所有用户**的数据（不仅仅是当前用户），确保 UUID 主键不冲突。
+
+```python
+async def _clear_user_data(db: AsyncSession, user_id: int) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for model in IMPORT_CLEAR_ORDER:
+        # 删除所有记录，不限于当前用户
+        result = await db.execute(delete(model))
+        counts[table_name] = result.rowcount or 0
+    return counts
+```
+
+**注意**：这是针对单用户实例的简化策略。多用户实例应考虑：
+1. 仅清空当前用户数据
+2. 导入时对 UUID 冲突的记录生成新 ID
+3. 更新外键引用关系
+
 ### 5.3 清空顺序（FK 反向依赖，先删子表）
 
 ```
@@ -222,6 +267,45 @@ prompt_templates（仅 scope='user'）
 upload_batches → files → prompt_templates(user) →
 bib_entries → jobs → bib_filter_links → job_bib_entries →
 reading_items → artifacts → bib_references → bib_reference_citations
+```
+
+### 5.4.1 物理文件恢复策略
+
+**关键原则**：文件恢复必须在数据库事务提交后进行。
+
+**原因**：
+- 事务提交前，新插入的记录尚未真正写入数据库
+- 文件恢复需要查询数据库获取 `storage_path`
+- 如果先恢复文件再提交事务，可能导致文件恢复成功但数据回滚，造成 orphaned files
+
+**实现步骤**：
+
+1. **事务内**：导入所有数据库记录
+2. **提交事务**：`await db.commit()`
+3. **事务外**：收集文件恢复信息（此时 session 仍有效）
+4. **文件恢复**：复制物理文件到目标目录
+
+```python
+# 步骤1-2：数据导入和提交
+await db.commit()
+
+# 步骤3：收集恢复信息（仍在 session 内）
+files_to_restore = []
+for src_path in files_dir.iterdir():
+    file_id = src_path.stem
+    result = await db.execute(select(File).where(File.id == file_id))
+    record = result.scalar_one_or_none()
+    if record and not getattr(record, "_file_missing", False):
+        dst = resolve_storage_path(record.storage_path)
+        files_to_restore.append((src_path, dst))
+
+# 步骤4：恢复文件（best-effort）
+for src_path, dst_path in files_to_restore:
+    try:
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dst_path)
+    except Exception:
+        pass  # 文件缺失不阻塞导入
 ```
 
 ### 5.5 导入时数据转换

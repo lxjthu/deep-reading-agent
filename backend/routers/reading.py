@@ -273,9 +273,9 @@ async def get_or_create_bib_entry(db: AsyncSession, user: User, file_record: Fil
             select(BibEntry).where(
                 BibEntry.owner_user_id == user.id,
                 BibEntry.source_file_id == file_record.id,
-            )
+            ).limit(1)
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
     if existing is not None:
         if existing.reading_status == "none":
             existing.reading_status = "has_pdf"

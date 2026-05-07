@@ -97,7 +97,15 @@
 - 提示词优先级解析
 - 前端统一管理 quant / qual / long / filter
 
-### 2.8 历史记录与下载
+### 2.8 数据导入导出
+
+- 一键导出所有用户数据为 `.dra` 格式（JSON + 物理文件打包）
+- 一键导入 `.dra` 文件恢复数据
+- 导入时自动清空旧数据（避免 UUID 冲突）
+- 支持跨设备/跨实例迁移
+- 普通用户数据 24h 到期前可导出备份
+
+### 2.9 历史记录与下载
 
 - 历史精读结果
 - 历史综述结果
@@ -773,7 +781,57 @@
 
 测试文件：`backend/tests/test_queue_manager.py`（30 个用例，覆盖全部行为）
 
-## 5.14 清理与管理员：`backend/cleanup.py` + `backend/routers/admin.py`
+## 5.14 数据导入导出：`backend/routers/data.py` + `backend/services/data_portability.py`
+
+文件：
+
+- [data.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/routers/data.py)
+- [data_portability.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/data_portability.py)
+
+职责：
+
+- 用户数据一键导出为 `.dra` 格式
+- `.dra` 文件一键导入恢复数据
+- 导出包包含数据库记录（JSON）和物理文件
+
+关键函数：
+
+- `export_user_data(db, user)`
+  - 按 FK 正向顺序查询 11 张表，序列化为 JSON
+  - 复制物理文件到 files/ 和 artifacts/ 目录
+  - 打包为 zip，返回临时文件路径
+- `import_user_data(db, user, dra_path)`
+  - 解压 `.dra` 文件，读取 manifest.json
+  - 验证 format_version
+  - **清空所有现有数据**（避免 UUID 冲突）
+  - 按 FK 正向顺序导入 JSON 数据
+  - 统一提交事务
+  - 恢复物理文件（best-effort）
+
+**关键实现要点**：
+
+1. **事务管理**：所有数据库操作在一个事务中完成，不要在 `_clear_user_data()` 内部调用 `db.commit()`
+2. **清空策略**：当前实现清空**所有用户**数据（单用户实例），多用户实例需改为仅清空当前用户或重映射 UUID
+3. **文件恢复时机**：必须在 `db.commit()` 之后进行，否则 session 已关闭无法查询 storage_path
+4. **错误处理**：导入失败时抛出异常，由路由层捕获并返回 500 错误
+
+导出包格式：
+
+```
+export_20260506_username.dra
+├── manifest.json              # 格式版本、统计信息、错误记录
+├── data/                      # 数据库记录（每表一个 JSON）
+│   ├── bib_entries.json
+│   ├── files.json
+│   └── ...
+├── files/                     # 上传的物理文件
+│   └── {file_id}.{ext}
+└── artifacts/                 # 产物物理文件
+    └── {job_id}/
+        └── {filename}
+```
+
+## 5.15 清理与管理员：`backend/cleanup.py` + `backend/routers/admin.py`
 
 文件：
 
@@ -1324,6 +1382,34 @@
 - 上传 `.md`/`.markdown` 文件并绑定 BibEntry 后，参考文献梳理页面可正常识别和梳理
 - 修复了残留的旧函数名引用导致的 500 错误
 
+### 8.9 用户数据导入导出
+
+改动目标：
+
+- 支持用户一键导出和导入全部数据（文献库、精读结果、源文件、提示词等）
+- 解决普通用户 24h 数据过期无法恢复的问题
+- 支持跨设备/跨实例迁移
+
+落点文件：
+
+- `backend/services/data_portability.py`（新建，核心导出/导入逻辑）
+- `backend/routers/data.py`（新建，API 路由）
+- `frontend/src/App.tsx`（添加导出/导入 UI 和事件处理）
+
+关键实现细节：
+
+- 导出格式：`.dra`（zip 包），内含 `manifest.json` + `data/*.json` + `files/` + `artifacts/`
+- 导入策略：**清空所有数据后导入**（避免 UUID 主键冲突）
+- 事务管理：所有数据库操作在一个事务内完成，文件恢复在事务提交后进行
+- 序列化：datetime → ISO8601，owner_user_id → 替换为当前用户 ID，expires_at → 根据当前角色重算
+- 错误处理：添加详细日志记录（`logger.info/error`），前端捕获非 JSON 响应
+
+踩坑记录：
+
+- **事务关闭错误**：最初使用 `async with db.begin_nested()` 嵌套事务，但 `_clear_user_data()` 内部调用了 `db.commit()`，导致事务提前关闭。解决方案：去掉嵌套事务，由调用方统一控制 `db.commit()`
+- **UUID 冲突**：导入时 bib_entries.id 已存在（其他用户的数据）。解决方案：改为清空**所有用户**数据（单用户实例策略）
+- **文件恢复时机**：最初在事务内查询 storage_path，但 commit 后 session 已关闭。解决方案：先收集所有恢复信息，再执行文件复制
+
 ## 9. 改代码时的推荐查找路径
 
 ## 9.1 要改注册/登录/权限
@@ -1393,7 +1479,23 @@
 - `frontend/src/lib/download.ts`
 - `frontend/src/App.tsx` 中的 `HistoryTab`
 
-## 9.9 要改任务队列、并发控制、排队提醒
+## 9.9 要改数据导入导出
+
+先看：
+
+- `backend/routers/data.py`
+- `backend/services/data_portability.py`
+- `frontend/src/App.tsx` 中的导出/导入处理函数
+- `docs/superpowers/specs/2026-05-06-user-data-export-import-design.md`
+
+常见修改点：
+
+- 新增表到导出范围 → 修改 `EXPORT_TABLE_ORDER` 和 `IMPORT_CLEAR_ORDER`
+- 修改导入策略（如从"清空所有"改为"仅清空当前用户"）→ 修改 `_clear_user_data()`
+- 修改事务行为 → 注意 `db.commit()` 的调用位置
+- 新增字段序列化/反序列化逻辑 → 修改 `_serialize_value()` / `_deserialize_value()`
+
+## 9.10 要改任务队列、并发控制、排队提醒
 
 先看：
 

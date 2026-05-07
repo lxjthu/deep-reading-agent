@@ -22,7 +22,7 @@ import uvicorn
 from cleanup import cleanup_normal_user_data
 from db import AsyncSessionLocal
 from prompt_service import ensure_builtin_prompt_templates
-from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references
+from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data
 
 # Create upload directory
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
@@ -112,6 +112,7 @@ app.include_router(history.router, prefix="/api/history", tags=["History"])
 app.include_router(compare.router, prefix="/api/compare", tags=["Compare"])
 app.include_router(library.router, prefix="/api/library", tags=["Library"])
 app.include_router(references.router, prefix="/api/references", tags=["References"])
+app.include_router(data.router, prefix="/api/data", tags=["Data"])
 app.include_router(deploy.router, prefix="/api/deploy", tags=["Deploy"])
 
 
