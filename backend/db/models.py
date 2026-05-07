@@ -277,6 +277,9 @@ class BibEntry(Base):
     keywords_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     venue_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     citation_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    volume: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    issue: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    pages: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Provenance
     source_db: Mapped[str] = mapped_column(String, nullable=False)

@@ -127,7 +127,21 @@
 | `normalize_title_for_match(...)` | 标题归一化 | PDF 文件名和题录标题匹配不稳定 |
 | `title_match_score(...)` | 标题相似度评分 | 自动匹配质量调优 |
 
-## 2.9 `backend/routers/filter.py`
+## 2.9 `parsers.py`（项目根目录）
+
+文件：
+
+- [parsers.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/parsers.py)
+
+| 函数 / 类 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `WoSParser.parse()` | 解析 WoS 纯文本格式，支持多行续行 | WoS 导入解析异常 |
+| `WoSParser.to_dataframe()` | 将解析结果转为 DataFrame（含 Keywords/Volume/Issue/Pages/ISSN/Language） | WoS 字段映射不对 |
+| `CNKIParser.parse()` | 解析 CNKI "Key-中文Key" 格式，支持多行值续行 | CNKI 导入解析异常 |
+| `CNKIParser.to_dataframe()` | 将解析结果转为 DataFrame（含 DOI/Keywords/Volume/Issue/Pages/ISSN/URL） | CNKI 字段映射不对、DOI 丢失 |
+| `get_parser(file_path)` | 工厂方法：根据文件内容自动检测格式并返回对应 Parser | 新增题录格式或格式检测异常 |
+
+## 2.10 `backend/routers/filter.py`
 
 文件：
 
@@ -137,11 +151,12 @@
 |---|---|---|
 | `start_filter(...)` | 启动筛选任务 | 点击开始筛选没反应、任务没创建 |
 | `run_filter_task(...)` | 后台执行筛选、导出、持久化 | 筛选过程出错、日志不对、任务卡住 |
-| `persist_filter_results(...)` | 将筛选结果写入 `BibEntry` / `BibFilterLink` / `Artifact` | 文献库中缺筛选信息、Excel 产物缺失 |
+| `persist_filter_results(...)` | 将筛选结果写入 `BibEntry` / `BibFilterLink` / `Artifact`，含反向匹配 | 文献库中缺筛选信息、Excel 产物缺失 |
+| `reverse_match_to_existing_files(...)` | 反向匹配：将新 BibEntry 与用户已上传的 PDF/MD 关联（DOI 精确匹配或标题 ≥ 0.72） | 题录导入后 PDF 未自动绑定 |
 | `get_task_status(...)` | 返回筛选任务状态 | 前端进度条或轮询异常 |
 | `cancel_task(...)` | 取消任务 | 任务无法取消 |
 
-## 2.10 `backend/routers/reading.py`
+## 2.11 `backend/routers/reading.py`
 
 文件：
 
@@ -167,7 +182,7 @@
 | `start_quant(...)` | 启动七步任务 | 前端开始七步无响应 |
 | `start_qual(...)` | 启动四步任务 | 前端开始四步无响应 |
 
-## 2.11 `backend/routers/compare.py`
+## 2.12 `backend/routers/compare.py`
 
 文件：
 
@@ -191,7 +206,7 @@
 | `analyze_comparison(...)` | 生成七步/四步对比综述 | 七步/四步综述生成问题 |
 | `analyze_long_comparison(...)` | 生成长文本对比综述 | 长文本综述生成问题 |
 
-## 2.12 `backend/routers/library.py`
+## 2.13 `backend/routers/library.py`
 
 文件：
 
@@ -203,9 +218,9 @@
 | `get_entry_detail(...)` | 返回单篇文献详情和时间线 | 文献详情、产物列表、筛选评价问题 |
 | `update_entry(...)` | 更新文献元数据 | 文献库编辑保存问题 |
 | `match_online(...)` | 对单篇文献执行在线元数据匹配 | 在线匹配失败、候选结果异常 |
-| `apply_match(...)` | 应用候选元数据到文献 | 应用匹配结果失败 |
+| `apply_match(...)` | 应用候选元数据到文献（重新搜索 → 只补空字段 → 更新 dedup_key 和 metadata_completeness） | 应用匹配结果失败 |
 
-## 2.12.1 `backend/services/pdf_metadata_extract.py`
+## 2.13.1 `backend/services/pdf_metadata_extract.py`
 
 文件：
 
@@ -218,7 +233,7 @@
 | `extract_isbns(text)` | 从文本中正则提取 ISBN | ISBN 提取问题 |
 | `extract_page_header(page)` | 提取页面页眉区域 | 页眉提取不准确 |
 
-## 2.12.2 `backend/services/pdf_metadata_llm.py`
+## 2.13.2 `backend/services/pdf_metadata_llm.py`
 
 文件：
 
@@ -229,7 +244,7 @@
 | `extract_metadata_with_llm(front_matter, filename)` | 调用 DeepSeek 从 PDF 前几页抽取结构化元数据 | LLM 抽取结果异常 |
 | `_clean_metadata(data)` | 清洗和验证 LLM 返回的元数据 | 元数据字段格式问题 |
 
-## 2.12.3 `backend/services/metadata_sources.py`
+## 2.13.3 `backend/services/metadata_sources.py`
 
 文件：
 
@@ -240,7 +255,7 @@
 | `CandidateMetadata` | 候选元数据数据类 | 候选数据结构问题 |
 | `MetadataSource` | 元数据源抽象基类 | 新增数据源时参考 |
 
-## 2.12.4 `backend/services/crossref_source.py`
+## 2.13.4 `backend/services/crossref_source.py`
 
 文件：
 
@@ -251,7 +266,7 @@
 | `CrossrefSource.search_by_doi(doi)` | 通过 Crossref API 查询 DOI | Crossref 查询失败 |
 | `CrossrefSource.search_by_metadata(title, authors, year)` | 通过标题/作者/年份搜索 | Crossref 搜索无结果 |
 
-## 2.12.5 `backend/services/openalex_source.py`
+## 2.13.5 `backend/services/openalex_source.py`
 
 文件：
 
@@ -262,7 +277,7 @@
 | `OpenAlexSource.search_by_doi(doi)` | 通过 OpenAlex API 查询 DOI | OpenAlex 查询失败 |
 | `OpenAlexSource.search_by_metadata(title, authors, year)` | 通过标题/作者/年份搜索 | OpenAlex 搜索无结果 |
 
-## 2.12.6 `backend/services/metadata_match_service.py`
+## 2.13.6 `backend/services/metadata_match_service.py`
 
 文件：
 
@@ -274,7 +289,7 @@
 | `classify_confidence(score)` | 将分数分为 high/medium/low | 置信度阈值问题 |
 | `apply_high_confidence_match(bib_entry, candidate)` | 高置信度自动补空字段 | 自动补全逻辑问题 |
 
-## 2.12.7 `backend/db/utils.py` (新增函数)
+## 2.13.7 `backend/db/utils.py` (新增函数)
 
 文件：
 
@@ -286,7 +301,7 @@
 | `normalize_doi(value)` | DOI 标准化 | DOI 比对问题 |
 | `_extract_surname(author_name)` | 提取作者姓氏 | 作者匹配问题 |
 
-## 2.13 `backend/routers/history.py`
+## 2.14 `backend/routers/history.py`
 
 文件：
 
@@ -300,7 +315,7 @@
 | `save_synthesis(...)` | 将前端生成的综述保存为任务与产物 | 点击“保存到历史记录”无效 |
 | `delete_file(...)` | 删除历史记录 | 删除失败或权限问题 |
 
-## 2.14 `backend/routers/download.py`
+## 2.15 `backend/routers/download.py`
 
 文件：
 
@@ -310,7 +325,7 @@
 |---|---|---|
 | `download_file(...)` | 鉴权下载产物文件 | 下载返回 401/404/Not authenticated |
 
-## 2.15 `backend/prompt_registry.py`
+## 2.16 `backend/prompt_registry.py`
 
 文件：
 
@@ -405,6 +420,32 @@
 | `run_reference_trace_task(...)` | 后台执行参考文献梳理任务 | 参考文献任务异常 |
 | `write_trace_outputs(...)` | 生成 Excel/MD/JSON 产物文件 | 产物生成异常 |
 | `persist_trace_success(...)` | 将参考文献和引用写入数据库 | 数据库写入异常 |
+
+## 2.22 `backend/services/data_portability.py`
+
+文件：
+
+- [data_portability.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/data_portability.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `export_user_data(db, user)` | 将用户全部数据打包为 `.dra` 文件 | 导出功能异常 |
+| `import_user_data(db, user, dra_path)` | 从 `.dra` 文件恢复用户数据 | 导入功能异常 |
+| `_clear_user_data(db, user_id)` | 按 FK 逆序删除用户关联数据 | 导入时清理不完整 |
+| `_pre_delete_conflicts(db, model, records, ...)` | 三层冲突预删除（PK / UniqueConstraint / FK） | 导入 PK/unique 冲突 |
+| `_deserialize_table(db, model, records, ...)` | 反序列化 JSON 并 INSERT 到数据库 | 导入数据格式问题 |
+| `_serialize_table(db, model, user_id)` | 将表数据序列化为 JSON | 导出数据不全 |
+
+## 2.23 `backend/routers/data.py`
+
+文件：
+
+- [data.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/routers/data.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `export_data(user, db)` | GET /api/data/export 导出接口 | 导出 API 问题 |
+| `import_data(file, user, db)` | POST /api/data/import 导入接口 | 导入 API 问题 |
 
 ## 3. 前端函数索引
 

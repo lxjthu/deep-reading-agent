@@ -72,6 +72,18 @@ class WoSParser(BaseParser):
         data = []
         for r in self.records:
             authors = "; ".join(r.get('AU', []))
+            de = r.get('DE', '')
+            id_kw = r.get('ID', '')
+            kw_parts = [p.strip() for p in [de, id_kw] if p.strip()]
+            keywords = '; '.join(kw_parts)
+
+            pages = r.get('BP', '')
+            ep = r.get('EP', '')
+            if pages and ep:
+                pages = f"{pages}-{ep}"
+            elif not pages and ep:
+                pages = ep
+
             entry = {
                 'Title': r.get('TI', ''),
                 'Authors': authors,
@@ -79,9 +91,15 @@ class WoSParser(BaseParser):
                 'Year': r.get('PY', ''),
                 'Abstract': r.get('AB', ''),
                 'DOI': r.get('DI', ''),
+                'Keywords': keywords,
+                'Volume': r.get('VL', ''),
+                'Issue': r.get('IS', ''),
+                'Pages': pages,
+                'ISSN': r.get('SN', ''),
+                'Language': r.get('LA', ''),
                 'Type': r.get('DT', r.get('PT', '')),
                 'Citations': r.get('TC', '0'),
-                'SourceType': 'WoS'
+                'SourceType': 'WoS',
             }
             data.append(entry)
         return pd.DataFrame(data)
@@ -92,7 +110,6 @@ class CNKIParser(BaseParser):
         self.records = []
 
     def parse(self):
-        """Parses the CNKI plain text export."""
         if not os.path.exists(self.file_path):
             logger.error(f"File not found: {self.file_path}")
             return []
@@ -101,66 +118,68 @@ class CNKIParser(BaseParser):
             with open(self.file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
         except UnicodeDecodeError:
-            with open(self.file_path, 'r', encoding='gb18030') as f: # CNKI often uses GBK/GB18030
+            with open(self.file_path, 'r', encoding='gb18030') as f:
                 lines = f.readlines()
 
         current_record = {}
-        
-        # Regex to match "Key-ChineseKey: Value"
-        # e.g., "Title-题名: ..."
+        last_key = None
         field_pattern = re.compile(r"^([A-Za-z]+)-([\u4e00-\u9fa5]+):\s*(.*)")
-        
+
         for line in lines:
-            line = line.strip()
-            if not line: continue
-            
-            # Check for new record start
+            line = line.rstrip('\n').rstrip('\r')
+            if not line.strip():
+                last_key = None
+                continue
+
             if line.startswith("SrcDatabase-"):
                 if current_record:
                     self.records.append(current_record)
                 current_record = {}
-            
-            match = field_pattern.match(line)
+                last_key = None
+
+            match = field_pattern.match(line.strip())
             if match:
-                key = match.group(1) # e.g. Title
-                # cn_key = match.group(2) # e.g. 题名
+                key = match.group(1)
                 value = match.group(3)
                 current_record[key] = value
-            else:
-                # Handle multi-line abstract or other fields if necessary
-                # CNKI exports usually put abstract on one line, but just in case
-                pass
+                last_key = key
+            elif last_key and not line.strip().startswith("SrcDatabase-"):
+                current_record[last_key] = current_record.get(last_key, '') + ' ' + line.strip()
 
-        # Append last record
         if current_record:
             self.records.append(current_record)
-            
+
         logger.info(f"Parsed {len(self.records)} records from {self.file_path} (CNKI)")
         return self.records
 
     def to_dataframe(self):
         data = []
         for r in self.records:
-            # Clean Authors (replace ; with ; )
-            authors = r.get('Author', '').replace(';', '; ')
-            
-            # Extract Year from PubTime (e.g., 2026-01-23 17:54)
-            year = ''
-            pub_time = r.get('PubTime', '')
-            year_match = re.search(r'\d{4}', pub_time)
-            if year_match:
-                year = year_match.group(0)
-            
+            authors = r.get('Author', '').replace(';', '; ').rstrip('; ').strip()
+
+            year = r.get('Year', '').strip()
+            if not year:
+                pub_time = r.get('PubTime', '')
+                year_match = re.search(r'\d{4}', pub_time)
+                year = year_match.group(0) if year_match else ''
+
             entry = {
                 'Title': r.get('Title', ''),
                 'Authors': authors,
-                'Journal': r.get('Source', ''), # CNKI uses Source for Journal Name
+                'Journal': r.get('Source', ''),
                 'Year': year,
-                'Abstract': r.get('Summary', ''), # CNKI uses Summary
-                'DOI': '', # CNKI plain text often lacks DOI
-                'Type': 'Journal', # Default to Journal
-                'Citations': '0', # Not provided in this format
-                'SourceType': 'CNKI'
+                'Abstract': r.get('Summary', ''),
+                'DOI': r.get('DOI', ''),
+                'Keywords': r.get('Keyword', ''),
+                'Volume': r.get('Volume', ''),
+                'Issue': r.get('Period', ''),
+                'Pages': r.get('PageCount', ''),
+                'ISSN': r.get('ISSN', ''),
+                'URL': r.get('URL', ''),
+                'PubTime': r.get('PubTime', ''),
+                'Type': 'Journal',
+                'Citations': '0',
+                'SourceType': 'CNKI',
             }
             data.append(entry)
         return pd.DataFrame(data)

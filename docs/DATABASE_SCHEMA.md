@@ -1,8 +1,8 @@
 # 数据库设计文档
 
-> **版本**: v1.2  
-> **日期**: 2026-04-29  
-> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)
+> **版本**: v1.3  
+> **日期**: 2026-05-07  
+> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)
 
 ## 1. 选型与约定
 
@@ -52,7 +52,7 @@ upload_batches            │        └──────────┘  │ar
 └────────────────┘
 ```
 
-枢纽：`bib_entries`（一篇文献的"档案"）  
+枢纽：`bib_entries`（一篇文献的"档案"，含 v1.3 新增的 volume/issue/pages 字段）  
 物理：`files`（PDF / 题录 / MD / DOCX）  
 事件：`jobs`（filter / reading_* / compare / synthesis / reference_trace 等）  
 产物：`artifacts`（任务输出文件）  
@@ -230,6 +230,9 @@ CREATE TABLE bib_entries (
     keywords_json   TEXT NOT NULL DEFAULT '[]',
     venue_type      TEXT,                                        -- journal/conference/book/preprint
     citation_count  INTEGER,                                     -- 预留，可后期填
+    volume          TEXT,                                        -- 卷号（CNKI Volume-卷 / WoS VL）
+    issue           TEXT,                                        -- 期号（CNKI Period-期 / WoS IS）
+    pages           TEXT,                                        -- 页码范围（CNKI PageCount-页码 / WoS BP-EP）
 
     -- 来源
     source_db       TEXT NOT NULL CHECK (source_db IN
@@ -292,6 +295,12 @@ def compute_dedup_key(doi: str | None, title: str, authors: list[str], year: int
 - `full`: title/authors/year/doi/journal/abstract 全有
 - `partial`: 至少 title + authors
 - `minimal`: 只有 title
+
+> **v1.3 新增字段**：`volume`、`issue`、`pages` 于 2026-05-07 规划，详见 [CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)。这三个字段来源：
+> - CNKI 导出：`Volume-卷`、`Period-期`、`PageCount-页码`
+> - WoS 导出：`VL`、`IS`、`BP`+`EP`
+> - 在线匹配：Crossref/OpenAlex 返回的 volume/issue/pages
+> - `metadata_completeness` 计算**不含**这三个字段（它们是补充信息，不影响 full/partial/minimal 判定）
 
 PDF 提取后若为 `partial` 或 `minimal`，前端弹出"请补充元数据"对话框。
 
@@ -754,6 +763,12 @@ class BibEntry(Base):
     doi: Mapped[Optional[str]] = mapped_column(String)
     journal: Mapped[Optional[str]] = mapped_column(String)
     abstract: Mapped[Optional[str]] = mapped_column(String)
+    keywords_json: Mapped[str] = mapped_column(String, default="[]")
+    venue_type: Mapped[Optional[str]] = mapped_column(String)
+    citation_count: Mapped[Optional[int]] = mapped_column(Integer)
+    volume: Mapped[Optional[str]] = mapped_column(String)      # v1.3 新增
+    issue: Mapped[Optional[str]] = mapped_column(String)       # v1.3 新增
+    pages: Mapped[Optional[str]] = mapped_column(String)       # v1.3 新增
     source_db: Mapped[str] = mapped_column(String)
     source_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("files.id"))
     reading_status: Mapped[str] = mapped_column(String, default="none")
@@ -789,6 +804,7 @@ backend/migrations/versions/
 ├── 003_add_reading_items.py     # 精读结构化结果表，供 compare / library 直接查询
 ├── 004_add_prompt_templates.py  # 提示词模板表（系统默认 + 用户覆盖）
 ├── 005_add_reference_trace_tables.py  # bib_references / bib_reference_citations + jobs/artifacts 扩展
+├── 006_add_bib_entry_volume_issue_pages.py  # bib_entries 新增 volume/issue/pages 字段
 └── (后续新增字段时追加)
 ```
 

@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ from upload_storage import get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "005"
+CURRENT_SCHEMA_VERSION = "006"
 
 # FK forward order for export / import
 EXPORT_TABLE_ORDER = [
@@ -305,6 +305,65 @@ async def _clear_user_data(db: AsyncSession, user_id: int) -> dict[str, int]:
     return counts
 
 
+async def _pre_delete_conflicts(
+    db: AsyncSession,
+    model: type,
+    records: list[dict],
+    pk_col: str,
+    auto_pk: bool,
+) -> None:
+    """Delete existing DB rows that would collide with export data.
+
+    Three strategies, applied in order:
+    1. Non-auto PK tables: DELETE WHERE pk IN (export PKs)
+    2. Tables with UniqueConstraint: DELETE by unique column combos
+    3. Auto-PK tables: DELETE by FK column values (child rows whose
+       parent was already replaced in step 1)
+    """
+    from sqlalchemy import UniqueConstraint
+
+    # 1) PK-based delete for non-auto tables
+    if not auto_pk:
+        old_pks = [row[pk_col] for row in records if pk_col in row]
+        if old_pks:
+            await db.execute(delete(model).where(getattr(model, pk_col).in_(old_pks)))
+
+    # 2) UniqueConstraint-based delete (junction tables etc.)
+    for constraint in model.__table__.constraints:
+        if not isinstance(constraint, UniqueConstraint):
+            continue
+        uq_cols = [c.name for c in constraint.columns]
+        if sorted(uq_cols) == [pk_col]:
+            continue
+        conditions = []
+        for row in records:
+            if all(col in row for col in uq_cols):
+                cond = and_(*[getattr(model, col) == row[col] for col in uq_cols])
+                conditions.append(cond)
+        if conditions:
+            await db.execute(delete(model).where(or_(*conditions)))
+
+    # 3) FK-based delete for auto-PK tables (e.g. Artifact)
+    #    When parent records (jobs, bib_entries…) were deleted in step 1,
+    #    their child rows in auto-PK tables still linger because SQLite
+    #    doesn't enforce FK CASCADE.  Delete by FK column values.
+    if auto_pk:
+        for col in model.__table__.columns:
+            if col.name == "owner_user_id" or col.name == pk_col:
+                continue
+            if not col.foreign_keys:
+                continue
+            fk_vals = list({
+                row[col.name]
+                for row in records
+                if col.name in row and row[col.name] is not None
+            })
+            if fk_vals:
+                await db.execute(
+                    delete(model).where(getattr(model, col.name).in_(fk_vals))
+                )
+
+
 async def _deserialize_table(
     db: AsyncSession,
     model: type,
@@ -320,6 +379,11 @@ async def _deserialize_table(
     pk_col = _get_pk_column(model)
     auto_pk = _is_autoincrement_pk(model)
     inserted = 0
+
+    # Pre-delete existing records that would conflict with export data.
+    # Handles both PK collisions and UNIQUE constraint collisions,
+    # regardless of owner_user_id.
+    await _pre_delete_conflicts(db, model, records, pk_col, auto_pk)
 
     # Compute new expires_at based on current role
     new_expires_at = compute_expires_at_for_role(role)
@@ -362,7 +426,6 @@ async def _deserialize_table(
             db.add(obj)
             inserted += 1
         except Exception:
-            # Skip bad records, continue
             continue
 
     return inserted
@@ -398,7 +461,10 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
 
         # Clear existing data
         logger.info("[import] Clearing existing user data...")
-        clear_counts = await _clear_user_data(db, user.id)
+        uid = user.id
+        urole = user.role
+        clear_counts = await _clear_user_data(db, uid)
+        await db.flush()
         logger.info("[import] Cleared data: %s", clear_counts)
 
         # Import tables in order
@@ -414,7 +480,8 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
                 records = json.load(f)
 
             logger.info("[import] Importing table %s, %d records...", table_name, len(records))
-            count = await _deserialize_table(db, model, records, user.id, user.role)
+            count = await _deserialize_table(db, model, records, uid, urole)
+            await db.flush()
             import_counts[table_name] = count
             logger.info("[import] Table %s imported: %d records", table_name, count)
 
@@ -438,7 +505,7 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
                     continue
                 file_id = src_path.stem
                 result = await db.execute(select(File).where(File.id == file_id))
-                record = result.scalar_one_or_none()
+                record = result.scalars().first()
                 if record is None:
                     logger.warning("[import] File record not found for id=%s", file_id)
                     continue
@@ -464,7 +531,7 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
                             Artifact.filename == filename,
                         )
                     )
-                    record = result.scalar_one_or_none()
+                    record = result.scalars().first()
                     if record is None:
                         logger.warning("[import] Artifact record not found: job_id=%s, filename=%s", job_id, filename)
                         continue

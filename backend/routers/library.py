@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -12,9 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import PROJECT_ROOT, get_db
-from db.models import Artifact, BibEntry, BibFilterLink, File, Job, JobBibEntry, User
+from db.models import Artifact, BibEntry, BibFilterLink, File, Job, JobBibEntry, ReadingItem, User
+from db.utils import title_match_score, normalize_doi, compute_metadata_match_score
 from services.crossref_source import CrossrefSource
-from services.metadata_match_service import classify_confidence, score_candidates
+from services.metadata_match_service import apply_high_confidence_match, classify_confidence, score_candidates
 from services.metadata_sources import CandidateMetadata
 from services.openalex_source import OpenAlexSource
 from services.pdf_metadata_extract import extract_front_matter
@@ -374,7 +376,7 @@ class OnlineMatchResponse(BaseModel):
 
 
 class ApplyMatchRequest(BaseModel):
-    candidate_index: int
+    candidate: dict
 
 
 @router.post("/entries/{entry_id}/match-online", response_model=OnlineMatchResponse)
@@ -384,7 +386,6 @@ async def match_online(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OnlineMatchResponse:
-    """Execute online metadata matching for a single entry."""
     entry = (
         await db.execute(
             select(BibEntry).where(
@@ -430,22 +431,72 @@ async def match_online(
                     if not extracted.get("doi") and front_matter.get("doi_candidates"):
                         extracted["doi"] = front_matter["doi_candidates"][0]
 
-    candidates = []
+    candidates: list[CandidateMetadata] = []
 
-    if extracted.get("doi"):
+    entry_title = (extracted.get("title") or "").strip()
+    entry_doi = normalize_doi(extracted.get("doi"))
+    title_words = [w for w in re.sub(r"[^\w]+", " ", entry_title.lower()).split() if len(w) >= 2]
+
+    local_stmt = select(BibEntry).where(
+        BibEntry.owner_user_id == user.id,
+        BibEntry.id != entry.id,
+    )
+
+    if entry_doi:
+        local_stmt = local_stmt.where(
+            or_(BibEntry.doi == entry.doi, BibEntry.title.ilike(f"%{title_words[0]}%"))
+            if title_words else BibEntry.doi == entry.doi
+        )
+    elif title_words:
+        local_stmt = local_stmt.where(BibEntry.title.ilike(f"%{title_words[0]}%"))
+    else:
+        local_stmt = local_stmt.where(BibEntry.metadata_completeness == "full")
+
+    local_rows = (await db.execute(local_stmt)).scalars().all()
+
+    for other in local_rows:
+        other_authors = json.loads(other.authors_json) if other.authors_json else []
+        existing = {
+            "title": other.title,
+            "authors": other_authors,
+            "year": other.year,
+            "doi": other.doi,
+            "journal": other.journal,
+            "language": None,
+        }
+        local_score = compute_metadata_match_score(extracted, existing)
+        if local_score >= 0.78:
+            candidates.append(CandidateMetadata(
+                title=other.title,
+                authors=other_authors,
+                year=other.year,
+                journal=other.journal,
+                doi=other.doi,
+                volume=other.volume,
+                issue=other.issue,
+                pages=other.pages,
+                source="local",
+                score=local_score,
+            ))
+
+    online_dedup = {normalize_doi(c.doi) for c in candidates if c.doi}
+
+    if extracted.get("doi") and not any(c.source == "local" and c.score >= 0.92 for c in candidates):
         crossref = CrossrefSource()
         openalex = OpenAlexSource()
 
         doi_result_crossref = await crossref.search_by_doi(extracted["doi"])
-        if doi_result_crossref:
+        if doi_result_crossref and normalize_doi(doi_result_crossref.doi) not in online_dedup:
             candidates.append(doi_result_crossref)
+            online_dedup.add(normalize_doi(doi_result_crossref.doi))
 
         doi_result_openalex = await openalex.search_by_doi(extracted["doi"])
-        if doi_result_openalex:
-            if not any(c.doi == doi_result_openalex.doi for c in candidates):
-                candidates.append(doi_result_openalex)
+        if doi_result_openalex and normalize_doi(doi_result_openalex.doi) not in online_dedup:
+            candidates.append(doi_result_openalex)
+            online_dedup.add(normalize_doi(doi_result_openalex.doi))
 
-    if not candidates and extracted.get("title"):
+    has_local_high = any(c.source == "local" and c.score >= 0.92 for c in candidates)
+    if not has_local_high and extracted.get("title"):
         crossref = CrossrefSource()
         openalex = OpenAlexSource()
 
@@ -487,7 +538,6 @@ async def apply_match(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Apply a candidate match to fill empty fields."""
     entry = (
         await db.execute(
             select(BibEntry).where(
@@ -500,4 +550,179 @@ async def apply_match(
     if entry is None:
         raise HTTPException(status_code=404, detail="文献不存在。")
 
-    return {"message": "Match applied successfully."}
+    c = request.candidate
+    candidate_source = c.get("source", "unknown")
+
+    extracted = {
+        "title": entry.title,
+        "authors": json.loads(entry.authors_json) if entry.authors_json else [],
+        "year": entry.year,
+        "doi": entry.doi,
+        "journal": entry.journal,
+        "volume": entry.volume,
+        "issue": entry.issue,
+        "pages": entry.pages,
+        "language": None,
+    }
+
+    if candidate_source == "local":
+        other_entry = (
+            await db.execute(
+                select(BibEntry).where(
+                    BibEntry.owner_user_id == user.id,
+                    BibEntry.id != entry.id,
+                    BibEntry.title == c.get("title", ""),
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if other_entry is None:
+            raise HTTPException(status_code=400, detail="本地候选文献不存在。")
+
+        winner, loser = entry, other_entry
+
+        if not winner.doi and loser.doi:
+            winner.doi = loser.doi
+        if not winner.journal and loser.journal:
+            winner.journal = loser.journal
+        if not winner.abstract and loser.abstract:
+            winner.abstract = loser.abstract
+        if not winner.year and loser.year:
+            winner.year = loser.year
+        if not winner.volume and loser.volume:
+            winner.volume = loser.volume
+        if not winner.issue and loser.issue:
+            winner.issue = loser.issue
+        if not winner.pages and loser.pages:
+            winner.pages = loser.pages
+        if not winner.venue_type and loser.venue_type:
+            winner.venue_type = loser.venue_type
+        if not winner.citation_count and loser.citation_count:
+            winner.citation_count = loser.citation_count
+
+        winner_authors = json.loads(winner.authors_json) if winner.authors_json else []
+        loser_authors = json.loads(loser.authors_json) if loser.authors_json else []
+        if not winner_authors and loser_authors:
+            winner.authors_json = json.dumps(loser_authors, ensure_ascii=False)
+
+        winner_kw = json.loads(winner.keywords_json) if winner.keywords_json else []
+        loser_kw = json.loads(loser.keywords_json) if loser.keywords_json else []
+        if not winner_kw and loser_kw:
+            winner.keywords_json = json.dumps(loser_kw, ensure_ascii=False)
+
+        if not winner.source_file_id and loser.source_file_id:
+            winner.source_file_id = loser.source_file_id
+
+        better_status = {"read": 4, "reading": 3, "has_pdf": 2, "none": 1}
+        if better_status.get(loser.reading_status, 0) > better_status.get(winner.reading_status, 0):
+            winner.reading_status = loser.reading_status
+
+        link_rows = (
+            await db.execute(
+                select(BibFilterLink).where(BibFilterLink.bib_entry_id == loser.id)
+            )
+        ).scalars().all()
+        for link in link_rows:
+            existing = (
+                await db.execute(
+                    select(BibFilterLink).where(
+                        BibFilterLink.bib_entry_id == winner.id,
+                        BibFilterLink.filter_job_id == link.filter_job_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                link.bib_entry_id = winner.id
+            else:
+                await db.delete(link)
+
+        jbe_rows = (
+            await db.execute(
+                select(JobBibEntry).where(JobBibEntry.bib_entry_id == loser.id)
+            )
+        ).scalars().all()
+        for jbe in jbe_rows:
+            existing_jbe = (
+                await db.execute(
+                    select(JobBibEntry).where(
+                        JobBibEntry.job_id == jbe.job_id,
+                        JobBibEntry.bib_entry_id == winner.id,
+                        JobBibEntry.role == jbe.role,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_jbe is None:
+                jbe.bib_entry_id = winner.id
+            else:
+                await db.delete(jbe)
+
+        ri_rows = (
+            await db.execute(
+                select(ReadingItem).where(
+                    ReadingItem.bib_entry_id == loser.id,
+                    ReadingItem.owner_user_id == user.id,
+                )
+            )
+        ).scalars().all()
+        for ri in ri_rows:
+            ri.bib_entry_id = winner.id
+
+        await db.delete(loser)
+
+        updated_fields = ["merged_with_local"]
+    else:
+        candidate = CandidateMetadata(
+            title=c.get("title", ""),
+            authors=c.get("authors", []),
+            year=c.get("year"),
+            journal=c.get("journal"),
+            doi=c.get("doi"),
+            volume=c.get("volume"),
+            issue=c.get("issue"),
+            pages=c.get("pages"),
+            source=candidate_source,
+            score=c.get("score", 0.0),
+        )
+        updates = apply_high_confidence_match(extracted, candidate)
+
+        for field, value in updates.items():
+            if field == "authors":
+                setattr(entry, "authors_json", json.dumps(value, ensure_ascii=False))
+            elif field in ("doi", "journal", "volume", "issue", "pages", "year"):
+                setattr(entry, field, value)
+
+        updated_fields = list(updates.keys())
+
+    from db.utils import compute_dedup_key
+    new_doi = entry.doi
+    new_title = entry.title
+    new_authors = json.loads(entry.authors_json) if entry.authors_json else []
+    new_year = entry.year
+    entry.dedup_key = compute_dedup_key(
+        normalize_doi(new_doi) or new_doi,
+        new_title,
+        new_authors,
+        new_year,
+    )
+
+    mc_title = entry.title
+    mc_authors = json.loads(entry.authors_json) if entry.authors_json else []
+    mc_year = entry.year
+    mc_doi = entry.doi
+    mc_journal = entry.journal
+    mc_abstract = entry.abstract
+    has_title = bool(mc_title.strip())
+    has_authors = bool(mc_authors)
+    has_year = mc_year is not None
+    has_doi = bool((mc_doi or "").strip())
+    has_journal = bool((mc_journal or "").strip())
+    has_abstract = bool((mc_abstract or "").strip())
+    if has_title and has_authors and has_year and has_doi and has_journal and has_abstract:
+        entry.metadata_completeness = "full"
+    elif has_title and has_authors:
+        entry.metadata_completeness = "partial"
+    else:
+        entry.metadata_completeness = "minimal"
+
+    await db.commit()
+    return {"message": "Match applied successfully.", "updated_fields": updated_fields}

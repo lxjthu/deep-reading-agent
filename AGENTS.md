@@ -95,6 +95,8 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 
 推送前确保：lint 通过、构建通过、本地功能正常。自动部署直接上线，无 staging 环境。
 
+**⚠️ 编辑大文件时（尤其 FastAPI router），替换完务必检查路由注册是否完整**：用 `python -c "from routers.xxx import router; [print(r.path) for r in router.routes]"` 验证所有端点都在。曾有替换 `apply_match` 时误将 `match_online` 路由定义连带删掉的事故。
+
 ## 改代码优先看的文件
 
 | 改什么 | 先看 |

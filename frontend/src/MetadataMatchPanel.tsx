@@ -69,7 +69,7 @@ export default function MetadataMatchPanel({
       const response = await fetch(`/api/library/entries/${encodeURIComponent(entryId)}/apply-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_index: index }),
+        body: JSON.stringify({ candidate }),
       })
 
       if (!response.ok) {
@@ -93,7 +93,7 @@ export default function MetadataMatchPanel({
           disabled={loading}
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
         >
-          {loading ? '匹配中...' : '在线匹配'}
+          {loading ? '匹配中...' : '匹配'}
         </button>
         {result && (
           <span className="text-sm text-gray-500">

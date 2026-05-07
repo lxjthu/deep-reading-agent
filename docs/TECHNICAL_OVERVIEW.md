@@ -454,7 +454,9 @@
 - `run_filter_task(...)`
   - 后台执行筛选
 - `persist_filter_results(...)`
-  - 将结果写入数据库
+  - 将结果写入数据库，含反向匹配（自动关联已上传 PDF）
+- `reverse_match_to_existing_files(...)`
+  - 反向匹配：将新创建的 BibEntry 与用户已上传的 PDF/MD 文件关联
 - `get_task_status(...)`
   - 查询任务状态
 
@@ -569,6 +571,10 @@
   - 单篇详情
 - `update_entry(...)`
   - 修改元数据
+- `match_online(...)`
+  - 对单篇文献执行在线元数据匹配（Crossref + OpenAlex）
+- `apply_match(...)`
+  - 应用候选匹配：重新执行在线搜索，调用 `apply_high_confidence_match` 只补空字段，更新 dedup_key 和 metadata_completeness
 
 列表响应 `LibraryEntrySummary` 包含字段：
 
@@ -803,17 +809,23 @@
 - `import_user_data(db, user, dra_path)`
   - 解压 `.dra` 文件，读取 manifest.json
   - 验证 format_version
-  - **清空所有现有数据**（避免 UUID 冲突）
-  - 按 FK 正向顺序导入 JSON 数据
+  - 清空导入用户自己的关联数据（junction tables 等）
+  - 按 FK 正向顺序导入 JSON 数据，每张表先 `_pre_delete_conflicts` 再 INSERT
+  - 每张表 flush 一次，捕获早期错误
   - 统一提交事务
   - 恢复物理文件（best-effort）
 
 **关键实现要点**：
 
 1. **事务管理**：所有数据库操作在一个事务中完成，不要在 `_clear_user_data()` 内部调用 `db.commit()`
-2. **清空策略**：当前实现清空**所有用户**数据（单用户实例），多用户实例需改为仅清空当前用户或重映射 UUID
-3. **文件恢复时机**：必须在 `db.commit()` 之后进行，否则 session 已关闭无法查询 storage_path
+2. **冲突覆盖策略**：`_pre_delete_conflicts` 在每张表 INSERT 前按三层策略清理旧数据：
+   - UUID PK 表（File/BibEntry/Job 等）：`DELETE WHERE pk IN (导出数据PKs)`，不区分 owner_user_id
+   - 有 UniqueConstraint 的表（BibFilterLink/JobBibEntry/ReadingItem）：按唯一键组合精确删除
+   - Auto-PK 无唯一约束的子表（Artifact）：按 FK 列值删除（如 `job_id IN (...)`），因为 SQLite 不强制 FK CASCADE
+3. **文件恢复时机**：必须在 `db.commit()` 之后进行，但恢复所需信息（storage_path）在 commit 前收集
 4. **错误处理**：导入失败时抛出异常，由路由层捕获并返回 500 错误
+5. **用户 ID 替换**：导入时 `owner_user_id` 统一替换为当前用户，`expires_at` 按当前角色重算
+6. **安全注意事项**：导入前保存 `user.id`/`user.role` 到局部变量，避免 flush 后访问过期 ORM 对象触发 MissingGreenlet
 
 导出包格式：
 
@@ -1382,7 +1394,38 @@ export_20260506_username.dra
 - 上传 `.md`/`.markdown` 文件并绑定 BibEntry 后，参考文献梳理页面可正常识别和梳理
 - 修复了残留的旧函数名引用导致的 500 错误
 
-### 8.9 用户数据导入导出
+### 8.9 题录解析增强与反向匹配
+
+改动目标：
+
+- CNKI Parser 补全 DOI、Keywords、Volume、Issue、Pages、ISSN、URL 等被丢弃的字段
+- CNKI Parser 支持多行值续行（超长摘要场景）
+- WoS Parser 新增 Keywords（DE+ID 合并）、Volume(VL)、Issue(IS)、Pages(BP-EP)、ISSN(SN)、Language(LA) 字段
+- BibEntry 模型新增 `volume`、`issue`、`pages` 三个字段
+- 筛选入库时执行反向匹配：将 CNKI/WoS 题录自动关联用户已上传的 PDF/MD 文件
+- 修复 `apply_match` 空壳端点：实际执行在线匹配并补空字段
+
+落点文件：
+
+- `parsers.py`（CNKIParser 重写 + WoSParser to_dataframe 增强）
+- `backend/db/models.py`（BibEntry 新增 volume/issue/pages）
+- `backend/routers/filter.py`（新增 `reverse_match_to_existing_files()`、persist_filter_results 写入新字段）
+- `backend/routers/library.py`（`apply_match` 从空壳改为实际匹配+补全逻辑）
+- `backend/migrations/versions/006_add_bib_entry_volume_issue_pages.py`（新增 Alembic 迁移）
+
+当前结果：
+
+- CNKI 导出的 DOI 不再丢失（约 40% 条目恢复 DOI）
+- Keywords、Volume、Issue、Pages 等元数据完整保留，可用于 AI 筛选和文献库展示
+- 用户先上传 PDF 再导入题录时，系统自动合并为同一文献条目（DOI 精确匹配或标题相似度 ≥ 0.72）
+- 文献库"匹配 → 应用匹配"端点可用，先本地库搜索再在线搜索，只补空字段不覆盖已有值，并自动更新 dedup_key 和 metadata_completeness
+
+踩坑记录：
+
+- **Edit 替换路由函数时连带删掉相邻路由**：用编辑工具替换 `apply_match` 函数体时，`oldString` 匹配范围包含了紧邻的 `match_online` 路由定义（从 `class ApplyMatchRequest` 到文件末尾），导致 `match_online` 被 `apply_match` 的新实现完全覆盖，运行时 404。**教训：编辑 FastAPI router 文件时，替换完务必验证所有路由注册是否完整**，例如：`python -c "from routers.xxx import router; [print(r.path) for r in router.routes]"`
+- **apply_match 不应重新搜索**：最初 `apply_match` 重新执行在线搜索重建候选列表，但前端展示的列表包含本地匹配结果（source=local），两份列表不一致导致索引越界（400 候选索引无效）。**教训：`apply_match` 应直接接收前端传来的完整候选数据，而非重新搜索**
+
+### 8.10 用户数据导入导出
 
 改动目标：
 
@@ -1407,7 +1450,10 @@ export_20260506_username.dra
 踩坑记录：
 
 - **事务关闭错误**：最初使用 `async with db.begin_nested()` 嵌套事务，但 `_clear_user_data()` 内部调用了 `db.commit()`，导致事务提前关闭。解决方案：去掉嵌套事务，由调用方统一控制 `db.commit()`
-- **UUID 冲突**：导入时 bib_entries.id 已存在（其他用户的数据）。解决方案：改为清空**所有用户**数据（单用户实例策略）
+- **跨用户 UUID 冲突**：导入时 `_clear_user_data()` 仅删除当前用户的数据，但导出文件可能来自其他用户（如 admin 导出后用普通用户导入），UUID PK 全局冲突。实测 100% overlap（files 17/17、bib_entries 367/367）。解决方案：`_pre_delete_conflicts()` 按 PK 直接删除，不区分 owner_user_id
+- **UniqueConstraint 冲突**：`bib_filter_links` 有 auto PK 但 `UNIQUE(bib_entry_id, filter_job_id)`，auto PK 跳过 PK 删除后 unique 约束仍然冲突。解决方案：`_pre_delete_conflicts()` 第二层按 UniqueConstraint 列组合批量 `DELETE WHERE OR`
+- **Auto-PK 子表残留**：Artifact 无 UniqueConstraint，父表（jobs）被 PK 删除后子表行残留（SQLite 不强制 FK CASCADE），导致文件恢复查询 `scalar_one_or_none()` 报 `MultipleResultsFound`。解决方案：`_pre_delete_conflicts()` 第三层按 FK 列值批量删除
+- **MissingGreenlet**：`db.flush()` 后访问 `user.id` 触发 lazy load，在 async session 中报 greenlet 错误。解决方案：flush 前保存 `uid = user.id; urole = user.role` 到局部变量
 - **文件恢复时机**：最初在事务内查询 storage_path，但 commit 后 session 已关闭。解决方案：先收集所有恢复信息，再执行文件复制
 
 ## 9. 改代码时的推荐查找路径
@@ -1582,6 +1628,22 @@ export_20260506_username.dra
 - 页面展示不对
 
 不要只看页面现象就直接改前端。
+
+### 12.5 编辑 FastAPI router 文件时
+
+**替换函数体后务必验证路由注册完整**。
+
+FastAPI 的路由是按 `@router.get/post(...)` 装饰器的声明顺序注册的。用编辑工具替换某个函数时，如果 `oldString` 匹配范围过大，很容易把紧邻的另一个路由函数连带删掉——运行时不报错但该端点直接 404。
+
+验证命令：
+
+```bash
+python -c "from backend.routers.xxx import router; [print(r.path) for r in router.routes]"
+```
+
+历史事故：
+
+- 替换 `library.py` 中的 `apply_match` 函数时，`oldString` 从 `class ApplyMatchRequest` 匹配到了文件末尾，把 `match_online` 路由定义一起覆盖了，导致 `/entries/{id}/match-online` 返回 404
 
 ## 13. 本文档维护原则
 

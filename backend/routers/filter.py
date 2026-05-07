@@ -18,7 +18,7 @@ from sqlalchemy import select
 from auth.dependencies import current_user
 from db import AsyncSessionLocal, PROJECT_ROOT, get_db
 from db.models import Artifact, BibEntry, BibFilterLink, File, Job, User
-from db.utils import compute_dedup_key
+from db.utils import compute_dedup_key, title_match_score, normalize_doi
 from prompt_service import get_effective_prompt_text
 from upload_storage import lookup_path_by_file_id
 from backend.utils.api_key import validate_deepseek_key
@@ -185,6 +185,71 @@ async def sync_job_status(task_id: str, **updates: Any) -> None:
         await db.commit()
 
 
+async def reverse_match_to_existing_files(
+    db,
+    new_entry: BibEntry,
+    user_id: int,
+) -> None:
+    existing_entries = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.owner_user_id == user_id,
+                BibEntry.source_file_id.isnot(None),
+                BibEntry.id != new_entry.id,
+            )
+        )
+    ).scalars().all()
+
+    if not existing_entries:
+        return
+
+    for old_entry in existing_entries:
+        matched = False
+        new_doi = normalize_doi(new_entry.doi)
+        old_doi = normalize_doi(old_entry.doi)
+        if new_doi and old_doi and new_doi == old_doi:
+            matched = True
+        elif title_match_score(new_entry.title, old_entry.title) >= 0.72:
+            matched = True
+
+        if not matched:
+            continue
+
+        new_entry.source_file_id = old_entry.source_file_id
+        if old_entry.reading_status not in ("none",) and new_entry.reading_status == "none":
+            new_entry.reading_status = old_entry.reading_status
+
+        if not new_entry.abstract and old_entry.abstract:
+            new_entry.abstract = old_entry.abstract
+        if not new_entry.doi and old_entry.doi:
+            new_entry.doi = old_entry.doi
+        if not new_entry.journal and old_entry.journal:
+            new_entry.journal = old_entry.journal
+        if not new_entry.volume and old_entry.volume:
+            new_entry.volume = old_entry.volume
+        if not new_entry.issue and old_entry.issue:
+            new_entry.issue = old_entry.issue
+        if not new_entry.pages and old_entry.pages:
+            new_entry.pages = old_entry.pages
+
+        has_job = (
+            await db.execute(
+                select(Job.id).where(Job.input_file_id == old_entry.source_file_id).limit(1)
+            )
+        ).scalar_one_or_none()
+        has_link = (
+            await db.execute(
+                select(BibFilterLink.id).where(
+                    BibFilterLink.bib_entry_id == old_entry.id
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if not has_job and not has_link:
+            await db.delete(old_entry)
+
+        break
+
+
 async def persist_filter_results(
     task_id: str,
     user: User,
@@ -216,6 +281,9 @@ async def persist_filter_results(
             keywords = parse_keywords(row.get("Keywords"))
             venue_type = clean_nullable_text(row.get("Type"))
             citation_count = parse_int(row.get("Citations"))
+            volume = clean_nullable_text(row.get("Volume"))
+            issue = clean_nullable_text(row.get("Issue"))
+            pages = clean_nullable_text(row.get("Pages"))
             metadata_completeness = compute_metadata_completeness(
                 title, authors, year, doi, journal, abstract
             )
@@ -243,6 +311,9 @@ async def persist_filter_results(
                     keywords_json=json.dumps(keywords, ensure_ascii=False),
                     venue_type=venue_type,
                     citation_count=citation_count,
+                    volume=volume,
+                    issue=issue,
+                    pages=pages,
                     source_db=source_db,
                     source_filter_job_id=job.id,
                     source_file_id=None,
@@ -253,6 +324,7 @@ async def persist_filter_results(
                 )
                 db.add(bib_entry)
                 await db.flush()
+                await reverse_match_to_existing_files(db, bib_entry, user.id)
             else:
                 bib_entry.updated_at = now
                 bib_entry.title = title
@@ -264,6 +336,12 @@ async def persist_filter_results(
                 bib_entry.keywords_json = json.dumps(keywords, ensure_ascii=False)
                 bib_entry.venue_type = venue_type
                 bib_entry.citation_count = citation_count
+                if not bib_entry.volume and volume:
+                    bib_entry.volume = volume
+                if not bib_entry.issue and issue:
+                    bib_entry.issue = issue
+                if not bib_entry.pages and pages:
+                    bib_entry.pages = pages
                 bib_entry.metadata_completeness = metadata_completeness
                 if not bib_entry.source_filter_job_id:
                     bib_entry.source_filter_job_id = job.id
