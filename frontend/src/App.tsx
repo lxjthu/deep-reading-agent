@@ -1094,6 +1094,22 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey })
       })
+      if (startRes.status === 409) {
+        const err = await startRes.json()
+        const info = err.detail?.bib_entry
+        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
+        if (!ok) { setStage('已取消'); setIsRunning(false); return }
+        const retryRes = await fetch('/api/reading/long/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+        })
+        const retryData = await retryRes.json()
+        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
+        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
+        await startTrackingTask(retryData.task_id)
+        return
+      }
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
@@ -1271,6 +1287,21 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey })
       })
+      if (startRes.status === 409) {
+        const err = await startRes.json()
+        const info = err.detail?.bib_entry
+        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
+        if (!ok) { setStage('已取消'); setIsRunning(false); return }
+        const retryRes = await fetch('/api/reading/quant/start', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+        })
+        const retryData = await retryRes.json()
+        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
+        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
+        await startTrackingTask(retryData.task_id)
+        return
+      }
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
@@ -1421,6 +1452,21 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey })
       })
+      if (startRes.status === 409) {
+        const err = await startRes.json()
+        const info = err.detail?.bib_entry
+        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
+        if (!ok) { setStage('已取消'); setIsRunning(false); return }
+        const retryRes = await fetch('/api/reading/qual/start', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+        })
+        const retryData = await retryRes.json()
+        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
+        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
+        await startTrackingTask(retryData.task_id)
+        return
+      }
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)

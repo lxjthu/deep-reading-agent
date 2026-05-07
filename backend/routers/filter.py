@@ -255,6 +255,16 @@ async def persist_filter_results(
                 await db.flush()
             else:
                 bib_entry.updated_at = now
+                bib_entry.title = title
+                bib_entry.authors_json = json.dumps(authors, ensure_ascii=False)
+                bib_entry.year = year
+                bib_entry.doi = doi
+                bib_entry.journal = journal
+                bib_entry.abstract = abstract
+                bib_entry.keywords_json = json.dumps(keywords, ensure_ascii=False)
+                bib_entry.venue_type = venue_type
+                bib_entry.citation_count = citation_count
+                bib_entry.metadata_completeness = metadata_completeness
                 if not bib_entry.source_filter_job_id:
                     bib_entry.source_filter_job_id = job.id
 

@@ -18,7 +18,7 @@ from backend.utils.api_key import validate_deepseek_key
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
@@ -207,11 +207,13 @@ class LongContextRequest(BaseModel):
     custom_question: Optional[str] = None
     extraction_method: str = "full"  # full or preview
     api_key: Optional[str] = None
+    force_overwrite: bool = False
 
 
 class SimpleReadingRequest(BaseModel):
     file_id: str
     api_key: Optional[str] = None
+    force_overwrite: bool = False
 
 
 def utcnow_naive() -> datetime:
@@ -370,6 +372,52 @@ async def create_reading_job(
         )
     )
     return task_id
+
+
+def check_reading_duplicate(bib_entry: BibEntry, force_overwrite: bool) -> Optional[dict]:
+    if bib_entry.reading_status not in ("reading", "read"):
+        return None
+    if force_overwrite:
+        return None
+    return {
+        "detail": "already_read",
+        "bib_entry": {
+            "id": bib_entry.id,
+            "title": bib_entry.title,
+            "reading_status": bib_entry.reading_status,
+        },
+    }
+
+
+async def cleanup_old_reading_data(db: AsyncSession, bib_entry: BibEntry) -> None:
+    old_job_ids = (
+        await db.execute(
+            select(JobBibEntry.job_id).where(JobBibEntry.bib_entry_id == bib_entry.id)
+        )
+    ).scalars().all()
+
+    if old_job_ids:
+        old_artifacts = (
+            await db.execute(
+                select(Artifact).where(Artifact.job_id.in_(old_job_ids))
+            )
+        ).scalars().all()
+        for art in old_artifacts:
+            if art.storage_path:
+                physical = RESULTS_ROOT / art.storage_path
+                if physical.exists():
+                    try:
+                        physical.unlink()
+                    except OSError:
+                        pass
+        await db.execute(delete(Artifact).where(Artifact.job_id.in_(old_job_ids)))
+        await db.execute(delete(ReadingItem).where(ReadingItem.job_id.in_(old_job_ids)))
+        await db.execute(delete(JobBibEntry).where(JobBibEntry.job_id.in_(old_job_ids)))
+        await db.execute(delete(Job).where(Job.id.in_(old_job_ids)))
+
+    await db.execute(delete(ReadingItem).where(ReadingItem.bib_entry_id == bib_entry.id))
+    bib_entry.reading_status = "has_pdf"
+    await db.flush()
 
 
 def init_task_payload(task_id: str, task_type: str, user_id: int, file_id: str, bib_entry_id: str) -> dict:
@@ -1091,6 +1139,11 @@ async def start_long_context(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    dup = check_reading_duplicate(bib_entry, request.force_overwrite)
+    if dup:
+        raise HTTPException(status_code=409, detail=dup)
+    if request.force_overwrite:
+        await cleanup_old_reading_data(db, bib_entry)
     prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="long")
     task_id = await create_reading_job(
         db,
@@ -1141,6 +1194,11 @@ async def start_quant(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    dup = check_reading_duplicate(bib_entry, request.force_overwrite)
+    if dup:
+        raise HTTPException(status_code=409, detail=dup)
+    if request.force_overwrite:
+        await cleanup_old_reading_data(db, bib_entry)
     prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="quant")
     task_id = await create_reading_job(
         db,
@@ -1177,6 +1235,11 @@ async def start_qual(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    dup = check_reading_duplicate(bib_entry, request.force_overwrite)
+    if dup:
+        raise HTTPException(status_code=409, detail=dup)
+    if request.force_overwrite:
+        await cleanup_old_reading_data(db, bib_entry)
     prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="qual")
     task_id = await create_reading_job(
         db,
