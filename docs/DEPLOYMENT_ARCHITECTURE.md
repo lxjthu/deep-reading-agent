@@ -35,7 +35,8 @@
 │   │     1. git fetch origin online                                      │   │
 │   │     2. git reset --hard origin/online (拉取最新代码)                 │   │
 │   │     3. pip install requirements.txt                                 │   │
-│   │     4. bash start.sh (重启服务)                                     │   │
+   │   │     4. alembic upgrade head (自动更新数据库结构)                     │
+   │   │     5. bash start.sh (重启服务)                                     │   │
 │   │ - db/app.sqlite (线上真实数据，不覆盖)                              │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
@@ -96,7 +97,7 @@ GitHub 发送 Webhook (POST /deploy)
 ### 5.1 核心原则
 
 - **代码部署是自动的**：push 到 GitHub 后，服务器自动拉取并重启
-- **数据库迁移是手动的**：服务器需要手动执行 `alembic upgrade head`
+- **数据库迁移是自动的**：`deploy.sh` 已集成 `alembic upgrade head`，部署时自动执行
 - **数据库文件不互传**：本地和服务器的 `db/app.sqlite` 各自独立，不互相覆盖
 
 ### 5.2 数据库变更上线流程
@@ -109,12 +110,7 @@ GitHub 发送 Webhook (POST /deploy)
         ↓
 git push origin online
         ↓
-服务器自动部署代码
-        ↓
-SSH 登录服务器
-  ├─ cd /root/.openclaw/workspace/deep-reading-agent/backend
-  ├─ source ../venv/bin/activate
-  └─ python -m alembic upgrade head
+服务器自动部署代码（含数据库迁移）
         ↓
 验证服务正常
 ```
@@ -145,7 +141,9 @@ git push origin online
 git pull origin online
 ```
 
-### 7.3 服务器手动迁移数据库
+### 7.3 服务器手动迁移数据库（备用）
+
+> 正常情况下 `deploy.sh` 会自动执行迁移。如果自动迁移失败或需要回滚，可手动执行：
 
 ```bash
 # SSH 登录服务器后执行
