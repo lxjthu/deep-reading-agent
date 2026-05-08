@@ -17,11 +17,16 @@ git fetch origin online
 git checkout online
 git reset --hard origin/online
 
-echo "[2/3] 安装依赖..."
+echo "[2/4] 安装依赖..."
 source venv/bin/activate
 pip install -q -r requirements.txt 2>/dev/null || true
 
-echo "[3/3] 重启服务..."
+echo "[3/4] 更新数据库结构..."
+cd backend
+alembic upgrade head || echo "警告：数据库迁移失败，请手动检查"
+cd ..
+
+echo "[4/4] 重启服务..."
 bash start.sh
 
 echo "=== 部署完成 ==="
