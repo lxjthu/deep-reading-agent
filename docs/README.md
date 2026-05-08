@@ -1,0 +1,123 @@
+# docs 目录索引
+
+> 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
+> 最后更新：2026-05-08
+
+---
+
+## 核心文档（必看）
+
+| 文档 | 类型 | 内容 | 何时查阅 |
+|------|------|------|----------|
+| [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) | 技术总览 | 系统架构、代码结构、核心数据流、文件索引、修改记录 | **入门首选**：了解系统全貌，定位改代码先看哪些文件 |
+| [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | 数据库设计 | 表结构、字段定义、SQLAlchemy 模型、迁移脚本索引、查询示例 | 新增/修改数据库字段、排查数据问题 |
+| [FUNCTION_INDEX.md](FUNCTION_INDEX.md) | 函数索引 | 按文件列出关键函数和常见问题速查 | 快速定位某个功能在哪实现 |
+| [CHANGELOG.md](../CHANGELOG.md) | 变更日志 | 版本发布记录、功能更新、bug 修复 | 了解最近的改动 |
+
+---
+
+## 方案设计文档
+
+| 文档 | 类型 | 内容 | 何时查阅 |
+|------|------|------|----------|
+| [CUSTOM_DIMENSION_PLAN.md](CUSTOM_DIMENSION_PLAN.md) | 方案 | 用户自定义精读维度集合（P8） | 理解 dimension_sets/items 的设计 |
+| [CUSTOM_DIMENSION_PHASE1_IMPL.md](CUSTOM_DIMENSION_PHASE1_IMPL.md) | 实现 | 维度功能 Phase 1 实现细节 | 查看已完成的维度功能实现 |
+| [CUSTOM_DIMENSION_PHASE2_DESIGN.md](CUSTOM_DIMENSION_PHASE2_DESIGN.md) | 设计 | 维度功能 Phase 2 设计 | 查看维度功能后续规划 |
+| [PENDING_PLANS.md](PENDING_PLANS.md) | 待办 | 所有未实施的功能规划（P1-P8） | 了解接下来做什么 |
+| [MULTI_USER_PLAN.md](MULTI_USER_PLAN.md) | 方案 | 多用户系统整体规划 | 理解用户/角色/隔离设计 |
+| [MULTIUSER_PROGRESS.md](MULTIUSER_PROGRESS.md) | 进度 | 多用户功能实施进度 | 查看已完成的里程碑 |
+| [PROMPT_MANAGEMENT_PLAN.md](PROMPT_MANAGEMENT_PLAN.md) | 方案 | 提示词中心设计 | 理解 prompt_templates 的设计 |
+| [PDF_METADATA_MATCH_PLAN.md](PDF_METADATA_MATCH_PLAN.md) | 方案 | PDF 元数据在线匹配 | 理解 match_online/apply_match 的设计 |
+| [SYNTHESIS_PROMPT_PLAN.md](SYNTHESIS_PROMPT_PLAN.md) | 方案 | 综述提示词改进 | 综述相关规划 |
+| [REFERENCE_CITATION_TAB_PLAN.md](REFERENCE_CITATION_TAB_PLAN.md) | 方案 | 参考文献梳理标签页 | 引用追踪相关规划 |
+| [CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md) | 设计 | CNKI/WoS 解析与反向匹配 | 理解题录解析和文件绑定逻辑 |
+| [SYNTHESIS_CURRENT_DESIGN.md](SYNTHESIS_CURRENT_DESIGN.md) | 设计 | 当前综述实现设计 | 了解对比综述的当前实现 |
+
+---
+
+## 运维与部署文档
+
+| 文档 | 类型 | 内容 | 何时查阅 |
+|------|------|------|----------|
+| [DEPLOYMENT_ARCHITECTURE.md](DEPLOYMENT_ARCHITECTURE.md) | 部署 | 本地→GitHub→服务器部署链路 | 部署流程、Webhook 配置 |
+| [DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md](DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md) | 部署 | 数据库部署与迁移指南 | 服务器数据库迁移 |
+| [OPS_HEALTHCHECK_GUIDE.md](OPS_HEALTHCHECK_GUIDE.md) | 运维 | 服务器健康检查与自动恢复 | 线上故障排查 |
+| [TROUBLESHOOTING_SERVER_ERRORS.md](TROUBLESHOOTING_SERVER_ERRORS.md) | 排错 | 服务器报错排查记录（含修复方案） | **线上报错排查首选**：500错误、401错误、SQL错误等 |
+| [MIGRATION_PLAN_10PLUS_USERS.md](MIGRATION_PLAN_10PLUS_USERS.md) | 方案 | 10+ 并发用户迁移方案 | 并发扩容规划 |
+| [CONCURRENCY_ANALYSIS.md](CONCURRENCY_ANALYSIS.md) | 分析 | 多用户并发分析 | 性能瓶颈分析 |
+
+---
+
+## 故障与事件记录
+
+| 文档 | 类型 | 内容 | 何时查阅 |
+|------|------|------|----------|
+| [INCIDENT_2026-05-06_LIBRARY_502.md](INCIDENT_2026-05-06_LIBRARY_502.md) | 事件 | 文献库 502 故障复盘 | 了解历史故障及修复过程 |
+| [API_KEY_FLOW_FIX.md](API_KEY_FLOW_FIX.md) | 修复 | API Key 传递链路修复 | 理解 API Key 如何从前端传到后端 |
+
+---
+
+## 专项功能文档
+
+| 文档 | 类型 | 内容 | 何时查阅 |
+|------|------|------|----------|
+| [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | 方案 | 双栏 PDF 参考文献提取修复 | 理解 pdfplumber + use_text_flow 方案 |
+| [REFERENCE_CITATION_DEEPSEEK_FLASH_PLAN.md](REFERENCE_CITATION_DEEPSEEK_FLASH_PLAN.md) | 方案 | DeepSeek Flash 模型用于引用追踪 | 引用追踪模型选型 |
+| [COMPARE_SYNTHESIS_SELECTION_PLAN.md](COMPARE_SYNTHESIS_SELECTION_PLAN.md) | 方案 | 对比综述选择交互改进 | 对比页多选交互设计 |
+| [TESTSET_AND_P2_PLAN.md](TESTSET_AND_P2_PLAN.md) | 方案 | 测试集与 P2 规划 | 测试相关规划 |
+
+---
+
+## 设计文档子目录（superpowers）
+
+### specs/（规格设计）
+
+| 文档 | 内容 | 何时查阅 |
+|------|------|----------|
+| [superpowers/specs/2026-05-06-user-data-export-import-design.md](superpowers/specs/2026-05-06-user-data-export-import-design.md) | 用户数据导入导出设计（.dra 格式） | 理解导出/导入包格式和流程 |
+| [superpowers/specs/2026-05-03-pdf-metadata-match-design.md](superpowers/specs/2026-05-03-pdf-metadata-match-design.md) | PDF 元数据匹配设计 | 理解在线匹配的技术方案 |
+
+### plans/（实施计划）
+
+| 文档 | 内容 | 何时查阅 |
+|------|------|----------|
+| [superpowers/plans/2026-05-06-simplify-reference-extraction.md](superpowers/plans/2026-05-06-simplify-reference-extraction.md) | 简化参考文献提取计划 | 参考文献功能简化方案 |
+| [superpowers/plans/2026-05-06-remove-env-api-key-fallback.md](superpowers/plans/2026-05-06-remove-env-api-key-fallback.md) | 移除环境变量 API Key 兜底 | API Key 策略变更 |
+| [superpowers/plans/2026-05-06-queue-integration-plan.md](superpowers/plans/2026-05-06-queue-integration-plan.md) | 任务队列接入计划 | 队列管理器集成方案 |
+| [superpowers/plans/2026-05-03-pdf-metadata-match.md](superpowers/plans/2026-05-03-pdf-metadata-match.md) | PDF 元数据匹配实施计划 | 匹配功能实施步骤 |
+| [superpowers/plans/2026-05-03-windows-executable-packaging.md](superpowers/plans/2026-05-03-windows-executable-packaging.md) | Windows 可执行文件打包计划 | PyInstaller 打包方案 |
+
+---
+
+## 按主题快速查找
+
+### 我要排查线上报错
+→ [TROUBLESHOOTING_SERVER_ERRORS.md](TROUBLESHOOTING_SERVER_ERRORS.md)
+
+### 我要了解系统整体架构
+→ [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md)
+
+### 我要改数据库
+→ [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
+
+### 我要部署或重启服务
+→ [DEPLOYMENT_ARCHITECTURE.md](DEPLOYMENT_ARCHITECTURE.md)
+→ [OPS_HEALTHCHECK_GUIDE.md](OPS_HEALTHCHECK_GUIDE.md)
+
+### 我要了解某个功能的设计思路
+→ 在上方「方案设计文档」中按名称查找
+
+### 我要了解接下来做什么
+→ [PENDING_PLANS.md](PENDING_PLANS.md)
+
+### 我要快速定位某个函数
+→ [FUNCTION_INDEX.md](FUNCTION_INDEX.md)
+
+---
+
+## 维护建议
+
+新增文档时：
+1. 在此索引中按类别添加条目
+2. 更新「最后更新」日期
+3. 如果文档很重要，考虑加入「核心文档」或「必看」分类

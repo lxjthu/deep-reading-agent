@@ -943,7 +943,7 @@ export_20260506_username.dra
 
 - 覆盖全局 `fetch`
 - 自动附加 token
-- 401 时自动刷新 access token
+- 401 时自动刷新 access token 并**重试原请求**
 
 关键函数：
 
@@ -951,10 +951,18 @@ export_20260506_username.dra
   - 安装全局包装后的 fetch
 - `apiFetch(...)`
   - 实际请求逻辑
+  - **重要**：retry 时必须重新 `new Request(input, initSnapshot)`，禁止复用已消费的 Request 对象（body 只能消费一次）
 - `refreshAccessToken()`
   - 调 refresh 接口
 - `redirectToLogin(...)`
   - 刷新失败后跳登录页
+
+**踩坑记录**：
+
+- 曾出现 `Cannot construct a Request with a Request object that has already been used` 错误
+- 原因：token refresh 后 retry 复用了同一个 Request 对象，其 body 已被第一次 fetch 消费
+- 修复：保存 `init` 快照，retry 时用 `new Request(input, initSnapshot)` 重新创建
+- 详见 [TROUBLESHOOTING_SERVER_ERRORS.md](TROUBLESHOOTING_SERVER_ERRORS.md) 问题 5
 
 ## 6.4 工作台主壳：`frontend/src/App.tsx`
 

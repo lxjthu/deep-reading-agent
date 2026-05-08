@@ -474,6 +474,132 @@ async with AsyncSessionLocal() as db:
 
 ---
 
+## 问题 5：前端报错 `Cannot construct a Request with a Request object that has already been used`
+
+### 错误现象
+
+远端部署后，用户操作（如保存提示词、上传文件）时前端控制台报错：
+
+```
+Failed to execute 'fetch' on 'Window': Cannot construct a Request with a Request object that has already been used.
+```
+
+本地开发环境难以复现。
+
+### 排查过程
+
+#### 1. 确认报错位置
+
+查看 `frontend/src/lib/api-fetch.ts`：
+
+```typescript
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const request = new Request(input, init)
+  // ... 自动附加 token ...
+  let response = await nativeFetch(request, { headers })
+  if (response.status !== 401) return response
+  // ... refresh token ...
+  response = await nativeFetch(request, { headers: retryHeaders })  // ← 复用了同一个 request
+}
+```
+
+#### 2. 分析触发条件
+
+- `apiFetch` 第 36 行用 `new Request(input, init)` 创建了一个 Request 对象
+- 第 43 行第一次 `nativeFetch(request, ...)` 已经消费了 request 的 body（如果有）
+- 第 57 行 token refresh 后再次 `nativeFetch(request, ...)` 复用同一个对象
+- **Request 对象的 body 只能被消费一次**，第二次使用时报错
+
+### 根因分析
+
+**为什么本地没事，远端必现？**
+
+- 本地开发时 token 通常未过期，请求直接成功，不会走到 401 → refresh → retry 分支
+- 远端 session 更短，或 CDN/代理导致更容易触发 token 刷新
+- 只有 POST/PUT 请求带有 body 时才会触发此错误；GET 请求无 body，不会报错
+
+### 解决方案
+
+修改 `frontend/src/lib/api-fetch.ts`，retry 时重新创建 Request：
+
+```typescript
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  // 保存 init 快照，用于 retry 时重新创建 Request
+  const initSnapshot = init ? { ...init } : {}
+  const request = new Request(input, initSnapshot)
+  // ... 首次请求 ...
+
+  if (response.status !== 401 || isAuthEndpoint(input)) {
+    return response
+  }
+
+  // ... refresh token ...
+
+  // retry 时创建新 Request，而不是复用已消费的旧 request
+  const retryRequest = new Request(input, initSnapshot)
+  const retryHeaders = new Headers(retryRequest.headers)
+  retryHeaders.set('Authorization', `Bearer ${refreshedToken}`)
+  response = await nativeFetch(retryRequest, { headers: retryHeaders })
+  // ...
+}
+```
+
+修改文件：`frontend/src/lib/api-fetch.ts`
+
+### 验证
+
+1. 本地可强制触发 retry：在浏览器 DevTools 手动清除 accessToken，刷新页面后立即发起 POST 请求
+2. 观察 Network 面板：第一次请求 401，第二次请求成功（200），无控制台报错
+
+### 经验总结
+
+- `fetch()` 消费 Request body 后，该 Request 对象**不可复用**
+- 任何需要 retry 的请求包装层，都必须保存原始 `input` 和 `init`，在 retry 时重新 `new Request(input, init)`
+- GET 请求无 body，复用 Request 对象不会报错，因此这个 bug 在纯 GET 场景下是隐性的
+
+---
+
+## 服务器架构总结
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         请求链路                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   用户浏览器                                                      │
+│       │                                                         │
+│       ▼                                                         │
+│   Cloudflare Tunnel (HTTPS, 100MB 限制)                         │
+│       │                                                         │
+│       ▼                                                         │
+│   Nginx (端口 80, 默认 1MB 限制)                                 │
+│       │                                                         │
+│       ▼                                                         │
+│   FastAPI/Uvicorn (端口 8000)                                   │
+│       │                                                         │
+│       ▼                                                         │
+│   SQLite 数据库                                                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 常用排查命令
+
+| 目的 | 命令 |
+|------|------|
+| 查看后端日志 | `tail -100 /tmp/fastapi.log` |
+| 查看前端日志 | `tail -100 /tmp/vite.log` |
+| 检查服务进程 | `ps aux \| grep -E "uvicorn\|vite\|cloudflared\|nginx"` |
+| 检查端口监听 | `ss -tlnp` |
+| 测试 Nginx 配置 | `nginx -t` |
+| 重启 Nginx | `nginx -s reload` |
+| 检查数据库重复记录 | 见问题 1 的修复脚本 |
+| 查看错误日志 | `grep -i "error\|401\|authentication\|failed" /tmp/fastapi.log \| tail -20` |
+
+---
+
 ## 预防措施
 
 1. **数据库层面**：在 `prompt_templates` 表上添加唯一约束，防止重复记录
@@ -482,3 +608,4 @@ async with AsyncSessionLocal() as db:
 4. **API Key 层面**：所有使用 API Key 的模块都应优先使用用户提供的 Key，环境变量仅作为回退选项
 5. **前端层面**：所有需要 API Key 的页面组件都应接收并传递 `apiKey` 参数
 6. **SQLAlchemy 排序层面**：不要对已调用 `.desc()` / `.asc()` 的列对象再用 `desc()` / `asc()` 二次包装；排序逻辑应显式处理每种 `sort_by` 分支，避免混用原始列和方向化列对象后统一包装
+7. **前端 fetch 层面**：任何需要 retry 的请求包装层，retry 时必须重新 `new Request(input, init)`，禁止复用已消费的 Request 对象
