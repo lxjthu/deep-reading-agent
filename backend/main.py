@@ -2,7 +2,12 @@
 Deep Reading Agent - FastAPI Backend
 """
 import os
+import sys
 import uuid
+from pathlib import Path
+
+# Ensure project root is in sys.path so backend/ modules can import new_architecture
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 

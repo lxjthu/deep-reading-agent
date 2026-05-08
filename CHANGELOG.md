@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased] - 2026-05-08
+
+### Features
+
+- Add user-customizable dimension sets for long reading: `dimension_sets` + `dimension_items` tables, default dimension seeding, dimensions router (`backend/dimension_seed.py`, `backend/routers/dimensions.py`, migration 007)
+
+### Fixes
+
+- Fix `ModuleNotFoundError: No module named 'new_architecture'` by adding project root to `sys.path` in `backend/main.py` before any backend imports
+
+---
+
 ## 1.3.0 - 2026-05-03
 
 ### Features
