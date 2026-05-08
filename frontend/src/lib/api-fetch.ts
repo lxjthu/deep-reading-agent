@@ -33,7 +33,9 @@ function redirectToLogin() {
 }
 
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const request = new Request(input, init)
+  // Keep a plain-object snapshot of init so we can retry with a fresh Request
+  const initSnapshot = init ? { ...init } : {}
+  const request = new Request(input, initSnapshot)
   const headers = new Headers(request.headers)
   const accessToken = getStoredAccessToken()
   if (accessToken && !headers.has('Authorization')) {
@@ -52,9 +54,12 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     return response
   }
 
-  const retryHeaders = new Headers(request.headers)
+  // Re-create a fresh Request for the retry; the original request body
+  // may have been consumed by the first fetch call.
+  const retryRequest = new Request(input, initSnapshot)
+  const retryHeaders = new Headers(retryRequest.headers)
   retryHeaders.set('Authorization', `Bearer ${refreshedToken}`)
-  response = await nativeFetch(request, { headers: retryHeaders })
+  response = await nativeFetch(retryRequest, { headers: retryHeaders })
   if (response.status === 401) {
     clearStoredAuth()
     redirectToLogin()

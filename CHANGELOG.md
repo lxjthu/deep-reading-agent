@@ -9,6 +9,7 @@
 ### Fixes
 
 - Fix `ModuleNotFoundError: No module named 'new_architecture'` by adding project root to `sys.path` in `backend/main.py` before any backend imports
+- Fix `Cannot construct a Request with a Request object that has already been used` in `frontend/src/lib/api-fetch.ts`: re-create a fresh Request on token-refresh retry instead of reusing the consumed one
 
 ---
 
