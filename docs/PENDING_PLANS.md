@@ -15,6 +15,7 @@
 | ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
 | P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
 | P7 | P13 Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
+| P8 | 长文本精读维度用户化 | **规划完成**，待实施 | 无 | [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md) | 用户可创建多个命名维度集合，增删改维度+提示词，一键恢复默认。涉及 `dimension_sets` + `dimension_items` 两张新表。 |
 
 ## 2. 各事项说明
 

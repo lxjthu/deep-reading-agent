@@ -1,8 +1,8 @@
 # 数据库设计文档
 
-> **版本**: v1.3  
-> **日期**: 2026-05-07  
-> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)
+> **版本**: v1.4  
+> **日期**: 2026-05-08  
+> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)、[CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)
 
 ## 1. 选型与约定
 
@@ -56,7 +56,8 @@ upload_batches            │        └──────────┘  │ar
 物理：`files`（PDF / 题录 / MD / DOCX）  
 事件：`jobs`（filter / reading_* / compare / synthesis / reference_trace 等）  
 产物：`artifacts`（任务输出文件）  
-引用：`bib_references` / `bib_reference_citations`（参考文献条目与正文引用命中）
+引用：`bib_references` / `bib_reference_citations`（参考文献条目与正文引用命中）  
+维度：`dimension_sets` / `dimension_items`（v1.4 用户自定义长文本精读维度集合）
 
 ## 3. 表定义
 
@@ -607,11 +608,79 @@ CREATE INDEX idx_artifacts_expires ON artifacts (expires_at);
 - `references_json`
   - 供调试、审计和潜在前端二次渲染使用
 
+### 3.14 `dimension_sets` — 用户维度集合（v1.4 新增）
+
+> 目的：支持用户自定义长文本精读的分析维度集合。每个用户可创建多个命名集合（如"计量论文专用"、"理论论文专用"），系统自动为每个用户创建一个不可删除的默认集合。
+
+```sql
+CREATE TABLE dimension_sets (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,              -- 集合名称，如"计量论文专用"
+    description     TEXT,                       -- 可选描述
+    is_default      INTEGER NOT NULL DEFAULT 0, -- 是否为用户当前激活的默认集合（每用户至多 1 个）
+    is_system       INTEGER NOT NULL DEFAULT 0, -- 系统内置集合（不可删除、不可改名）
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (owner_user_id, name)               -- 同一用户集合名不重复
+);
+
+CREATE INDEX idx_dim_sets_owner ON dimension_sets (owner_user_id);
+CREATE INDEX idx_dim_sets_default ON dimension_sets (owner_user_id, is_default);
+```
+
+**字段语义**：
+
+- `is_system=1`：系统内置的默认维度集，不可删除、不可改名，但可通过 `/reset` 端点恢复默认内容
+- `is_default=1`：用户当前激活的集合，启动精读时默认使用此集合的维度。每用户至多一个 `is_default=1`
+- `name`：用户自定义集合名，系统集默认名为"默认维度集"
+
+**种子数据**：应用启动时自动为每个用户创建系统默认集合，并从 `ANALYSIS_DIMENSIONS` 填充 12+1 个维度条目。
+
+### 3.15 `dimension_items` — 维度条目（v1.4 新增）
+
+> 目的：保存每个维度集合内的具体维度定义，包括名称、描述、提示词和默认问题。系统预置维度和用户自建维度共存。
+
+```sql
+CREATE TABLE dimension_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    set_id          INTEGER NOT NULL REFERENCES dimension_sets(id) ON DELETE CASCADE,
+    dim_key         TEXT NOT NULL,              -- 维度英文标识
+    dim_name        TEXT NOT NULL,              -- 中文显示名，如"研究问题"
+    description     TEXT,                       -- 维度描述（tooltip 等）
+    prompt_content  TEXT NOT NULL DEFAULT '',    -- 该维度的完整提示词
+    default_question TEXT NOT NULL DEFAULT '',   -- 默认分析问题
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    is_builtin      INTEGER NOT NULL DEFAULT 0, -- 1=系统预置维度 0=用户自建
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (set_id, dim_key)                    -- 集合内维度 key 不重复
+);
+
+CREATE INDEX idx_dim_items_set ON dimension_items (set_id);
+CREATE INDEX idx_dim_items_builtin ON dimension_items (set_id, is_builtin);
+```
+
+**dim_key 命名规则**：
+
+- **系统内置维度**：沿用 `ANALYSIS_DIMENSIONS` 的 key（`overview`, `theory`, `methodology` 等）
+- **用户自建维度**：使用 `{set_name_prefix}_{uuid_short}` 格式（如 `计量论文_a3f2`），确保：
+  - 不与系统内置 key 冲突
+  - 可追溯属于哪个集合
+  - 在 `ReadingItem.item_key` 中形成 `long.计量论文_a3f2`，与历史数据格式兼容
+
+**与 prompt_templates 的关系**：
+
+- 系统内置维度的提示词覆盖继续走 `prompt_templates` 表（用户覆盖 > 系统默认 > 文件兜底 > 代码兜底）
+- 用户自建维度的提示词直接存在 `prompt_content` 字段，不经过 `prompt_templates`
+- 详细设计见 [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)
+
 ## 4. 级联删除规则
 
 | 触发 | 行为 |
 |---|---|
-| 删除 `users` | 级联删除该用户的 settings/files/bib_entries/jobs/reading_items/artifacts/upload_batches/invite_codes/bib_references/bib_reference_citations（DB ON DELETE CASCADE） + 物理删除 `_uploads/{user_id}/` 和 `deep_reading_results/{user_id}/` |
+| 删除 `users` | 级联删除该用户的 settings/files/bib_entries/jobs/reading_items/artifacts/upload_batches/invite_codes/bib_references/bib_reference_citations/dimension_sets（DB ON DELETE CASCADE，dimension_sets 级联删除 dimension_items） + 物理删除 `_uploads/{user_id}/` 和 `deep_reading_results/{user_id}/` |
 | 删除 `bib_entries` | DB 级联删 bib_filter_links、job_bib_entries、reading_items、以其为 `source_bib_entry_id` 的 `bib_references / bib_reference_citations`（**只删关联/结构化结果**）；通过应用层逻辑清理仅由本档案独占的 jobs/artifacts |
 | 删除 `files` | 应用层处理：清空所有引用该 file 的 `bib_entries.source_file_id`；若 file 是 filter job 的 input，禁止删除（除非任务已完成） |
 | 删除 `jobs` | DB 级联删 job_bib_entries、reading_items、artifacts，以及以其为 `source_job_id` 的 `bib_references / bib_reference_citations`；不动 bib_entries 本身 |
@@ -722,6 +791,21 @@ SELECT c.quote_text, c.excerpt, c.page_label, c.section_label, c.confidence
 FROM bib_reference_citations c
 WHERE c.bib_reference_id = 'R8'
 ORDER BY c.citation_index;
+
+-- 用户 U1 当前激活的维度集合及其维度条目（v1.4）
+SELECT s.name AS set_name, i.dim_key, i.dim_name, i.is_builtin, i.sort_order
+FROM dimension_sets s
+JOIN dimension_items i ON s.id = i.set_id
+WHERE s.owner_user_id = 1 AND s.is_default = 1
+ORDER BY i.sort_order;
+
+-- 用户 U1 的所有维度集合（含维度数量统计）（v1.4）
+SELECT s.id, s.name, s.is_default, s.is_system, COUNT(i.id) AS item_count
+FROM dimension_sets s
+LEFT JOIN dimension_items i ON s.id = i.set_id
+WHERE s.owner_user_id = 1
+GROUP BY s.id
+ORDER BY s.sort_order;
 ```
 
 ## 7. SQLAlchemy 2.0 模型骨架（参考）
@@ -782,6 +866,46 @@ class BibEntry(Base):
     )
 
 # ... 其它模型省略，模式相同
+
+
+class DimensionSet(Base):
+    __tablename__ = "dimension_sets"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "name", name="uq_dim_sets_owner_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+
+class DimensionItem(Base):
+    __tablename__ = "dimension_items"
+    __table_args__ = (
+        UniqueConstraint("set_id", "dim_key", name="uq_dim_items_set_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    set_id: Mapped[int] = mapped_column(
+        ForeignKey("dimension_sets.id", ondelete="CASCADE"), nullable=False
+    )
+    dim_key: Mapped[str] = mapped_column(String, nullable=False)
+    dim_name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prompt_content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    default_question: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_builtin: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
 ```
 
 ## 8. 迁移管理
@@ -805,6 +929,7 @@ backend/migrations/versions/
 ├── 004_add_prompt_templates.py  # 提示词模板表（系统默认 + 用户覆盖）
 ├── 005_add_reference_trace_tables.py  # bib_references / bib_reference_citations + jobs/artifacts 扩展
 ├── 006_add_bib_entry_volume_issue_pages.py  # bib_entries 新增 volume/issue/pages 字段
+├── 007_add_dimension_sets_and_items.py  # dimension_sets + dimension_items（用户自定义维度集合）
 └── (后续新增字段时追加)
 ```
 
@@ -838,6 +963,7 @@ backend/migrations/versions/
 | 引用网络分析 / 共引分析 | 依赖 `bib_references.source_bib_entry_id -> matched_bib_entry_id` 关系继续向上扩展 |
 | VIP 试用期 | `users.vip_expires_at` |
 | 团队/共享空间 | 不在本期，需要新增 `workspaces` 中间层（暂不规划） |
+| 用户自定义精读维度集合 | `dimension_sets` + `dimension_items`（v1.4 已建表，详见 [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)） |
 
 ## 10. 风险与注意事项
 

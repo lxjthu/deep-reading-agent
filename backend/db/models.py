@@ -547,3 +547,63 @@ class Artifact(Base):
 Index("idx_artifacts_job", Artifact.job_id)
 Index("idx_artifacts_owner", Artifact.owner_user_id)
 Index("idx_artifacts_expires", Artifact.expires_at)
+
+
+# --------------------------------------------------------------------------
+# Dimension sets (user-customizable analysis dimensions)
+# --------------------------------------------------------------------------
+
+class DimensionSet(Base):
+    __tablename__ = "dimension_sets"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "name", name="uq_dim_sets_owner_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_dim_sets_owner", DimensionSet.owner_user_id)
+Index("idx_dim_sets_default", DimensionSet.owner_user_id, DimensionSet.is_default)
+
+
+class DimensionItem(Base):
+    __tablename__ = "dimension_items"
+    __table_args__ = (
+        UniqueConstraint("set_id", "dim_key", name="uq_dim_items_set_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    set_id: Mapped[int] = mapped_column(
+        ForeignKey("dimension_sets.id", ondelete="CASCADE"), nullable=False
+    )
+    dim_key: Mapped[str] = mapped_column(String, nullable=False)
+    dim_name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prompt_content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    default_question: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_builtin: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_dim_items_set", DimensionItem.set_id)
+Index("idx_dim_items_builtin", DimensionItem.set_id, DimensionItem.is_builtin)

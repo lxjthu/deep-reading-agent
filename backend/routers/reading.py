@@ -208,6 +208,7 @@ class LongContextRequest(BaseModel):
     extraction_method: str = "full"  # full or preview
     api_key: Optional[str] = None
     force_overwrite: bool = False
+    dimension_set_id: Optional[int] = None
 
 
 class SimpleReadingRequest(BaseModel):
@@ -690,6 +691,7 @@ def run_long_context_task(
     extraction_method: str,
     prompt_overrides: dict[str, str],
     api_key: Optional[str] = None,
+    dimension_set_id: Optional[int] = None,
 ):
     """Run long context analysis in background thread. api_key is REQUIRED."""
     try:
@@ -746,14 +748,47 @@ def run_long_context_task(
         
         # Build questions from dimensions
         from new_architecture.analysis_dimensions import ANALYSIS_DIMENSIONS
-        
+
+        custom_dim_map: dict[str, dict] = {}
+        if dimension_set_id is not None:
+            try:
+                from db.models import DimensionItem
+
+                def _load_custom_dims():
+                    import asyncio
+                    from db import AsyncSessionLocal
+                    from sqlalchemy import select as sa_select
+
+                    async def _inner():
+                        async with AsyncSessionLocal() as db:
+                            items = (
+                                await db.execute(
+                                    sa_select(DimensionItem)
+                                    .where(DimensionItem.set_id == dimension_set_id)
+                                    .order_by(DimensionItem.sort_order)
+                                )
+                            ).scalars().all()
+                            return {
+                                it.dim_name: {
+                                    "dim_key": it.dim_key,
+                                    "prompt_content": it.prompt_content,
+                                    "default_question": it.default_question,
+                                    "is_builtin": bool(it.is_builtin),
+                                }
+                                for it in items
+                            }
+                    return asyncio.run(_inner())
+
+                custom_dim_map = _load_custom_dims()
+            except Exception:
+                custom_dim_map = {}
+
         results = {}
         total_dims = len(analysis_dims)
         for i, dim_key in enumerate(analysis_dims):
             if tasks[task_id]["status"] == "cancelled":
                 return
             
-            # Map Chinese dim name to key
             dim_map = {
                 "研究问题": "overview",
                 "理论框架": "theory",
@@ -768,13 +803,19 @@ def run_long_context_task(
                 "贡献与局限": "contributions_limitations",
                 "写作质量": "writing_quality",
             }
-            mapped_key = dim_map.get(dim_key, "overview")
-            
+            mapped_key = dim_map.get(dim_key)
+
             tasks[task_id]["stage"] = f"分析维度 {i+1}/{total_dims}: {dim_key}..."
             tasks[task_id]["logs"].append(f"[{i+1}/{total_dims}] {dim_key}...")
             
             try:
-                answer = engine.analyze_dimension(mapped_key)
+                if mapped_key:
+                    answer = engine.analyze_dimension(mapped_key)
+                elif custom_dim_map and dim_key in custom_dim_map:
+                    dim_meta = custom_dim_map[dim_key]
+                    answer = engine.analyze_dimension(dim_key, dim_meta=dim_meta)
+                else:
+                    answer = engine.analyze_dimension("overview")
                 results[dim_key] = answer
                 tasks[task_id]["logs"].append(f"✓ {dim_key} 完成")
             except Exception as e:
@@ -1173,6 +1214,7 @@ async def start_long_context(
             request.extraction_method,
             prompt_overrides,
             request.api_key,
+            request.dimension_set_id,
         ),
         daemon=True
     )

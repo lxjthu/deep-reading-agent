@@ -218,22 +218,26 @@ class ConversationEngine:
             ))
             return error_msg
     
-    def analyze_dimension(self, dimension: str, custom_question: Optional[str] = None) -> str:
-        """
-        执行一个预定义的分析维度
-        """
-        if dimension not in ANALYSIS_DIMENSIONS:
-            return f"未知维度: {dimension}"
-        
-        dim_info = ANALYSIS_DIMENSIONS[dimension]
-        
-        if custom_question:
-            question = custom_question
+    def analyze_dimension(
+        self,
+        dimension: str,
+        custom_question: Optional[str] = None,
+        dim_meta: Optional[Dict] = None,
+    ) -> str:
+        if dimension in ANALYSIS_DIMENSIONS:
+            dim_info = ANALYSIS_DIMENSIONS[dimension]
+            question = custom_question or (dim_info["default_questions"][0] if dim_info["default_questions"] else "请分析这个维度。")
+            print(f"\n[分析维度: {dim_info['name']}] {question}")
+            return self.ask(question, dimension)
+        elif dim_meta:
+            question = custom_question or dim_meta.get("default_question", "请分析这个维度。")
+            dim_name = dim_meta.get("dim_name", dimension)
+            prompt_content = dim_meta.get("prompt_content", "")
+            enhanced = f"【分析维度：{dim_name}】\n{prompt_content}\n\n{question}" if prompt_content else f"【分析维度：{dim_name}】\n{question}"
+            print(f"\n[分析维度: {dim_name}] {question}")
+            return self.ask(enhanced, dimension=None)
         else:
-            question = dim_info["default_questions"][0] if dim_info["default_questions"] else "请分析这个维度。"
-        
-        print(f"\n[分析维度: {dim_info['name']}] {question}")
-        return self.ask(question, dimension)
+            return f"未知维度: {dimension}"
     
     def run_full_analysis(self, dimensions: Optional[List[str]] = None) -> Dict[str, str]:
         """

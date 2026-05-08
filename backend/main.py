@@ -21,8 +21,9 @@ import uvicorn
 # Routers
 from cleanup import cleanup_normal_user_data
 from db import AsyncSessionLocal
+from dimension_seed import ensure_default_dimension_sets
 from prompt_service import ensure_builtin_prompt_templates
-from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data
+from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions
 
 # Create upload directory
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
@@ -61,6 +62,12 @@ async def lifespan(app: FastAPI):
             await ensure_builtin_prompt_templates(db)
     except Exception as exc:  # pragma: no cover - defensive startup logging
         print(f"[prompt-seed] skipped: {exc}")
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await ensure_default_dimension_sets(db)
+    except Exception as exc:  # pragma: no cover - defensive startup logging
+        print(f"[dimension-seed] skipped: {exc}")
 
     # Recover jobs left hanging from previous crash/restart
     try:
@@ -113,6 +120,7 @@ app.include_router(compare.router, prefix="/api/compare", tags=["Compare"])
 app.include_router(library.router, prefix="/api/library", tags=["Library"])
 app.include_router(references.router, prefix="/api/references", tags=["References"])
 app.include_router(data.router, prefix="/api/data", tags=["Data"])
+app.include_router(dimensions.router, prefix="/api/dimensions", tags=["Dimensions"])
 app.include_router(deploy.router, prefix="/api/deploy", tags=["Deploy"])
 
 
