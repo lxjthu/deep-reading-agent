@@ -1132,6 +1132,11 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
             <span className="text-sm text-gray-600">点击上传 PDF / Markdown</span>
             {file && <span className="mt-2 text-xs text-emerald-600">✓ {file.name}</span>}
           </label>
+          <p className="mt-2 text-xs text-gray-400">
+            PDF 文件过大无法上传？可前往
+            <a href="https://aistudio.baidu.com/paddleocr" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:text-emerald-700 underline mx-0.5">百度 PaddleOCR</a>
+            将 PDF 转换为 Markdown 后上传
+          </p>
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-5">
@@ -1321,6 +1326,11 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
             <span className="text-sm text-gray-600">点击上传 PDF / Markdown</span>
             {file && <span className="mt-2 text-xs text-emerald-600">✓ {file.name}</span>}
           </label>
+          <p className="mt-2 text-xs text-gray-400">
+            PDF 文件过大无法上传？可前往
+            <a href="https://aistudio.baidu.com/paddleocr" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:text-emerald-700 underline mx-0.5">百度 PaddleOCR</a>
+            将 PDF 转换为 Markdown 后上传
+          </p>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">★ 提取方式</h3>
@@ -1486,6 +1496,11 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
             <span className="text-sm text-gray-600">点击上传 PDF / Markdown</span>
             {file && <span className="mt-2 text-xs text-emerald-600">✓ {file.name}</span>}
           </label>
+          <p className="mt-2 text-xs text-gray-400">
+            PDF 文件过大无法上传？可前往
+            <a href="https://aistudio.baidu.com/paddleocr" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:text-emerald-700 underline mx-0.5">百度 PaddleOCR</a>
+            将 PDF 转换为 Markdown 后上传
+          </p>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">★ 提取方式</h3>
