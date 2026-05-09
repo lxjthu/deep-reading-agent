@@ -1028,6 +1028,24 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [dims, setDims] = useState<string[]>(["研究问题", "理论框架", "识别策略"])
   const [customQ, setCustomQ] = useState('')
   const [extraction, _setExtraction] = useState('full')
+  const [dimensionSetId, setDimensionSetId] = useState<number | null>(null)
+  const [dimensionItems, setDimensionItems] = useState<any[]>([])
+  const [dimSets, setDimSets] = useState<any[]>([])
+  const [editingDim, setEditingDim] = useState<any>(null)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [editPrompt, setEditPrompt] = useState('')
+  const [editQuestion, setEditQuestion] = useState('')
+  const [showAddDim, setShowAddDim] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addDesc, setAddDesc] = useState('')
+  const [addPrompt, setAddPrompt] = useState('')
+  const [addQuestion, setAddQuestion] = useState('')
+  const [dimMessage, setDimMessage] = useState('')
+  const [showSaveAsSet, setShowSaveAsSet] = useState(false)
+  const [saveAsName, setSaveAsName] = useState('')
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [overIdx, setOverIdx] = useState<number | null>(null)
   const {
     cancelTask,
     isRunning,
@@ -1053,6 +1071,177 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
 
   const toggleDim = (dim: string) => {
     setDims(prev => prev.includes(dim) ? prev.filter(d => d !== dim) : [...prev, dim])
+  }
+
+  const reloadItems = async (setId: number) => {
+    const res = await fetch(`/api/dimensions/sets/${setId}/items`)
+    if (res.ok) setDimensionItems(await res.json())
+  }
+
+  const reloadSets = async () => {
+    const res = await fetch('/api/dimensions/sets')
+    if (res.ok) return await res.json()
+    return []
+  }
+
+  useEffect(() => {
+    const fetchActiveSet = async () => {
+      try {
+        const sets = await reloadSets()
+        setDimSets(sets)
+        const active = sets.find((s: any) => s.is_default)
+        if (!active) return
+        setDimensionSetId(active.id)
+        await reloadItems(active.id)
+        const itemsRes = await fetch(`/api/dimensions/sets/${active.id}/items`)
+        if (!itemsRes.ok) return
+        const items = await itemsRes.json()
+        setDimensionItems(items)
+        if (items.length > 0) {
+          setDims(items.slice(0, Math.min(3, items.length)).map((i: any) => i.dim_name))
+        }
+      } catch {}
+    }
+    fetchActiveSet()
+  }, [])
+
+  const switchDimSet = async (setId: number) => {
+    setDimensionSetId(setId)
+    setEditingDim(null)
+    await reloadItems(setId)
+    const res = await fetch(`/api/dimensions/sets/${setId}/items`)
+    if (res.ok) {
+      const items = await res.json()
+      setDims(items.slice(0, Math.min(3, items.length)).map((i: any) => i.dim_name))
+    }
+    await fetch('/api/dimensions/sets/' + setId + '/activate', { method: 'POST' })
+    const sets = await reloadSets()
+    setDimSets(sets)
+  }
+
+  const startEditDim = (item: any) => {
+    setEditingDim(item)
+    setEditName(item.dim_name)
+    setEditDesc(item.description || '')
+    setEditPrompt(item.prompt_content || '')
+    setEditQuestion(item.default_question || '')
+    setShowAddDim(false)
+  }
+
+  const saveEditDim = async () => {
+    if (!editingDim || !dimensionSetId) return
+    try {
+      const res = await fetch(`/api/dimensions/sets/${dimensionSetId}/items/${editingDim.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dim_name: editName.trim(), description: editDesc.trim() || null, prompt_content: editPrompt, default_question: editQuestion }),
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || '保存失败')
+      const oldName = editingDim.dim_name
+      if (editName.trim() !== oldName) {
+        setDims(prev => prev.map(d => d === oldName ? editName.trim() : d))
+      }
+      setEditingDim(null)
+      await reloadItems(dimensionSetId)
+      setDimMessage('✓ 维度已更新')
+      setTimeout(() => setDimMessage(''), 2000)
+    } catch (e: unknown) {
+      setDimMessage(`❌ ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const deleteDim = async (item: any) => {
+    if (!confirm('确定删除维度「' + item.dim_name + '」？') || !dimensionSetId) return
+    try {
+      const res = await fetch(`/api/dimensions/sets/${dimensionSetId}/items/${item.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error((await res.json()).detail || '删除失败')
+      setDims(prev => prev.filter(d => d !== item.dim_name))
+      if (editingDim?.id === item.id) setEditingDim(null)
+      await reloadItems(dimensionSetId)
+      setDimMessage('✓ 维度已删除')
+      setTimeout(() => setDimMessage(''), 2000)
+    } catch (e: unknown) {
+      setDimMessage(`❌ ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const addDimension = async () => {
+    if (!addName.trim() || !dimensionSetId) return
+    try {
+      const res = await fetch(`/api/dimensions/sets/${dimensionSetId}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dim_name: addName.trim(), description: addDesc.trim() || null, prompt_content: addPrompt, default_question: addQuestion }),
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || '添加失败')
+      setShowAddDim(false); setAddName(''); setAddDesc(''); setAddPrompt(''); setAddQuestion('')
+      await reloadItems(dimensionSetId)
+      const sets = await reloadSets()
+      setDimSets(sets)
+      setDimMessage('✓ 维度已添加')
+      setTimeout(() => setDimMessage(''), 2000)
+    } catch (e: unknown) {
+      setDimMessage(`❌ ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const saveAsNewSet = async () => {
+    if (!saveAsName.trim() || !dimensionSetId) return
+    try {
+      const res = await fetch('/api/dimensions/sets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: saveAsName.trim(), clone_from_set_id: dimensionSetId }),
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || '创建失败')
+      const created = await res.json()
+      setShowSaveAsSet(false); setSaveAsName('')
+      await switchDimSet(created.id)
+      setDimMessage('✓ 已保存为新集合并切换')
+      setTimeout(() => setDimMessage(''), 2000)
+    } catch (e: unknown) {
+      setDimMessage(`❌ ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const createNewEmptySet = async () => {
+    const name = prompt('请输入新集合名称：')
+    if (!name?.trim()) return
+    try {
+      const body: any = { name: name.trim() }
+      if (dimensionSetId) body.clone_from_set_id = dimensionSetId
+      const res = await fetch('/api/dimensions/sets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || '创建失败')
+      const created = await res.json()
+      await switchDimSet(created.id)
+      setDimMessage('✓ 新集合已创建')
+      setTimeout(() => setDimMessage(''), 2000)
+    } catch (e: unknown) {
+      setDimMessage(`❌ ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const onDragEnd = async () => {
+    if (dragIdx === null || overIdx === null || dragIdx === overIdx || !dimensionSetId) {
+      setDragIdx(null); setOverIdx(null)
+      return
+    }
+    const reordered = [...dimensionItems]
+    const [moved] = reordered.splice(dragIdx, 1)
+    reordered.splice(overIdx, 0, moved)
+    setDimensionItems(reordered)
+    setDragIdx(null); setOverIdx(null)
+    try {
+      await fetch(`/api/dimensions/sets/${dimensionSetId}/items/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders: reordered.map((it, i) => ({ id: it.id, sort_order: i })) }),
+      })
+    } catch {}
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1092,7 +1281,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       const startRes = await fetch('/api/reading/long/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey })
+        body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, dimension_set_id: dimensionSetId || undefined, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey })
       })
       if (startRes.status === 409) {
         const err = await startRes.json()
@@ -1102,7 +1291,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
         const retryRes = await fetch('/api/reading/long/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+          body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, dimension_set_id: dimensionSetId || undefined, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
         })
         const retryData = await retryRes.json()
         if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
@@ -1140,15 +1329,101 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">★ 分析维度</h3>
-          <div className="grid grid-cols-2 gap-2">
-            {ALL_DIMS.map(dim => (
-              <label key={dim} className="flex items-center gap-2 p-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
-                <input type="checkbox" checked={dims.includes(dim)} onChange={() => toggleDim(dim)} className="rounded text-emerald-600" />
-                <span className="text-gray-700">{dim}</span>
-              </label>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700">★ 分析维度</h3>
+            <div className="flex items-center gap-1.5">
+              {dimensionSetId && (
+                <button onClick={() => { setShowSaveAsSet(true); setSaveAsName('') }} className="rounded-lg bg-gray-100 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-200 transition-colors" title="另存为新集合">另存为</button>
+              )}
+              <button onClick={createNewEmptySet} className="rounded-lg bg-gray-100 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-200 transition-colors">+ 新集合</button>
+            </div>
+          </div>
+
+          {dimSets.length > 1 && (
+            <div className="mb-3">
+              <select
+                value={dimensionSetId ?? ''}
+                onChange={e => { if (e.target.value) switchDimSet(Number(e.target.value)) }}
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+              >
+                {dimSets.map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.item_count} 维度){s.is_default ? ' ●' : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {showSaveAsSet && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-2">
+              <input value={saveAsName} onChange={e => setSaveAsName(e.target.value)} placeholder="新集合名称" className="flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none" onKeyDown={e => { if (e.key === 'Enter') saveAsNewSet() }} />
+              <button onClick={saveAsNewSet} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white hover:bg-emerald-700">保存</button>
+              <button onClick={() => setShowSaveAsSet(false)} className="rounded bg-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-300">取消</button>
+            </div>
+          )}
+
+          {dimMessage && <div className={`mb-2 text-xs ${dimMessage.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>{dimMessage}</div>}
+
+          <div className="space-y-0.5">
+            {(dimensionItems.length > 0 ? dimensionItems : ALL_DIMS.map((name, i) => ({ id: -(i + 1), dim_name: name, is_builtin: true }))).map((item: any, idx: number) => (
+              <div
+                key={item.id || item.dim_name}
+                draggable={dimensionItems.length > 0}
+                onDragStart={() => setDragIdx(idx)}
+                onDragOver={e => { e.preventDefault(); setOverIdx(idx) }}
+                onDragLeave={() => setOverIdx(null)}
+                onDrop={onDragEnd}
+                className={`rounded transition-colors ${
+                  dragIdx !== null && dragIdx === idx ? 'opacity-40' : ''
+                } ${
+                  overIdx !== null && overIdx === idx && dragIdx !== idx ? 'border-t-2 border-emerald-400' : ''
+                }`}
+              >
+                <div className="flex items-center gap-1.5 p-1.5 hover:bg-gray-50 text-sm group cursor-grab active:cursor-grabbing">
+                  <span className="text-gray-300 text-[10px] select-none">⠿</span>
+                  <input type="checkbox" checked={dims.includes(item.dim_name)} onChange={() => toggleDim(item.dim_name)} className="rounded text-emerald-600 shrink-0" />
+                  <span className="text-gray-700 flex-1 truncate">{item.dim_name}</span>
+                  {dimensionItems.length > 0 && (
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button onClick={() => startEditDim(item)} className="rounded px-1 py-0.5 text-[10px] text-blue-500 hover:bg-blue-50" title="编辑">✏</button>
+                      <button onClick={() => deleteDim(item)} className="rounded px-1 py-0.5 text-[10px] text-red-400 hover:bg-red-50" title="删除">✕</button>
+                    </div>
+                  )}
+                </div>
+                {editingDim?.id === item.id && (
+                  <div className="ml-6 mt-1 mb-2 rounded-lg border border-amber-200 bg-amber-50/30 p-3 space-y-2">
+                    <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="维度名称" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                    <input value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="描述（可选）" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                    <input value={editQuestion} onChange={e => setEditQuestion(e.target.value)} placeholder="默认问题" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                    <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)} placeholder="提示词内容" rows={4} className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+                    <div className="flex gap-2">
+                      <button onClick={saveEditDim} className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700">保存</button>
+                      <button onClick={() => setEditingDim(null)} className="rounded bg-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-300">取消</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
+
+          {dimensionItems.length > 0 && (
+            <button
+              onClick={() => { setShowAddDim(!showAddDim); setAddName(''); setAddDesc(''); setAddPrompt(''); setAddQuestion('') }}
+              className="mt-2 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-xs text-gray-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors"
+            >+ 添加维度</button>
+          )}
+
+          {showAddDim && (
+            <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+              <input value={addName} onChange={e => setAddName(e.target.value)} placeholder="维度名称 *" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+              <input value={addDesc} onChange={e => setAddDesc(e.target.value)} placeholder="描述（可选）" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+              <input value={addQuestion} onChange={e => setAddQuestion(e.target.value)} placeholder="默认问题" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+              <textarea value={addPrompt} onChange={e => setAddPrompt(e.target.value)} placeholder="提示词内容" rows={3} className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+              <div className="flex gap-2">
+                <button onClick={addDimension} className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700">添加</button>
+                <button onClick={() => setShowAddDim(false)} className="rounded bg-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-300">取消</button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-5">

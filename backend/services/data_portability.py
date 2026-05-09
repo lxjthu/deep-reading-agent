@@ -27,6 +27,8 @@ from db.models import (
     BibFilterLink,
     BibReference,
     BibReferenceCitation,
+    DimensionItem,
+    DimensionSet,
     File,
     Job,
     JobBibEntry,
@@ -40,13 +42,15 @@ from upload_storage import get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "006"
+CURRENT_SCHEMA_VERSION = "007"
 
 # FK forward order for export / import
 EXPORT_TABLE_ORDER = [
     UploadBatch,
     File,
     PromptTemplate,
+    DimensionSet,
+    DimensionItem,
     BibEntry,
     Job,
     BibFilterLink,
@@ -67,6 +71,8 @@ IMPORT_CLEAR_ORDER = [
     BibFilterLink,
     Job,
     BibEntry,
+    DimensionItem,
+    DimensionSet,
     File,
     UploadBatch,
     PromptTemplate,
@@ -131,6 +137,13 @@ async def _query_user_records(db: AsyncSession, model: type, user_id: int) -> li
             select(model)
             .join(Job, model.job_id == Job.id)
             .where(Job.owner_user_id == user_id)
+        )
+    elif model is DimensionItem:
+        user_set_ids = select(DimensionSet.id).where(
+            DimensionSet.owner_user_id == user_id
+        )
+        result = await db.execute(
+            select(model).where(model.set_id.in_(user_set_ids))
         )
     else:
         result = await db.execute(select(model).where(model.owner_user_id == user_id))
@@ -280,12 +293,19 @@ async def _clear_user_data(db: AsyncSession, user_id: int) -> dict[str, int]:
 
     counts: dict[str, int] = {}
     user_job_subq = select(Job.id).where(Job.owner_user_id == user_id)
+    user_set_subq = select(DimensionSet.id).where(DimensionSet.owner_user_id == user_id)
 
     for model in IMPORT_CLEAR_ORDER:
         table_name = _model_name(model)
         if hasattr(model, "owner_user_id"):
             result = await db.execute(
                 delete(model).where(model.owner_user_id == user_id)
+            )
+        elif model is DimensionItem:
+            result = await db.execute(
+                delete(DimensionItem).where(
+                    DimensionItem.set_id.in_(user_set_subq)
+                )
             )
         elif model is JobBibEntry:
             result = await db.execute(
@@ -370,6 +390,7 @@ async def _deserialize_table(
     records: list[dict],
     user_id: int,
     role: str,
+    id_map: dict[tuple[str, int], int] | None = None,
 ) -> int:
     """Deserialize and insert records for one table. Returns inserted count."""
     if not records:
@@ -379,14 +400,13 @@ async def _deserialize_table(
     pk_col = _get_pk_column(model)
     auto_pk = _is_autoincrement_pk(model)
     inserted = 0
+    track_ids = id_map is not None and auto_pk
 
-    # Pre-delete existing records that would conflict with export data.
-    # Handles both PK collisions and UNIQUE constraint collisions,
-    # regardless of owner_user_id.
     await _pre_delete_conflicts(db, model, records, pk_col, auto_pk)
 
-    # Compute new expires_at based on current role
     new_expires_at = compute_expires_at_for_role(role)
+    table_name = _model_name(model)
+    created_objects: list[tuple[Any, Any]] = []
 
     for row in records:
         kwargs: dict[str, Any] = {}
@@ -394,23 +414,25 @@ async def _deserialize_table(
             if col not in row:
                 continue
 
-            # Skip auto-increment PK
             if col == pk_col and auto_pk:
                 continue
 
             value = row[col]
 
-            # Replace owner_user_id
             if col == "owner_user_id":
                 kwargs[col] = user_id
                 continue
 
-            # Replace expires_at based on current role
             if col == "expires_at":
                 kwargs[col] = new_expires_at
                 continue
 
-            # Deserialize datetime
+            if col == "set_id" and id_map and model is DimensionItem:
+                new_set_id = id_map.get(("dimension_sets", value))
+                if new_set_id is not None:
+                    kwargs[col] = new_set_id
+                    continue
+
             try:
                 col_type = _get_column_type(model, col)
                 if col_type is datetime and isinstance(value, str):
@@ -425,8 +447,16 @@ async def _deserialize_table(
             obj = model(**kwargs)
             db.add(obj)
             inserted += 1
+            if track_ids:
+                created_objects.append((row.get(pk_col), obj))
         except Exception:
             continue
+
+    if created_objects:
+        await db.flush()
+        for old_pk, obj in created_objects:
+            if old_pk is not None and id_map is not None:
+                id_map[(table_name, old_pk)] = obj.id
 
     return inserted
 
@@ -469,6 +499,7 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
 
         # Import tables in order
         import_counts: dict[str, int] = {}
+        id_map: dict[tuple[str, int], int] = {}
         for model in EXPORT_TABLE_ORDER:
             table_name = _model_name(model)
             json_path = data_dir / f"{table_name}.json"
@@ -480,7 +511,7 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
                 records = json.load(f)
 
             logger.info("[import] Importing table %s, %d records...", table_name, len(records))
-            count = await _deserialize_table(db, model, records, uid, urole)
+            count = await _deserialize_table(db, model, records, uid, urole, id_map)
             await db.flush()
             import_counts[table_name] = count
             logger.info("[import] Table %s imported: %d records", table_name, count)

@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-08
+> 最后更新：2026-05-09
 
 ---
 
@@ -22,7 +22,9 @@
 |------|------|------|----------|
 | [CUSTOM_DIMENSION_PLAN.md](CUSTOM_DIMENSION_PLAN.md) | 方案 | 用户自定义精读维度集合（P8） | 理解 dimension_sets/items 的设计 |
 | [CUSTOM_DIMENSION_PHASE1_IMPL.md](CUSTOM_DIMENSION_PHASE1_IMPL.md) | 实现 | 维度功能 Phase 1 实现细节 | 查看已完成的维度功能实现 |
-| [CUSTOM_DIMENSION_PHASE2_DESIGN.md](CUSTOM_DIMENSION_PHASE2_DESIGN.md) | 设计 | 维度功能 Phase 2 设计 | 查看维度功能后续规划 |
+| [CUSTOM_DIMENSION_PHASE2_DESIGN.md](CUSTOM_DIMENSION_PHASE2_DESIGN.md) | 设计 | 维度功能 Phase 2 原始设计（子 Tab 方案，已被内联方案替代） | 查看原始设计思路 |
+| [CUSTOM_DIMENSION_PHASE2_IMPL.md](CUSTOM_DIMENSION_PHASE2_IMPL.md) | 实现 | 维度功能 Phase 2 实际实施记录（LongTab 内联编辑 + 拖拽排序） | 查看维度前端最终实现 |
+| [CUSTOM_DIMENSION_EXPORT_IMPORT_FIX.md](CUSTOM_DIMENSION_EXPORT_IMPORT_FIX.md) | 修复 | 维度表导入导出遗漏修复 | 维度数据导出/导入问题排查 |
 | [PENDING_PLANS.md](PENDING_PLANS.md) | 待办 | 所有未实施的功能规划（P1-P8） | 了解接下来做什么 |
 | [MULTI_USER_PLAN.md](MULTI_USER_PLAN.md) | 方案 | 多用户系统整体规划 | 理解用户/角色/隔离设计 |
 | [MULTIUSER_PROGRESS.md](MULTIUSER_PROGRESS.md) | 进度 | 多用户功能实施进度 | 查看已完成的里程碑 |
