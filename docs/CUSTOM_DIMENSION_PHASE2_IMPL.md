@@ -157,6 +157,7 @@ body: JSON.stringify({
 |------|----------|------|------|
 | `frontend/src/App.tsx` | 修改 | +293 行 | LongTab 内联维度管理 + 拖拽 + API 适配 |
 | `frontend/src/DimensionManager.tsx` | 新增 | ~395 行 | 独立维度管理组件（备用，未引用） |
+| `backend/routers/dimensions.py` | 修改 | +8 行 | delete_item 增加 ReadingItem 使用量检查 |
 | `backend/services/data_portability.py` | 修改 | +51 行 | 导入导出适配维度表 + ID 重映射 |
 | `docs/CUSTOM_DIMENSION_PHASE2_IMPL.md` | 新增 | 本文件 | 实施记录 |
 | `docs/CUSTOM_DIMENSION_EXPORT_IMPORT_FIX.md` | 新增 | — | 导入导出修复文档 |
@@ -173,3 +174,4 @@ body: JSON.stringify({
 | 精读进行中切换集合 | 不影响（dimension_set_id 已提交后台线程） |
 | 导入旧版 .dra（无维度 JSON） | 文件不存在则 skip，不报错 |
 | DimensionManager.tsx 未被引用 | 保留备用，tree-shaking 不会打包 |
+| 删除已使用的自定义维度 | 后端查询 `reading_items` 中 `item_label == dim_name` 的记录数，>0 时返回 409 错误，前端显示"已有 N 条精读记录，无法删除" |

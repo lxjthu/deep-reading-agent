@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import get_db
-from db.models import DimensionItem, DimensionSet, User
+from db.models import DimensionItem, DimensionSet, ReadingItem, User
 from new_architecture.analysis_dimensions import ANALYSIS_DIMENSIONS
 from prompt_registry import load_prompt_from_file
 
@@ -448,6 +448,15 @@ async def delete_item(
     ds, item = await _get_user_item(db, set_id, item_id, user.id)
     if ds.is_system and item.is_builtin:
         raise HTTPException(status_code=400, detail="系统集合中的内置维度不可删除，请使用恢复默认功能")
+    used = await db.execute(
+        select(func.count()).select_from(ReadingItem).where(
+            ReadingItem.owner_user_id == user.id,
+            ReadingItem.mode == "long",
+            ReadingItem.item_label == item.dim_name,
+        )
+    )
+    if (used.scalar() or 0) > 0:
+        raise HTTPException(status_code=409, detail=f"维度「{item.dim_name}」已有 {used.scalar()} 条精读记录，无法删除")
     await db.execute(delete(DimensionItem).where(DimensionItem.id == item_id))
     ds.updated_at = _utcnow()
     await db.commit()
