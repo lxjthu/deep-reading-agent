@@ -607,3 +607,54 @@ class DimensionItem(Base):
 
 Index("idx_dim_items_set", DimensionItem.set_id)
 Index("idx_dim_items_builtin", DimensionItem.set_id, DimensionItem.is_builtin)
+
+
+# --------------------------------------------------------------------------
+# Dimension templates (system preset templates for template market)
+# --------------------------------------------------------------------------
+
+class DimensionTemplate(Base):
+    __tablename__ = "dimension_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    dim_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    preview_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    group_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_featured: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_dim_templates_category", DimensionTemplate.category)
+Index("idx_dim_templates_featured", DimensionTemplate.is_featured)
+
+
+class TemplateItem(Base):
+    __tablename__ = "template_items"
+    __table_args__ = (
+        UniqueConstraint("template_id", "dim_key", name="uq_template_items_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    template_id: Mapped[int] = mapped_column(
+        ForeignKey("dimension_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    dim_key: Mapped[str] = mapped_column(String, nullable=False)
+    dim_name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prompt_content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    default_question: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    group_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_builtin: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_template_items_template", TemplateItem.template_id)

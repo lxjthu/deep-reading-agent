@@ -28,6 +28,7 @@ from cleanup import cleanup_normal_user_data
 from db import AsyncSessionLocal
 from dimension_seed import ensure_default_dimension_sets
 from prompt_service import ensure_builtin_prompt_templates
+from template_seed import ensure_dimension_templates
 from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions
 
 # Create upload directory
@@ -73,6 +74,12 @@ async def lifespan(app: FastAPI):
             await ensure_default_dimension_sets(db)
     except Exception as exc:  # pragma: no cover - defensive startup logging
         print(f"[dimension-seed] skipped: {exc}")
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await ensure_dimension_templates(db)
+    except Exception as exc:  # pragma: no cover - defensive startup logging
+        print(f"[template-seed] skipped: {exc}")
 
     # Recover jobs left hanging from previous crash/restart
     try:
