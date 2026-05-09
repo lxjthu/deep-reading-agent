@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import get_db
-from db.models import DimensionItem, DimensionSet, ReadingItem, User
+from db.models import DimensionItem, DimensionSet, DimensionTemplate, ReadingItem, TemplateItem, User
 from new_architecture.analysis_dimensions import ANALYSIS_DIMENSIONS
 from prompt_registry import load_prompt_from_file
 
@@ -207,6 +207,21 @@ async def delete_set(
     ds = await _get_user_set(db, set_id, user.id)
     if ds.is_system:
         raise HTTPException(status_code=400, detail="系统集合不可删除")
+    # 检查是否有使用此维度集合精读过文献
+    from db.models import Job
+    used_jobs = await db.execute(
+        select(func.count()).select_from(Job).where(
+            Job.owner_user_id == user.id,
+            Job.job_type == "reading_long",
+            Job.params_json.like(f'%"dimension_set_id": {set_id}%'),
+        )
+    )
+    used_count = used_jobs.scalar() or 0
+    if used_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"该维度集合已有 {used_count} 条精读记录，无法删除",
+        )
     await db.execute(delete(DimensionSet).where(DimensionSet.id == set_id))
     await db.commit()
     return {"success": True}
@@ -386,9 +401,26 @@ async def create_item(
     db: AsyncSession = Depends(get_db),
 ):
     ds = await _get_user_set(db, set_id, user.id)
-    prefix = re.sub(r"\s+", "", ds.name[:6]) if not ds.is_system else "custom"
-    short_uuid = uuid.uuid4().hex[:4]
-    dim_key = f"{prefix}_{short_uuid}"
+    # dim_key 格式：维度集合-维度（如"计量论文专用-研究问题"）
+    set_name_clean = re.sub(r"[^\w\s-]", "", ds.name).strip()
+    dim_name_clean = re.sub(r"[^\w\s-]", "", body.dim_name).strip()
+    base_key = f"{set_name_clean}-{dim_name_clean}"
+    # 处理同一集合内可能的重名
+    dim_key = base_key
+    suffix = 1
+    while True:
+        existing = (
+            await db.execute(
+                select(DimensionItem).where(
+                    DimensionItem.set_id == set_id,
+                    DimensionItem.dim_key == dim_key,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            break
+        dim_key = f"{base_key}-{suffix}"
+        suffix += 1
 
     max_order = (
         await db.execute(
@@ -484,3 +516,149 @@ async def reorder_items(
     ds.updated_at = _utcnow()
     await db.commit()
     return {"success": True}
+
+
+# --------------------------------------------------------------------------
+# Template market endpoints
+# --------------------------------------------------------------------------
+
+import json
+
+
+@router.get("/templates")
+async def list_templates(
+    category: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取预置模板列表"""
+    query = select(DimensionTemplate).where(DimensionTemplate.is_featured == 1)
+    if category:
+        query = query.where(DimensionTemplate.category == category)
+    query = query.order_by(DimensionTemplate.sort_order, DimensionTemplate.id)
+
+    rows = (await db.execute(query)).scalars().all()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "description": t.description,
+            "category": t.category,
+            "dim_count": t.dim_count,
+            "preview": json.loads(t.preview_json) if t.preview_json else None,
+        }
+        for t in rows
+    ]
+
+
+@router.get("/templates/{template_id}")
+async def get_template_detail(
+    template_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取模板详情（含维度列表）"""
+    template = (
+        await db.execute(
+            select(DimensionTemplate).where(DimensionTemplate.id == template_id)
+        )
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(status_code=404, detail="模板不存在")
+
+    items = (
+        await db.execute(
+            select(TemplateItem)
+            .where(TemplateItem.template_id == template_id)
+            .order_by(TemplateItem.sort_order)
+        )
+    ).scalars().all()
+
+    return {
+        "id": template.id,
+        "name": template.name,
+        "description": template.description,
+        "category": template.category,
+        "dim_count": template.dim_count,
+        "group_config": json.loads(template.group_config) if template.group_config else None,
+        "dimensions": [
+            {
+                "id": item.id,
+                "dim_key": item.dim_key,
+                "dim_name": item.dim_name,
+                "description": item.description,
+                "default_question": item.default_question,
+                "prompt_content": item.prompt_content,
+                "group_name": item.group_name,
+                "sort_order": item.sort_order,
+            }
+            for item in items
+        ],
+    }
+
+
+@router.post("/templates/{template_id}/import")
+async def import_template(
+    template_id: int,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """导入预置模板到用户集合"""
+    template = (
+        await db.execute(
+            select(DimensionTemplate).where(DimensionTemplate.id == template_id)
+        )
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(status_code=404, detail="模板不存在")
+
+    # 创建新集合
+    new_name = template.name
+    suffix = 1
+    while True:
+        dup = (
+            await db.execute(
+                select(DimensionSet).where(
+                    DimensionSet.owner_user_id == user.id,
+                    DimensionSet.name == new_name,
+                )
+            )
+        ).scalar_one_or_none()
+        if dup is None:
+            break
+        suffix += 1
+        new_name = f"{template.name} ({suffix})"
+
+    ds = DimensionSet(
+        owner_user_id=user.id,
+        name=new_name,
+        description=template.description,
+        is_default=0,
+        is_system=0,
+    )
+    db.add(ds)
+    await db.flush()
+
+    # 复制维度
+    items = (
+        await db.execute(
+            select(TemplateItem)
+            .where(TemplateItem.template_id == template_id)
+            .order_by(TemplateItem.sort_order)
+        )
+    ).scalars().all()
+
+    for item in items:
+        db.add(
+            DimensionItem(
+                set_id=ds.id,
+                dim_key=item.dim_key,
+                dim_name=item.dim_name,
+                description=item.description,
+                prompt_content=item.prompt_content,
+                default_question=item.default_question,
+                sort_order=item.sort_order,
+                is_builtin=1,
+            )
+        )
+
+    await db.commit()
+    return {"id": ds.id, "name": ds.name, "dim_count": len(items)}
