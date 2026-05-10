@@ -67,6 +67,10 @@
 - 四步精读
 - 结果保存为 Markdown
 - 同时拆成结构化结果写入数据库
+- **精读完成后自动从前三页提取元数据并写入 `BibEntry`**（2026-05-10 修复）
+  - 使用 `pdf_metadata_extract` 提取前三页文本 + `pdf_metadata_llm` 调用 DeepSeek flash 结构化提取
+  - 提取字段：标题、作者、年份、期刊、DOI、卷、期、页码、摘要、关键词
+  - 只补空字段不覆盖已有值，自动更新 `dedup_key` 和 `metadata_completeness`
 
 ### 2.5 对比分析与综述
 
@@ -501,9 +505,15 @@
 - `run_qual_task(...)`
   - 后台线程执行分析
   - 精读完成后自动调用 `_try_extract_references()` 提取参考文献
+  - **精读完成后自动调用 `_try_update_bib_metadata()` 从前三页提取元数据并更新 `BibEntry`**
 - `_try_extract_references(...)`
   - 调用 `services/deepseek_refs.py` 提取参考文献
   - 调用 `routers/references.py` 的 `write_trace_outputs()` 生成产物
+  - 失败时不阻塞主精读流程
+- `_try_update_bib_metadata(...)`
+  - 调用 `services/pdf_metadata_extract.py` 提取前三页文本
+  - 调用 `services/pdf_metadata_llm.py` 调用 DeepSeek flash 提取结构化元数据
+  - 只补空字段，自动更新 `dedup_key` 和 `metadata_completeness`
   - 失败时不阻塞主精读流程
 - `persist_reading_items(...)`
   - 将结构化结果写入 `reading_items`

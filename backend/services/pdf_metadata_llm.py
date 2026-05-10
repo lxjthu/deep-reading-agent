@@ -47,6 +47,8 @@ Strict JSON:
   "volume": "12",
   "issue": "3",
   "pages": "1-20",
+  "abstract": "Paper abstract text...",
+  "keywords": ["keyword1", "keyword2"],
   "language": "en",
   "confidence": 0.85
 }}
@@ -57,6 +59,8 @@ Strict JSON:
 - Do NOT fabricate information
 - confidence: 0.0-1.0, how confident you are in the extraction
 - language: "zh" for Chinese, "en" for English
+- abstract: extract the full abstract from the first page; if not found, use null
+- keywords: extract keywords (usually after the abstract, separated by semicolons or commas); return as a list
 - If regex found DOIs, include them in your output"""
 
 
@@ -138,10 +142,15 @@ def _clean_metadata(data: dict) -> dict:
             pass
 
     # String fields
-    for field in ["journal", "doi", "volume", "issue", "pages"]:
+    for field in ["journal", "doi", "volume", "issue", "pages", "abstract"]:
         value = data.get(field)
         if value and isinstance(value, str) and value.strip() and value.strip().lower() != "null":
             result[field] = value.strip()
+
+    # Keywords
+    keywords = data.get("keywords")
+    if keywords and isinstance(keywords, list):
+        result["keywords"] = [str(k).strip() for k in keywords if str(k).strip()]
 
     # DOI normalization
     if result["doi"]:
@@ -182,6 +191,8 @@ def _empty_metadata() -> dict:
         "volume": None,
         "issue": None,
         "pages": None,
+        "abstract": None,
+        "keywords": [],
         "language": "en",
         "confidence": 0.0,
     }

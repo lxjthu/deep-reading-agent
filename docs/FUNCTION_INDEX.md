@@ -178,6 +178,7 @@
 | `run_long_task(...)` | 后台执行长文本精读 | 长文本分析失败 |
 | `run_quant_task(...)` | 后台执行七步精读 | 七步分析失败 |
 | `run_qual_task(...)` | 后台执行四步精读 | 四步分析失败 |
+| `_try_update_bib_metadata(...)` | 从前三页提取元数据并更新 `BibEntry`（只补空字段） | 精读后文献库元数据未更新 |
 | `start_long_context(...)` | 启动长文本任务 | 前端开始长文本无响应 |
 | `start_quant(...)` | 启动七步任务 | 前端开始七步无响应 |
 | `start_qual(...)` | 启动四步任务 | 前端开始四步无响应 |
@@ -241,8 +242,9 @@
 
 | 函数 | 作用 | 什么时候优先看 |
 |---|---|---|
-| `extract_metadata_with_llm(front_matter, filename)` | 调用 DeepSeek 从 PDF 前几页抽取结构化元数据 | LLM 抽取结果异常 |
-| `_clean_metadata(data)` | 清洗和验证 LLM 返回的元数据 | 元数据字段格式问题 |
+| `extract_metadata_with_llm(front_matter, filename)` | 调用 DeepSeek 从 PDF 前三页抽取结构化元数据（含摘要、关键词） | LLM 抽取结果异常 |
+| `_clean_metadata(data)` | 清洗和验证 LLM 返回的元数据（含 abstract/keywords） | 元数据字段格式问题 |
+| `_empty_metadata()` | 返回空元数据字典（含 abstract/keywords 字段） | 新增字段默认值 |
 
 ## 2.13.3 `backend/services/metadata_sources.py`
 
@@ -716,6 +718,7 @@ Key functions:
 | 精读结果有 Markdown 但 compare 页读不出来 | `reading.py.persist_reading_items(...)`、`compare.py.build_structured_paper_data(...)`、`compare_4step.html.loadReports()`、`compare_4step.html.getPaperSubQuestions(...)` |
 | 对比页 AI 综述按钮不亮 | `compare_7step.html.updateUI()`、`compare_4step.html.updateUI()` |
 | 历史记录预览报未认证 | `download.ts.openPreviewWithAuth(...)`、`history.py.preview_file(...)` |
+| 精读后文献库元数据未更新 | `reading.py._try_update_bib_metadata(...)`、`pdf_metadata_extract.py.extract_front_matter(...)`、`pdf_metadata_llm.py.extract_metadata_with_llm(...)` |
 | 提示词管理显示空或保存失败 | `prompt_service.py.ensure_builtin_prompt_templates(...)`、`get_prompt_payload(...)`、`prompts.py.get_prompt_item(...)` |
 
 ## 5. 维护建议

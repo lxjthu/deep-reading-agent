@@ -25,7 +25,9 @@ from auth.dependencies import current_user
 from db import AsyncSessionLocal, PROJECT_ROOT, get_db
 from db.models import Artifact, BibEntry, File, Job, JobBibEntry, ReadingItem, User
 from db.utils import compute_dedup_key, title_match_score
-from backend.routers.metadata_extractor import extract_metadata, build_frontmatter
+from backend.routers.metadata_extractor import build_frontmatter
+from services.pdf_metadata_extract import extract_front_matter
+from services.pdf_metadata_llm import extract_metadata_with_llm
 from prompt_service import get_effective_prompt_map
 from upload_storage import lookup_original_name, lookup_path_by_file_id
 from services.queue_manager import task_queue
@@ -523,6 +525,116 @@ async def finalize_reading_failure(task_id: str, bib_entry_id: str, error_messag
         await db.commit()
 
 
+async def _try_update_bib_metadata(
+    bib_entry_id: str,
+    file_path: str,
+    original_name: str,
+    api_key: Optional[str] = None,
+) -> list[str]:
+    """从PDF前三页提取元数据并更新BibEntry。只补空字段，标题如果是文件名则替换。
+    返回被更新的字段名列表。"""
+    try:
+        from pathlib import Path
+        from db.utils import compute_dedup_key
+
+        front_matter = extract_front_matter(file_path)
+        if not front_matter.get("page_1_full"):
+            return []
+
+        metadata = extract_metadata_with_llm(
+            front_matter,
+            original_name,
+            api_key=api_key,
+        )
+        if not metadata or metadata.get("confidence", 0) < 0.3:
+            return []
+
+        async with AsyncSessionLocal() as db:
+            bib_entry = await db.get(BibEntry, bib_entry_id)
+            if bib_entry is None:
+                return []
+
+            updated_fields = []
+
+            # Title: 如果当前标题是文件名，允许替换
+            current_title = (bib_entry.title or "").strip()
+            extracted_title = (metadata.get("title") or "").strip()
+            if extracted_title:
+                is_filename_like = current_title == original_name or current_title == os.path.splitext(original_name)[0]
+                if not current_title or is_filename_like:
+                    bib_entry.title = extracted_title
+                    updated_fields.append("title")
+
+            # Authors
+            current_authors = json.loads(bib_entry.authors_json) if bib_entry.authors_json else []
+            extracted_authors = metadata.get("authors", [])
+            if extracted_authors and not current_authors:
+                bib_entry.authors_json = json.dumps(extracted_authors, ensure_ascii=False)
+                updated_fields.append("authors")
+
+            # Year
+            if metadata.get("year") and bib_entry.year is None:
+                bib_entry.year = metadata["year"]
+                updated_fields.append("year")
+
+            # Journal
+            if metadata.get("journal") and not (bib_entry.journal or "").strip():
+                bib_entry.journal = metadata["journal"]
+                updated_fields.append("journal")
+
+            # DOI
+            if metadata.get("doi") and not (bib_entry.doi or "").strip():
+                bib_entry.doi = metadata["doi"]
+                updated_fields.append("doi")
+
+            # Abstract
+            if metadata.get("abstract") and not (bib_entry.abstract or "").strip():
+                bib_entry.abstract = metadata["abstract"]
+                updated_fields.append("abstract")
+
+            # Keywords
+            current_kw = json.loads(bib_entry.keywords_json) if bib_entry.keywords_json else []
+            extracted_kw = metadata.get("keywords", [])
+            if extracted_kw and not current_kw:
+                bib_entry.keywords_json = json.dumps(extracted_kw, ensure_ascii=False)
+                updated_fields.append("keywords")
+
+            # Volume / Issue / Pages
+            for field in ["volume", "issue", "pages"]:
+                if metadata.get(field) and not getattr(bib_entry, field, None):
+                    setattr(bib_entry, field, metadata[field])
+                    updated_fields.append(field)
+
+            # Recompute dedup_key
+            authors_list = json.loads(bib_entry.authors_json) if bib_entry.authors_json else []
+            bib_entry.dedup_key = compute_dedup_key(
+                bib_entry.doi, bib_entry.title, authors_list, bib_entry.year
+            )
+
+            # Recompute metadata_completeness
+            has_title = bool((bib_entry.title or "").strip())
+            has_authors = bool(authors_list)
+            has_year = bib_entry.year is not None
+            has_doi = bool((bib_entry.doi or "").strip())
+            has_journal = bool((bib_entry.journal or "").strip())
+            has_abstract = bool((bib_entry.abstract or "").strip())
+            if has_title and has_authors and has_year and has_doi and has_journal and has_abstract:
+                bib_entry.metadata_completeness = "full"
+            elif has_title and has_authors:
+                bib_entry.metadata_completeness = "partial"
+            else:
+                bib_entry.metadata_completeness = "minimal"
+
+            bib_entry.updated_at = utcnow_naive()
+            await db.commit()
+            return updated_fields
+
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("Metadata extraction/update failed for bib_entry %s: %s", bib_entry_id, e, exc_info=True)
+        return []
+
+
 async def build_task_status_from_db(task_id: str, user_id: int) -> dict | None:
     async with AsyncSessionLocal() as db:
         job = (
@@ -843,11 +955,17 @@ def run_long_context_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_long_context.md"
         
-        # Extract metadata
+        # Extract metadata from PDF front matter
         tasks[task_id]["stage"] = "提取论文元数据..."
         tasks[task_id]["logs"].append("提取论文元数据...")
-        metadata = extract_metadata(paper_text, api_key)
+        front_matter = extract_front_matter(file_path)
+        metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
         tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        
+        # Update BibEntry with extracted metadata
+        updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+        if updated_fields:
+            tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "长文本精读")
@@ -983,11 +1101,17 @@ def run_quant_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_7step.md"
         
-        # Extract metadata
+        # Extract metadata from PDF front matter
         tasks[task_id]["stage"] = "提取论文元数据..."
         tasks[task_id]["logs"].append("提取论文元数据...")
-        metadata = extract_metadata(paper_text, api_key)
+        front_matter = extract_front_matter(file_path)
+        metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
         tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        
+        # Update BibEntry with extracted metadata
+        updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+        if updated_fields:
+            tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "七步精读")
@@ -1113,7 +1237,23 @@ def run_qual_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_4step.md"
         
+        # Extract metadata from PDF front matter (previously missing for qual)
+        tasks[task_id]["stage"] = "提取论文元数据..."
+        tasks[task_id]["logs"].append("提取论文元数据...")
+        front_matter = extract_front_matter(file_path)
+        metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+        tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        
+        # Update BibEntry with extracted metadata
+        updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+        if updated_fields:
+            tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        
+        # Build frontmatter
+        frontmatter = build_frontmatter(metadata, "四步精读")
+        
         with open(report_path, "w", encoding="utf-8") as f:
+            f.write(frontmatter)
             f.write("# 四步精读报告\n\n")
             for step_name, answer in results.items():
                 f.write(f"## {step_name}\n\n{answer}\n\n---\n\n")
