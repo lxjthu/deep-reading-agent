@@ -637,7 +637,6 @@
       content.style.display = 'none';
 
       const dims = Array.from(selectedDims);
-      const isMulti = dims.length > 1;
       const papers = allReports.filter(r => selectedPapers.includes(r.filename));
 
       const paperData = papers.map(paper => {
@@ -653,21 +652,13 @@
           pages: fm.pages || fm['页码'] || '',
           doi: fm.doi || '',
         };
-        if (isMulti) {
-          const dimensions = {};
-          for (const dim of dims) {
-            const c = getDimensionContent(paper.content, dim);
-            if (c && c.trim()) dimensions[dim] = c;
-          }
-          return { ...base, dimensions };
-        } else {
-          const c = getDimensionContent(paper.content, dims[0]);
-          return { ...base, dimension: dims[0], content: c };
+        const dimensions = {};
+        for (const dim of dims) {
+          const c = getDimensionContent(paper.content, dim);
+          if (c && c.trim()) dimensions[dim] = c;
         }
-      }).filter(p => isMulti
-        ? Object.keys(p.dimensions || {}).length > 0
-        : (p.content && p.content.trim())
-      );
+        return { ...base, dimensions };
+      }).filter(p => Object.keys(p.dimensions || {}).length > 0);
 
       if (paperData.length === 0) {
         loading.style.display = 'none';
@@ -679,15 +670,13 @@
       try {
         const apiKey = promptForApiKey();
         if (!apiKey) { alert('请先设置 DeepSeek API Key'); return; }
-        const response = await authFetch('/api/compare/analyze_long', {
+        const response = await authFetch('/api/compare/synthesis_long', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            dimension: dims[0],
-            papers: selectedPapers,
+            dimensions: dims,
             paperData: paperData,
             api_key: apiKey,
-            mode: isMulti ? 'multi' : 'single'
           })
         });
         const result = await response.json();
