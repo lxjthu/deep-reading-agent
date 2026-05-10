@@ -491,6 +491,24 @@ def build_paper_metadata_block(papers: list[dict], bib_refs: dict[str, list[dict
     return "\n".join(lines)
 
 
+def _match_dimension_content(content_dict: dict, dim_label: str) -> str:
+    if dim_label in content_dict:
+        return str(content_dict[dim_label])
+
+    for key, value in content_dict.items():
+        if "]" in key:
+            clean = key.split("]", 1)[-1].strip()
+            if clean == dim_label:
+                return str(value)
+
+    for key, value in content_dict.items():
+        if dim_label in key or key in dim_label:
+            return str(value)
+
+    parts = [str(v).strip() for v in content_dict.values() if str(v).strip()]
+    return "\n\n".join(parts) if parts else ""
+
+
 def build_synthesis_dimension_prompt(
     dim_label: str,
     papers: list[dict],
@@ -522,19 +540,7 @@ def build_synthesis_dimension_prompt(
 
         content_dict = paper.get(content_field, {})
         if isinstance(content_dict, dict):
-            matched = ""
-            for key, value in content_dict.items():
-                label = key
-                if content_field == "subQuestions" and "]" in key:
-                    label = key.split("]", 1)[-1].strip()
-                if label == dim_label or dim_label in label:
-                    matched = str(value)
-                    break
-            if not matched:
-                for key, value in content_dict.items():
-                    if str(value).strip():
-                        matched = str(value)
-                        break
+            matched = _match_dimension_content(content_dict, dim_label)
             parts.append(matched[:CONTENT_CHAR_LIMIT].strip())
         else:
             parts.append(str(content_dict)[:CONTENT_CHAR_LIMIT].strip())
