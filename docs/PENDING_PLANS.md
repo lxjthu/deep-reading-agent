@@ -12,6 +12,7 @@
 | P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
 | P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **部分完成**，核心 bug 未修 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 合并为独立模块，不侵入现有代码。详见下方 2.2 节。 |
 | P2.5 | AI 综述二次引用目录过滤 | **待修复** | AI 综述模块已上线 | 无 | 当前 `build_gbt7714_references()` 将所有 BibReference 都放入二次引用目录，应只保留综述正文实际引用过的文献。详见下方 2.2.1 节。 |
+| P3.5 | 批量精读（文件夹上传） | **待规划** | 无 | 无 | 支持上传整个文件夹批量精读，统一设置精读模式后逐篇排队执行。详见下方 2.8 节。 |
 
 | ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
 | P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
@@ -306,6 +307,26 @@ PDF 结构复杂度：
 1. **`backend/services/data_portability.py`**：导出打包 + 导入解包核心逻辑
 2. **`backend/routers/data.py`**：`POST /api/data/export` + `POST /api/data/import`
 3. **前端组件**：用户菜单中"导出我的数据"和"导入数据"入口 + 确认弹窗 + 进度展示
+
+### 2.8 批量精读（文件夹上传）（P3.5）
+
+**状态：待规划（2026-05-10 记录）**
+
+**需求**：支持用户上传整个文件夹（含多个 PDF/MD 文件），统一设置精读模式（七步/四步/长文本）和维度集后，逐篇排队执行精读。
+
+**初步思路**：
+
+- 前端：精读入口新增「上传文件夹」选项（`webkitdirectory` 属性），展示文件列表预览，用户确认模式和参数后一次性提交
+- 后端：新增 `POST /api/reading/batch` 端点，接收文件列表 + 精读参数，为每个文件创建独立 Job 并入队，返回 batch_id
+- 进度：前端通过 batch_id 轮询整体进度（已完成/总数/失败数），单个文件精读结果独立查看
+- 复用：文件上传、PDF 提取、精读执行均复用现有 `routers/reading.py` 的单篇逻辑
+- 并发控制：复用 `queue_manager.py` 的排队机制，按用户并发上限串行执行
+
+**待确认**：
+
+- 文件夹内是否需要文件类型过滤（只取 .pdf/.md/.markdown）
+- 是否需要支持混合模式（同一文件夹内不同文件用不同精读模式）
+- 批量结果导出形式（逐篇下载 vs 打包 zip）
 
 ### 2.7 P13 Playwright E2E + 部署验收
 
