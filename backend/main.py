@@ -20,6 +20,7 @@ load_dotenv(env_path)
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
@@ -215,11 +216,30 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
         ws_manager.disconnect(task_id)
 
 
+# Mount frontend static files (for standalone distribution)
+def get_project_root():
+    """Get project root, compatible with PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Running in PyInstaller bundle
+        return Path(sys._MEIPASS)
+    else:
+        return Path(__file__).parent.parent
+
+project_root = get_project_root()
+frontend_dist = project_root / "frontend" / "dist"
+if frontend_dist.exists():
+    # Mount at root, but API routes take precedence
+    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="static")
+    print(f"[static] Serving frontend from {frontend_dist}")
+else:
+    print(f"[static] Frontend dist not found at {frontend_dist}")
+
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8000,
-        reload=True,
+        reload=False,
         log_level="info"
     )
