@@ -47,6 +47,35 @@ class LongCompareRequest(BaseModel):
     mode: Optional[str] = "single"
 
 
+SYNTHESIS_SYSTEM_PROMPT = (
+    "你是一位资深的学术文献综述专家。你的任务是根据已完成的精读分析，撰写高质量的"
+    "文献综述段落。你必须严格基于所提供的文献内容，不得捏造任何数据或结论。\n\n"
+    "你的综述风格要求：\n"
+    "- 不写引言和结论，直接以维度名作为小标题开始\n"
+    "- 专注每个维度下文献之间的梳理、总结、源流比较和学术对话\n"
+    "- 分析现有研究的缺漏和新研究的起点\n"
+    "- 引用格式使用间注法：（作者，年份），如（张三等，2024）或（Smith & Jones, 2023）\n"
+    "- 转引标注为：（原作者，年份，转引自 引用者，年份）\n"
+    "- 不要写参考文献目录，系统会自动生成\n"
+)
+
+CONTENT_CHAR_LIMIT = 3000
+
+
+class SynthesisDimensionRequest(BaseModel):
+    dimensions: list[dict] = Field(default_factory=list)
+    bib_entry_ids: list[str] = Field(default_factory=list)
+    paperData: list = Field(default_factory=list)
+    api_key: Optional[str] = None
+
+
+class SynthesisLongRequest(BaseModel):
+    dimensions: list[str] = Field(default_factory=list)
+    bib_entry_ids: list[str] = Field(default_factory=list)
+    paperData: list = Field(default_factory=list)
+    api_key: Optional[str] = None
+
+
 class StructuredStepResponse(BaseModel):
     label: str
     sub_questions: dict[str, str] = Field(default_factory=dict)
@@ -362,6 +391,269 @@ async def ensure_paper_data(db: AsyncSession, paper_data: list[dict], members: l
     if paper_data:
         return paper_data
     return [bib_entry_to_paper_data(member) for member in members]
+
+
+async def gather_bib_references(
+    db: AsyncSession,
+    members: list[BibEntry],
+) -> dict[str, list[dict]]:
+    from backend.db.models import BibReference
+
+    result: dict[str, list[dict]] = {}
+    for member in members:
+        refs = (
+            await db.execute(
+                select(BibReference)
+                .where(
+                    BibReference.source_bib_entry_id == member.id,
+                    BibReference.owner_user_id == member.owner_user_id,
+                )
+                .order_by(BibReference.reference_order.asc())
+            )
+        ).scalars().all()
+        items = []
+        for ref in refs:
+            authors = json.loads(ref.authors_json or "[]")
+            items.append({
+                "title": ref.title or "",
+                "authors": authors,
+                "year": ref.year,
+                "journal": ref.journal or "",
+                "raw_text": ref.raw_text or "",
+            })
+        result[member.id] = items
+    return result
+
+
+def format_cite_tag(authors: list, year) -> str:
+    if not authors:
+        return f"(佚名, {year or 'n.d.'})"
+    first = str(authors[0]).strip()
+    last_name = first.split()[-1] if first else first
+    if len(authors) == 1:
+        return f"({last_name}, {year or 'n.d.'})"
+    elif len(authors) == 2:
+        second = str(authors[1]).strip().split()[-1]
+        return f"({last_name} & {second}, {year or 'n.d.'})"
+    else:
+        return f"({last_name}等, {year or 'n.d.'})"
+
+
+def build_paper_metadata_block(papers: list[dict], bib_refs: dict[str, list[dict]], members: list[BibEntry]) -> str:
+    lines = [f"以下是 {len(papers)} 篇文献的元信息，用于引用标注：", ""]
+
+    bib_id_to_idx: dict[str, int] = {}
+    for i, member in enumerate(members):
+        bib_id_to_idx[member.id] = i
+
+    for i, paper in enumerate(papers):
+        title = paper.get('title') or paper.get('filename') or '未知'
+        authors = paper.get('authors', [])
+        year = paper.get('year', 'n.d.')
+        journal = paper.get('journal') or paper.get('source') or ''
+        cite = format_cite_tag(authors, year)
+
+        lines.append(f"━━━ 文献 {i + 1} ━━━")
+        lines.append(f"标题：{title}")
+        lines.append(f"作者：{', '.join(str(a) for a in authors) if authors else '佚名'}")
+        lines.append(f"年份：{year}")
+        if journal:
+            lines.append(f"期刊：{journal}")
+        lines.append(f"引用标注：{cite}")
+        lines.append("")
+
+    has_secondary = False
+    for i, member in enumerate(members):
+        refs = bib_refs.get(member.id, [])
+        if not refs:
+            continue
+        if not has_secondary:
+            lines.append("【二次引用信息】")
+            lines.append("以下文献在原文中引用了这些参考文献，你可以使用转引方式引用：")
+            lines.append("")
+            has_secondary = True
+        paper = papers[i] if i < len(papers) else {}
+        authors_p = paper.get('authors', [])
+        year_p = paper.get('year', 'n.d.')
+        cite_p = format_cite_tag(authors_p, year_p)
+        lines.append(f"━━━ {cite_p} 引用了： ━━━")
+        for j, ref in enumerate(refs[:15], 1):
+            ref_cite = format_cite_tag(ref.get('authors', []), ref.get('year'))
+            ref_title = ref.get('title') or ref.get('raw_text', '')[:60]
+            lines.append(f"{j}. {ref_cite} — 标题：{ref_title}")
+        lines.append("")
+
+    if not has_secondary:
+        lines.append("【二次引用信息】")
+        lines.append("当前未提取到这些文献的参考文献数据。")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def build_synthesis_dimension_prompt(
+    dim_label: str,
+    papers: list[dict],
+    content_field: str = "subQuestions",
+) -> str:
+    parts = [
+        f"【当前综述维度】{dim_label}",
+        "",
+        "【写作任务】",
+        "请撰写该维度的综述段落，包含以下层次：",
+        "1. **梳理与总结**：概述各文献在该维度的核心观点和发现",
+        "2. **源流比较**：比较不同文献的研究路径、方法论来源、理论根基的异同",
+        "3. **学术对话**：呈现文献间的共识与分歧，构建观点的交锋与呼应",
+        "4. **缺漏分析**：识别该维度下现有研究的盲区、方法局限或数据空白",
+        "5. **新起点**：基于以上分析，指出未来研究可突破的方向",
+        "",
+        "【引用要求】",
+        "- 正文使用间注法：（第一作者姓等，年份）",
+        "- 可使用转引：（被引作者, 年份, 转引自 引用作者, 年份）",
+        "- 不要写参考文献目录",
+        "",
+        "【各文献在该维度的精读内容】",
+        "",
+    ]
+
+    for i, paper in enumerate(papers):
+        cite = format_cite_tag(paper.get('authors', []), paper.get('year', 'n.d.'))
+        parts.append(f"━━━ 文献 {i + 1} {cite} ━━━")
+
+        content_dict = paper.get(content_field, {})
+        if isinstance(content_dict, dict):
+            matched = ""
+            for key, value in content_dict.items():
+                label = key
+                if content_field == "subQuestions" and "]" in key:
+                    label = key.split("]", 1)[-1].strip()
+                if label == dim_label or dim_label in label:
+                    matched = str(value)
+                    break
+            if not matched:
+                for key, value in content_dict.items():
+                    if str(value).strip():
+                        matched = str(value)
+                        break
+            parts.append(matched[:CONTENT_CHAR_LIMIT].strip())
+        else:
+            parts.append(str(content_dict)[:CONTENT_CHAR_LIMIT].strip())
+        parts.append("")
+
+    return "\n".join(parts)
+
+
+def build_gbt7714_references(
+    papers: list[dict],
+    bib_refs: dict[str, list[dict]],
+    members: list[BibEntry],
+) -> str:
+    refs = []
+    ref_num = 1
+
+    for paper in papers:
+        authors = paper.get('authors', [])
+        year = paper.get('year', 'n.d.')
+        title = paper.get('title') or paper.get('filename') or ''
+        journal = paper.get('journal') or paper.get('source') or ''
+        volume = str(paper.get('volume', '')) if paper.get('volume') else ''
+        issue = str(paper.get('issue', '')) if paper.get('issue') else ''
+        pages = str(paper.get('pages', '')) if paper.get('pages') else ''
+        doi = paper.get('doi', '')
+
+        if not authors:
+            author_str = "佚名"
+        elif len(authors) <= 3:
+            author_str = ", ".join(str(a) for a in authors)
+        else:
+            author_str = ", ".join(str(a) for a in authors[:3]) + ", 等"
+
+        entry = f"[{ref_num}] {author_str}. {title}[J]."
+        if journal:
+            entry += f" {journal}"
+            if volume:
+                entry += f", {volume}"
+                if issue:
+                    entry += f"({issue})"
+            if pages:
+                entry += f": {pages}"
+            entry += "."
+        if doi:
+            entry += f" DOI:{doi}"
+
+        cite_tag = format_cite_tag(authors, year)
+        refs.append((cite_tag, entry))
+        ref_num += 1
+
+    lines = ["---", "", "## 参考文献", ""]
+    lines.append("### 主要参考文献")
+    lines.append("")
+    for _, entry in refs:
+        lines.append(entry)
+
+    secondary_items = []
+    seen_secondary = set()
+    for i, member in enumerate(members):
+        paper = papers[i] if i < len(papers) else {}
+        authors_p = paper.get('authors', [])
+        year_p = paper.get('year', 'n.d.')
+        cite_p = format_cite_tag(authors_p, year_p)
+
+        for ref in bib_refs.get(member.id, []):
+            ref_authors = ref.get('authors', [])
+            ref_year = ref.get('year', 'n.d.')
+            ref_cite = format_cite_tag(ref_authors, ref_year)
+            dedup_key = f"{ref_cite}_{ref.get('title', '')}"
+            if dedup_key in seen_secondary:
+                continue
+            primary_cites = {format_cite_tag(p.get('authors', []), p.get('year', 'n.d.')) for p in papers}
+            if ref_cite in primary_cites:
+                continue
+            seen_secondary.add(dedup_key)
+
+            author_str = ", ".join(str(a) for a in ref_authors) if ref_authors else "佚名"
+            ref_title = ref.get('title') or ref.get('raw_text', '')[:80]
+            ref_journal = ref.get('journal', '')
+            entry = f"[{ref_num}] {author_str}. {ref_title}[J]."
+            if ref_journal:
+                entry += f" {ref_journal}."
+            entry += f" (转引自: {cite_p})"
+
+            secondary_items.append(entry)
+            ref_num += 1
+
+    if secondary_items:
+        lines.append("")
+        lines.append("### 二次引用文献")
+        lines.append("")
+        lines.extend(secondary_items)
+
+    return "\n".join(lines)
+
+
+async def persist_synthesis_result(
+    db: AsyncSession,
+    user: User,
+    job_id: str,
+    filename: str,
+    content: str,
+) -> str:
+    result_dir = get_results_dir(user.id, job_id)
+    path = result_dir / filename
+    path.write_text(content, encoding="utf-8")
+    storage_path = build_storage_path(path)
+    db.add(
+        Artifact(
+            job_id=job_id,
+            owner_user_id=user.id,
+            artifact_type="synthesis_md",
+            filename=filename,
+            storage_path=storage_path,
+            size_bytes=path.stat().st_size,
+            expires_at=compute_expires_at(user),
+        )
+    )
+    return storage_path
 
 
 def format_inline_citation(authors: list, year) -> str:
