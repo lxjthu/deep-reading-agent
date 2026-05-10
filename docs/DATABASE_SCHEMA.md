@@ -1,8 +1,8 @@
 # 数据库设计文档
 
-> **版本**: v1.4  
-> **日期**: 2026-05-08  
-> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)、[CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)
+> **版本**: v1.5  
+> **日期**: 2026-05-10  
+> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)、[CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)、[DIMENSION_TEMPLATE_PLAN.md](./DIMENSION_TEMPLATE_PLAN.md)
 
 ## 1. 选型与约定
 
@@ -50,6 +50,17 @@ upload_batches            │        └──────────┘  │ar
 ┌────────────────┐
 │ user_settings  │
 └────────────────┘
+
+┌────────────────────┐        ┌──────────────────┐
+│ dimension_sets     │        │dimension_templates│
+│  (用户维度集合)    │        │ (系统预设模板)    │
+└───────┬────────────┘        └───────┬──────────┘
+        │ 1:N                         │ 1:N
+        ▼                             ▼
+┌──────────────────┐          ┌──────────────────┐
+│ dimension_items  │          │ template_items   │
+│  (维度条目)      │          │ (模板维度条目)   │
+└──────────────────┘          └──────────────────┘
 ```
 
 枢纽：`bib_entries`（一篇文献的"档案"，含 v1.3 新增的 volume/issue/pages 字段）  
@@ -57,7 +68,8 @@ upload_batches            │        └──────────┘  │ar
 事件：`jobs`（filter / reading_* / compare / synthesis / reference_trace 等）  
 产物：`artifacts`（任务输出文件）  
 引用：`bib_references` / `bib_reference_citations`（参考文献条目与正文引用命中）  
-维度：`dimension_sets` / `dimension_items`（v1.4 用户自定义长文本精读维度集合）
+维度：`dimension_sets` / `dimension_items`（v1.4 用户自定义长文本精读维度集合）  
+模板：`dimension_templates` / `template_items`（v1.5 系统预设维度模板，用于快速创建维度集合）
 
 ## 3. 表定义
 
@@ -620,6 +632,7 @@ CREATE TABLE dimension_sets (
     description     TEXT,                       -- 可选描述
     is_default      INTEGER NOT NULL DEFAULT 0, -- 是否为用户当前激活的默认集合（每用户至多 1 个）
     is_system       INTEGER NOT NULL DEFAULT 0, -- 系统内置集合（不可删除、不可改名）
+    is_shared       INTEGER NOT NULL DEFAULT 0, -- 是否共享给其他用户（0=私有 1=共享）
     sort_order      INTEGER NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at      DATETIME NOT NULL DEFAULT (datetime('now')),
@@ -628,12 +641,14 @@ CREATE TABLE dimension_sets (
 
 CREATE INDEX idx_dim_sets_owner ON dimension_sets (owner_user_id);
 CREATE INDEX idx_dim_sets_default ON dimension_sets (owner_user_id, is_default);
+CREATE INDEX idx_dim_sets_shared ON dimension_sets (is_shared);
 ```
 
 **字段语义**：
 
 - `is_system=1`：系统内置的默认维度集，不可删除、不可改名，但可通过 `/reset` 端点恢复默认内容
 - `is_default=1`：用户当前激活的集合，启动精读时默认使用此集合的维度。每用户至多一个 `is_default=1`
+- `is_shared=1`：该集合已共享给其他用户，其他用户可浏览并基于此集合创建自己的副本。共享集合仍由 owner 管理
 - `name`：用户自定义集合名，系统集默认名为"默认维度集"
 
 **种子数据**：应用启动时自动为每个用户创建系统默认集合，并从 `ANALYSIS_DIMENSIONS` 填充 12+1 个维度条目。
@@ -653,6 +668,7 @@ CREATE TABLE dimension_items (
     default_question TEXT NOT NULL DEFAULT '',   -- 默认分析问题
     sort_order      INTEGER NOT NULL DEFAULT 0,
     is_builtin      INTEGER NOT NULL DEFAULT 0, -- 1=系统预置维度 0=用户自建
+    group_name      TEXT,                       -- 分组名称（nullable），用于前端按组展示维度
     created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at      DATETIME NOT NULL DEFAULT (datetime('now')),
     UNIQUE (set_id, dim_key)                    -- 集合内维度 key 不重复
@@ -670,11 +686,72 @@ CREATE INDEX idx_dim_items_builtin ON dimension_items (set_id, is_builtin);
   - 可追溯属于哪个集合
   - 在 `ReadingItem.item_key` 中形成 `long.计量论文_a3f2`，与历史数据格式兼容
 
+**`group_name` 字段**：
+
+- 可选分组标签，用于前端将维度按组折叠展示
+- 同一集合内的维度可共享相同的 `group_name`，属于同一组的维度连续排列
+- 为 NULL 时表示不分组，平铺展示
+
 **与 prompt_templates 的关系**：
 
 - 系统内置维度的提示词覆盖继续走 `prompt_templates` 表（用户覆盖 > 系统默认 > 文件兜底 > 代码兜底）
 - 用户自建维度的提示词直接存在 `prompt_content` 字段，不经过 `prompt_templates`
 - 详细设计见 [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)
+
+### 3.16 `dimension_templates` — 系统预设维度模板（v1.5 新增）
+
+> 目的：保存系统预设的维度模板，供用户快速创建维度集合。模板由管理员维护，用户不能直接修改模板，但可以基于模板创建自己的维度集合副本。
+
+```sql
+CREATE TABLE dimension_templates (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,              -- 模板名称，如"计量经济学论文"
+    description     TEXT,                       -- 模板描述
+    category        TEXT NOT NULL,              -- 分类，如"quantitative"/"qualitative"/"mixed"
+    dim_count       INTEGER NOT NULL,           -- 包含的维度数量
+    preview_json    TEXT,                       -- 预览用 JSON（维度列表摘要）
+    group_config    TEXT,                       -- 分组配置 JSON
+    is_featured     INTEGER NOT NULL DEFAULT 1, -- 是否精选模板（前端优先展示）
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_dim_tpl_category ON dimension_templates (category);
+CREATE INDEX idx_dim_tpl_featured ON dimension_templates (is_featured);
+```
+
+**字段语义**：
+
+- `category`：模板分类标签，用于前端筛选。常见值：`quantitative`（计量/定量）、`qualitative`（定性）、`mixed`（综合）、`theory`（理论）、`case_study`（案例研究）等
+- `dim_count`：模板包含的维度数量，冗余字段避免每次 COUNT 查询
+- `preview_json`：格式如 `[{"key":"rq","name":"研究问题"},{"key":"theory","name":"理论框架"}]`，用于前端模板卡片预览
+- `group_config`：分组配置，格式如 `{"groups":[{"name":"基本信息","keys":["overview","rq"]},{"name":"方法","keys":["method","data"]}]}`，`group_name` 来源
+- `is_featured=1`：精选模板，前端模板选择页置顶展示
+
+**种子数据**：系统启动时从代码或 JSON 文件幂等导入预设模板，管理员可通过 API 增删改模板。
+
+### 3.17 `template_items` — 模板维度条目（v1.5 新增）
+
+> 目的：保存每个预设模板包含的具体维度定义，结构与 `dimension_items` 类似，但不绑定用户，属于系统级数据。
+
+```sql
+CREATE TABLE template_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id     INTEGER NOT NULL REFERENCES dimension_templates(id) ON DELETE CASCADE,
+    dim_key         TEXT NOT NULL,              -- 维度英文标识
+    dim_name        TEXT NOT NULL,              -- 中文显示名
+    description     TEXT,                       -- 维度描述
+    prompt_content  TEXT NOT NULL DEFAULT '',    -- 该维度的完整提示词
+    default_question TEXT NOT NULL DEFAULT '',   -- 默认分析问题
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    group_name      TEXT,                       -- 分组名称（nullable），与 dimension_items.group_name 对应
+    is_builtin      INTEGER NOT NULL DEFAULT 1, -- 预设模板条目默认为系统内置
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (template_id, dim_key)               -- 模板内维度 key 不重复
+);
+
+CREATE INDEX idx_tpl_items_template ON template_items (template_id);
+```
 
 ## 4. 级联删除规则
 
@@ -684,6 +761,7 @@ CREATE INDEX idx_dim_items_builtin ON dimension_items (set_id, is_builtin);
 | 删除 `bib_entries` | DB 级联删 bib_filter_links、job_bib_entries、reading_items、以其为 `source_bib_entry_id` 的 `bib_references / bib_reference_citations`（**只删关联/结构化结果**）；通过应用层逻辑清理仅由本档案独占的 jobs/artifacts |
 | 删除 `files` | 应用层处理：清空所有引用该 file 的 `bib_entries.source_file_id`；若 file 是 filter job 的 input，禁止删除（除非任务已完成） |
 | 删除 `jobs` | DB 级联删 job_bib_entries、reading_items、artifacts，以及以其为 `source_job_id` 的 `bib_references / bib_reference_citations`；不动 bib_entries 本身 |
+| 删除 `dimension_templates` | DB 级联删 `template_items`（ON DELETE CASCADE） |
 
 **应用层级联清理 bib_entries 时的逻辑**：
 ```python
@@ -806,6 +884,20 @@ LEFT JOIN dimension_items i ON s.id = i.set_id
 WHERE s.owner_user_id = 1
 GROUP BY s.id
 ORDER BY s.sort_order;
+
+-- 所有精选维度模板（含维度数量验证）（v1.5）
+SELECT t.id, t.name, t.category, t.dim_count, COUNT(ti.id) AS actual_count
+FROM dimension_templates t
+LEFT JOIN template_items ti ON t.id = ti.template_id
+WHERE t.is_featured = 1
+GROUP BY t.id
+ORDER BY t.sort_order;
+
+-- 模板 T1 的完整维度列表（含分组）（v1.5）
+SELECT ti.dim_key, ti.dim_name, ti.group_name, ti.sort_order
+FROM template_items ti
+WHERE ti.template_id = 1
+ORDER BY ti.sort_order;
 ```
 
 ## 7. SQLAlchemy 2.0 模型骨架（参考）
@@ -882,6 +974,7 @@ class DimensionSet(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_shared: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
@@ -904,8 +997,49 @@ class DimensionItem(Base):
     default_question: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_builtin: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    group_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+
+class DimensionTemplate(Base):
+    __tablename__ = "dimension_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    dim_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    preview_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    group_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_featured: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+    items: Mapped[list["TemplateItem"]] = relationship("TemplateItem", back_populates="template", cascade="all, delete-orphan")
+
+
+class TemplateItem(Base):
+    __tablename__ = "template_items"
+    __table_args__ = (
+        UniqueConstraint("template_id", "dim_key", name="uq_tpl_items_template_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    template_id: Mapped[int] = mapped_column(
+        ForeignKey("dimension_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    dim_key: Mapped[str] = mapped_column(String, nullable=False)
+    dim_name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prompt_content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    default_question: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    group_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_builtin: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+    template: Mapped["DimensionTemplate"] = relationship("DimensionTemplate", back_populates="items")
 ```
 
 ## 8. 迁移管理
@@ -930,6 +1064,9 @@ backend/migrations/versions/
 ├── 005_add_reference_trace_tables.py  # bib_references / bib_reference_citations + jobs/artifacts 扩展
 ├── 006_add_bib_entry_volume_issue_pages.py  # bib_entries 新增 volume/issue/pages 字段
 ├── 007_add_dimension_sets_and_items.py  # dimension_sets + dimension_items（用户自定义维度集合）
+├── 008_add_dimension_shared_and_group.py  # dimension_sets 新增 is_shared，dimension_items 新增 group_name
+├── 009_add_dimension_templates.py  # dimension_templates + template_items（系统预设维度模板）
+├── 010_seed_dimension_templates.py  # 预设模板种子数据导入
 └── (后续新增字段时追加)
 ```
 
@@ -964,8 +1101,24 @@ backend/migrations/versions/
 | VIP 试用期 | `users.vip_expires_at` |
 | 团队/共享空间 | 不在本期，需要新增 `workspaces` 中间层（暂不规划） |
 | 用户自定义精读维度集合 | `dimension_sets` + `dimension_items`（v1.4 已建表，详见 [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)） |
+| 系统预设维度模板 | `dimension_templates` + `template_items`（v1.5 已建表，详见 [DIMENSION_TEMPLATE_PLAN.md](./DIMENSION_TEMPLATE_PLAN.md)） |
 
-## 10. 风险与注意事项
+## 10. 业务与表对应速查
+
+| 业务模块 | 核心表 | 辅助表 |
+|---|---|---|
+| 用户认证 | `users` | `invite_codes`、`user_settings` |
+| 文件管理 | `files` | `upload_batches` |
+| 文献档案 | `bib_entries` ⭐ | — |
+| 题录筛选 | `jobs(filter)`、`bib_filter_links` | `artifacts(filter_excel)` |
+| 精读（长文本/七步/四步） | `jobs(reading_*)`、`reading_items` | `artifacts(reading_final)` |
+| 对比综述 | `jobs(compare/synthesis)`、`job_bib_entries` | `artifacts(compare_md/synthesis_md)` |
+| 参考文献梳理 | `bib_references`、`bib_reference_citations` | `artifacts(references_excel/citation_trace_md)` |
+| 提示词管理 | `prompt_templates` | — |
+| 维度集合（用户自建） | `dimension_sets`、`dimension_items` | — |
+| 维度模板（系统预设） | `dimension_templates`、`template_items` | — |
+
+## 11. 风险与注意事项
 
 1. **SQLite 并发**：开启 WAL 模式（`PRAGMA journal_mode=WAL`），写并发足够支撑当前规模；用 `aiosqlite` 驱动。
 2. **物理文件与 DB 一致性**：所有"文件 + DB 记录"操作走 try/finally，DB 失败时回滚物理写入。

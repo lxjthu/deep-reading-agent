@@ -19,8 +19,9 @@
 5. 文献精读
 6. 对比分析与综述
 7. 文献库
-8. 提示词管理
-9. 历史记录与下载
+8. 维度模板市场
+9. 提示词管理
+10. 历史记录与下载
 
 每一节都尽量回答 4 个问题：
 
@@ -40,6 +41,7 @@
 | 精读 | `LongTab / QuantTab / QualTab` | `routers/reading.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `reading_final` |
 | 对比综述 | `compare_*.html` | `routers/compare.py`、`routers/history.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `compare_md`、`synthesis_md` |
 | 文献库 | `LibraryTab.tsx` | `routers/library.py` | `bib_entries`、`bib_filter_links`、`job_bib_entries`、`artifacts` | 时间线产物 |
+| 维度模板市场 | `DimensionMarketTab` | `routers/dimensions.py` | `dimension_templates`、`template_items`、`dimension_sets`、`dimension_items` | 用户维度集 |
 | 提示词管理 | `PromptsTab` | `routers/prompts.py`、`prompt_service.py` | `prompt_templates` | 无 |
 | 历史记录 / 下载 | `HistoryTab`、`download.ts` | `routers/history.py`、`routers/download.py` | `jobs`、`artifacts` | 各类产物文件 |
 
@@ -456,9 +458,85 @@ API Key 本身没有单独的后端管理接口。
 | 时间线 | `jobs + job_bib_entries + artifacts` |
 | 下载按钮 | `download.ts.downloadWithAuth(...)` |
 
-## 10. 提示词管理链路
+## 10. 维度模板市场链路
 
 ## 10.1 前端状态
+
+入口组件：
+
+- `DimensionMarketTab`
+
+关键状态：
+
+- `templates` (`Template[]`) - 预设模板列表，来自 `GET /api/dimensions/templates`
+- `userSets` - 用户自有维度集，来自 `GET /api/dimensions/sets`，过滤非系统集
+- `sharedSets` - 其他用户分享的维度集，来自 `GET /api/dimensions/shared`
+- `detailTarget` (`TemplateDetail | null`) - 当前查看的模板/维度集详情
+- `aiFile`、`aiDimCount`、`aiStep`、`aiResult` - AI 生成向导状态
+- `importPreview`、`importFile` - 文档导入状态
+
+这些状态分别表示：
+
+- 预设模板市场列表与详情
+- 用户自己的维度集管理
+- 社区分享的维度集浏览与导入
+- AI 辅助生成维度的向导流程
+- 文档（Word/Markdown）导入维度的预览与确认
+
+## 10.2 API 映射
+
+| 前端动作 | API | 后端函数 |
+|---|---|---|
+| 拉预设模板列表 | `GET /api/dimensions/templates` | `dimensions.py.list_templates(...)` |
+| 拉模板详情 | `GET /api/dimensions/templates/{id}` | `dimensions.py.get_template(...)` |
+| 导入预设模板 | `POST /api/dimensions/templates/{id}/import` | `dimensions.py.import_template(...)` |
+| 拉用户维度集 | `GET /api/dimensions/sets` | `dimensions.py.list_user_sets(...)` |
+| 克隆维度集 | `POST /api/dimensions/sets/{id}/clone` | `dimensions.py.clone_set(...)` |
+| 切换分享状态 | `PATCH /api/dimensions/sets/{id}/share` | `dimensions.py.toggle_share(...)` |
+| 删除维度集 | `DELETE /api/dimensions/sets/{id}` | `dimensions.py.delete_set(...)` |
+| 拉社区分享集 | `GET /api/dimensions/shared` | `dimensions.py.list_shared(...)` |
+| 导入分享集 | `POST /api/dimensions/shared/{id}/import` | `dimensions.py.import_shared(...)` |
+| AI 生成维度 | `POST /api/dimensions/generate` | `dimensions.py.generate(...)` |
+| 保存 AI 生成结果 | `POST /api/dimensions/generate/save` | `dimensions.py.save_generated(...)` |
+| 文档导入预览 | `POST /api/dimensions/import/preview` | `dimensions.py.import_preview(...)` |
+| 确认文档导入 | `POST /api/dimensions/import/confirm` | `dimensions.py.import_confirm(...)` |
+
+## 10.3 数据库映射
+
+主要读取：
+
+- `dimension_templates`
+- `template_items`
+- `dimension_sets`
+- `dimension_items`
+
+主要写入：
+
+- `dimension_sets`（`is_shared` 字段）
+- `dimension_items`（`group_name` 字段）
+
+导入逻辑：
+
+1. 导入预设模板 / 社区分享集时，创建新 `DimensionSet` 行
+2. 复制对应模板/分享集的所有 `DimensionItem` 行到新维度集
+3. AI 生成保存时，创建 `DimensionSet` + 多条 `DimensionItem` 行
+4. 文档导入确认时，创建 `DimensionSet` + 解析出的 `DimensionItem` 行
+5. 删除维度集时检查是否有 `Job` 正在使用，有则拒绝
+
+## 10.4 页面显示来源
+
+| 页面内容 | 数据来源 |
+|---|---|
+| 预设模板卡片列表 | `GET /api/dimensions/templates` |
+| 模板详情弹窗 | `GET /api/dimensions/templates/{id}` |
+| 我的维度集列表 | `GET /api/dimensions/sets` |
+| 社区分享列表（含分享者） | `GET /api/dimensions/shared`（含 `owner_name`） |
+| AI 生成结果预览 | `POST /api/dimensions/generate` 返回 |
+| 文档导入预览 | `POST /api/dimensions/import/preview` 返回 |
+
+## 11. 提示词管理链路
+
+## 11.1 前端状态
 
 入口组件：
 
@@ -487,7 +565,7 @@ API Key 本身没有单独的后端管理接口。
 - 系统默认内容
 - 当前来源与操作提示
 
-## 10.2 API 映射
+## 11.2 API 映射
 
 | 前端动作 | API | 后端函数 |
 |---|---|---|
@@ -497,7 +575,7 @@ API Key 本身没有单独的后端管理接口。
 | 恢复默认 | `DELETE /api/prompts/my?type=&key=` | `prompts.py.reset_my_prompt(...)` |
 | 保存系统默认 | `PUT /api/prompts/system` | `prompts.py.save_system_prompt(...)` |
 
-## 10.3 数据库映射
+## 11.3 数据库映射
 
 主要涉及：
 
@@ -517,7 +595,7 @@ API Key 本身没有单独的后端管理接口。
 3. 文件兜底
 4. 代码兜底
 
-## 10.4 页面显示来源
+## 11.4 页面显示来源
 
 | 页面内容 | 数据来源 |
 |---|---|
@@ -527,9 +605,9 @@ API Key 本身没有单独的后端管理接口。
 | 系统默认输入框 | `systemContent` |
 | 来源标签 | `source` |
 
-## 11. 历史记录与下载链路
+## 12. 历史记录与下载链路
 
-## 11.1 前端状态
+## 12.1 前端状态
 
 入口组件：
 
@@ -542,7 +620,7 @@ API Key 本身没有单独的后端管理接口。
 - `synthesisFiles`
 - `loading`
 
-## 11.2 API 映射
+## 12.2 API 映射
 
 | 前端动作 | API | 后端函数 |
 |---|---|---|
@@ -552,7 +630,7 @@ API Key 本身没有单独的后端管理接口。
 | 预览文件 | `GET /api/history/{filename}/preview` | `history.py.preview_file(...)` |
 | 下载文件 | `GET /api/download/{file_path:path}` | `download.py.download_file(...)` |
 
-## 11.3 数据库映射
+## 12.3 数据库映射
 
 主要涉及：
 
@@ -560,7 +638,7 @@ API Key 本身没有单独的后端管理接口。
 - `artifacts`
 - 可选通过 `job_bib_entries` 回溯关联文献
 
-## 11.4 页面显示来源
+## 12.4 页面显示来源
 
 | 页面内容 | 数据来源 |
 |---|---|
@@ -568,9 +646,9 @@ API Key 本身没有单独的后端管理接口。
 | 预览按钮 | `openPreviewWithAuth(...)` |
 | 下载按钮 | `downloadWithAuth(...)` |
 
-## 12. 最近重点改动的影响范围
+## 13. 最近重点改动的影响范围
 
-## 12.0 参考文献文本提取层迁移（pypdf → pdfplumber）
+## 13.0 参考文献文本提取层迁移（pypdf → pdfplumber）
 
 影响层：
 
@@ -595,7 +673,7 @@ API Key 本身没有单独的后端管理接口。
 - API 接口结构
 - 深度阅读主链路（使用 PaddleOCR 独立提取）
 
-## 12.1 注册密码规则前置
+## 13.1 注册密码规则前置
 
 影响层：
 
@@ -611,7 +689,7 @@ API Key 本身没有单独的后端管理接口。
 - token
 - 文献业务
 
-## 12.2 API Key 按账号隔离
+## 13.2 API Key 按账号隔离
 
 影响层：
 
@@ -631,7 +709,7 @@ API Key 本身没有单独的后端管理接口。
 - 数据库
 - 后端 API 结构
 
-## 12.3 七步/四步综述交互修复
+## 13.3 七步/四步综述交互修复
 
 影响层：
 
@@ -649,7 +727,7 @@ API Key 本身没有单独的后端管理接口。
 - 跨步骤累计选题
 - 已选数量提示
 
-## 12.4 提示词中心上线
+## 13.4 提示词中心上线
 
 影响层：
 
@@ -665,9 +743,9 @@ API Key 本身没有单独的后端管理接口。
 - `frontend/src/App.tsx`
 - `backend/migrations/versions/004_add_prompt_templates.py`
 
-## 13. 排查问题时的判断路径
+## 14. 排查问题时的判断路径
 
-## 13.1 先看页面状态，还是先看 API？
+## 14.1 先看页面状态，还是先看 API？
 
 建议用下面的判断方式：
 
@@ -702,7 +780,7 @@ API Key 本身没有单独的后端管理接口。
 - 后端聚合逻辑
 - `reading_items` / `bib_filter_links` / `artifacts` 等中间层表
 
-## 14. 后续维护建议
+## 15. 后续维护建议
 
 - 新增一个重要页面时，建议补它的状态、API、数据库映射到本文件。
 - 新增一个重要表时，也建议把它加入第 2 节的总映射表。

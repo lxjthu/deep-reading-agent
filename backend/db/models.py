@@ -567,6 +567,7 @@ class DimensionSet(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_shared: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
@@ -575,8 +576,11 @@ class DimensionSet(Base):
         DateTime, nullable=False, server_default=func.current_timestamp()
     )
 
+    owner = relationship("User", lazy="joined")
+
 
 Index("idx_dim_sets_owner", DimensionSet.owner_user_id)
+Index("idx_dim_sets_shared", DimensionSet.is_shared)
 Index("idx_dim_sets_default", DimensionSet.owner_user_id, DimensionSet.is_default)
 
 
@@ -597,6 +601,7 @@ class DimensionItem(Base):
     default_question: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_builtin: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    group_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )

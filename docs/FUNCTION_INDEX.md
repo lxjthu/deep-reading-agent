@@ -447,6 +447,48 @@
 | `export_data(user, db)` | GET /api/data/export 导出接口 | 导出 API 问题 |
 | `import_data(file, user, db)` | POST /api/data/import 导入接口 | 导入 API 问题 |
 
+## 2.24 `backend/routers/dimensions.py` (22 endpoints)
+
+文件：
+
+- [dimensions.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/routers/dimensions.py)
+
+Key functions/endpoints:
+| Function/Endpoint | Purpose | When to look |
+|---|---|---|
+| `list_sets` GET /sets | List user's dimension sets with item count | Set list display issues |
+| `toggle_share` PATCH /sets/{id}/share | Toggle is_shared on a set | Share/unshare not working |
+| `delete_set` DELETE /sets/{id} | Delete unused set (checks Job usage) | Delete fails or allows used set |
+| `clone_set` POST /sets/{id}/clone | Clone a user set with all items | Clone issues |
+| `list_shared` GET /shared | List other users' shared sets (with owner joined) | Shared list not showing |
+| `import_shared` POST /shared/{id}/import | Import shared set (copies items with group_name) | Import shared fails |
+| `import_template` POST /templates/{id}/import | Import preset template | Template import fails |
+| `generate_template` POST /generate | AI generate dimensions from paper via DeepSeek | AI generation errors |
+| `save_generated` POST /generate/save | Save AI-generated template as user set | Save fails |
+| `preview_document_import` POST /import/preview | Parse TXT/MD/JSON dimension doc | Import preview issues |
+| `confirm_document_import` POST /import/confirm | Save imported document dimensions | Import confirm fails |
+
+## 2.25 `backend/services/ai_template_generator.py`
+
+文件：
+
+- [ai_template_generator.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/ai_template_generator.py)
+
+| Function | Purpose | When to look |
+|---|---|---|
+| `generate_dimension_template(text, dim_count, api_key)` | Call DeepSeek to generate dimensions from paper text | AI generation returns bad results, meta-prompt tuning |
+
+## 2.26 `backend/services/document_parser.py`
+
+文件：
+
+- [document_parser.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/document_parser.py)
+
+| Function | Purpose | When to look |
+|---|---|---|
+| `parse_dimension_document(content, filename)` | Parse TXT/MD/JSON files into dimension list | Document import parsing errors |
+| `ParseError` | Custom exception for parse failures | Error handling |
+
 ## 3. 前端函数索引
 
 ## 3.1 `frontend/src/RootApp.tsx`
@@ -640,6 +682,28 @@
 | `toggleDim(...)` | 勾选/取消维度 | 维度选择状态异常 |
 | `updateUI()` | 刷新按钮和对比区域 | 选择后页面不更新 |
 | `renderComparisonTable()` | 渲染长文本对比表 | 长文本表格问题 |
+
+## 3.10 `frontend/src/TemplateMarket.tsx`
+
+文件：
+
+- [TemplateMarket.tsx](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/src/TemplateMarket.tsx)
+
+Key functions:
+| Function | Purpose | When to look |
+|---|---|---|
+| `loadTemplates` | Fetch preset templates | Template list not loading |
+| `loadUserSets` | Fetch user's own sets | User sets not showing |
+| `loadSharedSets` | Fetch other users' shared sets | Shared section not showing |
+| `importTemplate` | Import preset template | Import button not working |
+| `cloneUserSet` | Clone user's own set | Clone fails |
+| `toggleShare` | Toggle share/unshare | Share toggle not working |
+| `deleteSet` | Delete unused custom set | Delete not working |
+| `importSharedSet` | Import shared set from other user | Shared import fails |
+| `startAiGeneration` | Start AI dimension generation | AI wizard errors |
+| `saveAiResult` | Save AI-generated dimensions | AI save fails |
+| `previewDocumentImport` | Preview uploaded dimension doc | Document preview errors |
+| `confirmDocumentImport` | Confirm document import | Document import fails |
 
 ## 4. 常见修改场景速查
 

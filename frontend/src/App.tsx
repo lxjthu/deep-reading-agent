@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import './index.css'
 import LibraryTab from './LibraryTab'
 import ReferenceTraceTab from './ReferenceTraceTab'
+import TemplateMarket from './TemplateMarket'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import { useAuthStore } from './store/auth'
 
@@ -473,7 +474,7 @@ function App() {
           {activeTab === 'compare-4step' && <CompareTab title="四步法对比分析" src="/compare_4step.html" />}
           {activeTab === 'library' && <LibraryTab apiKey={apiKey} />}
           {activeTab === 'references' && <ReferenceTraceTab apiKey={apiKey} />}
-          {activeTab === 'prompts' && <PromptsTab />}
+          {activeTab === 'prompts' && <PromptsTab apiKey={apiKey} />}
           {activeTab === 'history' && <HistoryTab />}
         </div>
       </main>
@@ -1363,47 +1364,93 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
 
           {dimMessage && <div className={`mb-2 text-xs ${dimMessage.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>{dimMessage}</div>}
 
-          <div className="space-y-0.5">
-            {(dimensionItems.length > 0 ? dimensionItems : ALL_DIMS.map((name, i) => ({ id: -(i + 1), dim_name: name, is_builtin: true }))).map((item: any, idx: number) => (
-              <div
-                key={item.id || item.dim_name}
-                draggable={dimensionItems.length > 0}
-                onDragStart={() => setDragIdx(idx)}
-                onDragOver={e => { e.preventDefault(); setOverIdx(idx) }}
-                onDragLeave={() => setOverIdx(null)}
-                onDrop={onDragEnd}
-                className={`rounded transition-colors ${
-                  dragIdx !== null && dragIdx === idx ? 'opacity-40' : ''
-                } ${
-                  overIdx !== null && overIdx === idx && dragIdx !== idx ? 'border-t-2 border-emerald-400' : ''
-                }`}
-              >
-                <div className="flex items-center gap-1.5 p-1.5 hover:bg-gray-50 text-sm group cursor-grab active:cursor-grabbing">
-                  <span className="text-gray-300 text-[10px] select-none">⠿</span>
-                  <input type="checkbox" checked={dims.includes(item.dim_name)} onChange={() => toggleDim(item.dim_name)} className="rounded text-emerald-600 shrink-0" />
-                  <span className="text-gray-700 flex-1 truncate">{item.dim_name}</span>
-                  {dimensionItems.length > 0 && (
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <button onClick={() => startEditDim(item)} className="rounded px-1 py-0.5 text-[10px] text-blue-500 hover:bg-blue-50" title="编辑">✏</button>
-                      <button onClick={() => deleteDim(item)} className="rounded px-1 py-0.5 text-[10px] text-red-400 hover:bg-red-50" title="删除">✕</button>
+          {(() => {
+            const allItems = dimensionItems.length > 0 ? dimensionItems : ALL_DIMS.map((name, i) => ({ id: -(i + 1), dim_name: name, is_builtin: true }))
+            const hasGroups = dimensionItems.length > 0 && dimensionItems.some((it: any) => it.group_name)
+            if (!hasGroups) {
+              return (
+                <div className="space-y-0.5">
+                  {allItems.map((item: any, idx: number) => (
+                    <div
+                      key={item.id || item.dim_name}
+                      draggable={dimensionItems.length > 0}
+                      onDragStart={() => setDragIdx(idx)}
+                      onDragOver={e => { e.preventDefault(); setOverIdx(idx) }}
+                      onDragLeave={() => setOverIdx(null)}
+                      onDrop={onDragEnd}
+                      className={`rounded transition-colors ${dragIdx !== null && dragIdx === idx ? 'opacity-40' : ''} ${overIdx !== null && overIdx === idx && dragIdx !== idx ? 'border-t-2 border-emerald-400' : ''}`}
+                    >
+                      <div className="flex items-center gap-1.5 p-1.5 hover:bg-gray-50 text-sm group cursor-grab active:cursor-grabbing">
+                        <span className="text-gray-300 text-[10px] select-none">⠿</span>
+                        <input type="checkbox" checked={dims.includes(item.dim_name)} onChange={() => toggleDim(item.dim_name)} className="rounded text-emerald-600 shrink-0" />
+                        <span className="text-gray-700 flex-1 truncate">{item.dim_name}</span>
+                        {dimensionItems.length > 0 && (
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <button onClick={() => startEditDim(item)} className="rounded px-1 py-0.5 text-[10px] text-blue-500 hover:bg-blue-50" title="编辑">✏</button>
+                            <button onClick={() => deleteDim(item)} className="rounded px-1 py-0.5 text-[10px] text-red-400 hover:bg-red-50" title="删除">✕</button>
+                          </div>
+                        )}
+                      </div>
+                      {editingDim?.id === item.id && (
+                        <div className="ml-6 mt-1 mb-2 rounded-lg border border-amber-200 bg-amber-50/30 p-3 space-y-2">
+                          <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="维度名称" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                          <input value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="描述（可选）" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                          <input value={editQuestion} onChange={e => setEditQuestion(e.target.value)} placeholder="默认问题" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                          <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)} placeholder="提示词内容" rows={4} className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+                          <div className="flex gap-2">
+                            <button onClick={saveEditDim} className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700">保存</button>
+                            <button onClick={() => setEditingDim(null)} className="rounded bg-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-300">取消</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
-                {editingDim?.id === item.id && (
-                  <div className="ml-6 mt-1 mb-2 rounded-lg border border-amber-200 bg-amber-50/30 p-3 space-y-2">
-                    <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="维度名称" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
-                    <input value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="描述（可选）" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
-                    <input value={editQuestion} onChange={e => setEditQuestion(e.target.value)} placeholder="默认问题" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
-                    <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)} placeholder="提示词内容" rows={4} className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
-                    <div className="flex gap-2">
-                      <button onClick={saveEditDim} className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700">保存</button>
-                      <button onClick={() => setEditingDim(null)} className="rounded bg-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-300">取消</button>
+              )
+            }
+            const groupMap: Record<string, any[]> = {}
+            const groupOrder: string[] = []
+            dimensionItems.forEach((item: any) => {
+              const g = item.group_name || '其他'
+              if (!groupMap[g]) { groupMap[g] = []; groupOrder.push(g) }
+              groupMap[g].push(item)
+            })
+            return (
+              <div className="space-y-3">
+                {groupOrder.map(group => (
+                  <div key={group} className="rounded-lg border border-gray-200 p-2">
+                    <div className="mb-1.5 text-xs font-medium text-gray-500">{group}</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-0.5">
+                      {groupMap[group].map((item: any) => (
+                        <div key={item.id || item.dim_name}>
+                          <div className="flex items-center gap-1.5 p-1.5 hover:bg-gray-50 rounded text-sm group">
+                            <input type="checkbox" checked={dims.includes(item.dim_name)} onChange={() => toggleDim(item.dim_name)} className="rounded text-emerald-600 shrink-0" />
+                            <span className="text-gray-700 flex-1 truncate">{item.dim_name}</span>
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                              <button onClick={() => startEditDim(item)} className="rounded px-1 py-0.5 text-[10px] text-blue-500 hover:bg-blue-50" title="编辑">✏</button>
+                              <button onClick={() => deleteDim(item)} className="rounded px-1 py-0.5 text-[10px] text-red-400 hover:bg-red-50" title="删除">✕</button>
+                            </div>
+                          </div>
+                          {editingDim?.id === item.id && (
+                            <div className="ml-4 mt-1 mb-2 rounded-lg border border-amber-200 bg-amber-50/30 p-3 space-y-2">
+                              <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="维度名称" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                              <input value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="描述（可选）" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                              <input value={editQuestion} onChange={e => setEditQuestion(e.target.value)} placeholder="默认问题" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                              <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)} placeholder="提示词内容" rows={4} className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+                              <div className="flex gap-2">
+                                <button onClick={saveEditDim} className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700">保存</button>
+                                <button onClick={() => setEditingDim(null)} className="rounded bg-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-300">取消</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
+            )
+          })()}
 
           {dimensionItems.length > 0 && (
             <button
@@ -1847,8 +1894,42 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
   )
 }
 
-// Tab 4: 提示词管理
-function PromptsTab() {
+// Tab 4: 提示词管理（带子Tab：提示词编辑 / 模板市场）
+function PromptsTab({ apiKey }: { apiKey: string }) {
+  const [promptSubTab, setPromptSubTab] = useState<'editor' | 'market'>('editor')
+
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex gap-1 rounded-xl border border-gray-200 bg-white p-1">
+        <button
+          onClick={() => setPromptSubTab('editor')}
+          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            promptSubTab === 'editor'
+              ? 'bg-emerald-50 text-emerald-700 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          提示词管理
+        </button>
+        <button
+          onClick={() => setPromptSubTab('market')}
+          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            promptSubTab === 'market'
+              ? 'bg-emerald-50 text-emerald-700 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          模板市场
+        </button>
+      </div>
+      {promptSubTab === 'editor' && <PromptsEditor />}
+      {promptSubTab === 'market' && <TemplateMarket apiKey={apiKey} />}
+    </div>
+  )
+}
+
+// 提示词编辑器（原 PromptsTab 内容）
+function PromptsEditor() {
   const user = useAuthStore((state) => state.user)
   const [promptType, setPromptType] = useState('long')
   const [currentKey, setCurrentKey] = useState('overview')

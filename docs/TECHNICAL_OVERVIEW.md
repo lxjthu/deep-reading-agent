@@ -97,7 +97,17 @@
 - 提示词优先级解析
 - 前端统一管理 quant / qual / long / filter
 
-### 2.8 数据导入导出
+### 2.8 维度模板市场
+
+- 系统预设模板（案例研究 12 维度、社会网络分析 12 维度、Ostrom 制度分析 20 维度）
+- 用户浏览预设模板并一键导入为自己的维度集
+- AI 生成模板：上传种子论文，DeepSeek 自动生成分析维度
+- 文档导入：从 TXT/MD/JSON 文件导入维度定义
+- 共享功能：用户可将自建维度集分享到模板市场，其他用户看到后一键导入
+- 删除功能：删除未使用的自定义维度集（后端检查使用状态）
+- 维度分组显示：精读结果按 `group_name` 分组渲染
+
+### 2.9 数据导入导出
 
 - 一键导出所有用户数据为 `.dra` 格式（JSON + 物理文件打包）
 - 一键导入 `.dra` 文件恢复数据
@@ -105,7 +115,7 @@
 - 支持跨设备/跨实例迁移
 - 普通用户数据 24h 到期前可导出备份
 
-### 2.9 历史记录与下载
+### 2.10 历史记录与下载
 
 - 历史精读结果
 - 历史综述结果
@@ -1464,6 +1474,56 @@ export_20260506_username.dra
 - **MissingGreenlet**：`db.flush()` 后访问 `user.id` 触发 lazy load，在 async session 中报 greenlet 错误。解决方案：flush 前保存 `uid = user.id; urole = user.role` 到局部变量
 - **文件恢复时机**：最初在事务内查询 storage_path，但 commit 后 session 已关闭。解决方案：先收集所有恢复信息，再执行文件复制
 
+### 8.11 维度模板市场（Phase 3）
+
+改动目标：
+
+- 在自定义维度（Phase 1/2）基础上，新增模板市场，让用户可以浏览预设模板、AI 生成模板、从文档导入维度、共享和删除维度集
+- 修复 33 维度 bug：LLM meta-prompt 强制包含 13 个系统默认维度，导致用户自定义维度集无法独立生效
+
+落点文件：
+
+- `frontend/src/TemplateMarket.tsx`（新建，~750 行）— 模板市场组件，含列表/详情/AI 生成/文档导入 4 个面板，共享集展示、分享/删除按钮
+- `frontend/src/App.tsx` — PromptsTab 增加子标签页（"提示词管理" / "模板市场"），LongTab 增加分组维度渲染
+- `backend/routers/dimensions.py` — 从 12 个端点扩展到 22 个，Phase 3 新增 10 个：
+  - `PATCH /sets/{set_id}/share` — 切换维度集共享状态
+  - `GET /shared` — 列出其他用户的共享维度集
+  - `POST /shared/{set_id}/import` — 导入他人共享的维度集
+  - `POST /generate` — AI 从种子论文生成维度模板（预览）
+  - `POST /generate/save` — 保存 AI 生成的模板
+  - `POST /import/preview` — 预览文档导入的维度解析结果
+  - `POST /import/confirm` — 确认文档导入
+  - `POST /templates/{id}/import` — 导入系统预设模板
+  - `GET /templates/{id}` — 获取预设模板详情
+  - `GET /templates` — 列出所有预设模板
+- `backend/services/ai_template_generator.py`（新建）— 调用 DeepSeek API 从种子论文生成分析维度
+- `backend/services/document_parser.py`（新建）— 解析 TXT/MD/JSON 格式的维度定义文档
+- `backend/db/models.py` — `DimensionSet` 新增 `is_shared` 字段和 `owner` relationship；`DimensionItem` 新增 `group_name` 字段
+- `backend/template_seed.py` — 3 套预设模板定义（案例研究 12 维度、社会网络分析 12 维度、Ostrom 制度分析 20 维度）
+- `backend/migrations/versions/009_add_dim_item_group_name.py` — dimension_items 表新增 group_name 列
+- `backend/migrations/versions/010_add_dim_set_is_shared.py` — dimension_sets 表新增 is_shared 列
+
+数据模型变更：
+
+- `dimension_sets` 表：新增 `is_shared` INTEGER 列（默认 0）
+- `dimension_items` 表：新增 `group_name` TEXT 列（nullable）
+- `dimension_templates` 表：系统预设模板（Phase 2 migration 008 已创建）
+- `template_items` 表：预设模板的维度条目（Phase 2 migration 008 已创建）
+
+Bug 修复：
+
+- **33 维度 bug**：精读 LLM meta-prompt 在用户选择自定义维度集时，仍强制追加 13 个系统默认维度，导致实际分析维度远超预期。修复后 meta-prompt 仅包含用户选定的维度集内容
+
+当前结果：
+
+- PromptsTab 内含"提示词管理"和"模板市场"两个子标签页
+- 用户可浏览 3 套预设模板并一键导入
+- 用户可上传种子论文让 AI 生成分析维度
+- 用户可从 TXT/MD/JSON 文件导入维度定义
+- 用户可将自建维度集共享到模板市场，其他用户可一键导入
+- LongTab 精读结果按 group_name 分组渲染维度
+- 自定义维度集不再被强制追加系统默认维度
+
 ## 9. 改代码时的推荐查找路径
 
 ## 9.1 要改注册/登录/权限
@@ -1556,6 +1616,18 @@ export_20260506_username.dra
 - `backend/services/queue_manager.py`
 - `backend/tests/test_queue_manager.py`
 - `docs/MIGRATION_PLAN_10PLUS_USERS.md` 第 1.3 节
+
+## 9.11 要改维度模板市场
+
+先看：
+
+- `backend/routers/dimensions.py`（22 个端点，共享/导入/AI 生成/模板管理）
+- `backend/services/ai_template_generator.py`（AI 生成模板逻辑）
+- `backend/services/document_parser.py`（文档导入解析）
+- `backend/template_seed.py`（预设模板定义）
+- `backend/db/models.py`（DimensionSet / DimensionItem / DimensionTemplate 模型）
+- `frontend/src/TemplateMarket.tsx`（模板市场组件）
+- `frontend/src/App.tsx`（PromptsTab 子标签页、LongTab 分组渲染）
 
 ## 10. 当前仍在规划、未实施的能力
 

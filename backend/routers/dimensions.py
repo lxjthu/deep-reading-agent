@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
+import tempfile
 import uuid
 from datetime import UTC, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,6 +102,7 @@ async def list_sets(
                 "description": ds.description,
                 "is_default": bool(ds.is_default),
                 "is_system": bool(ds.is_system),
+                "is_shared": bool(ds.is_shared),
                 "item_count": count,
                 "sort_order": ds.sort_order,
             }
@@ -225,6 +230,140 @@ async def delete_set(
     await db.execute(delete(DimensionSet).where(DimensionSet.id == set_id))
     await db.commit()
     return {"success": True}
+
+
+@router.patch("/sets/{set_id}/share")
+async def toggle_share(
+    set_id: int,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ds = await _get_user_set(db, set_id, user.id)
+    if ds.is_system:
+        raise HTTPException(status_code=400, detail="系统集合不可共享")
+    new_val = 0 if ds.is_shared else 1
+    await db.execute(
+        update(DimensionSet)
+        .where(DimensionSet.id == set_id)
+        .values(is_shared=new_val)
+    )
+    await db.commit()
+    return {"id": set_id, "is_shared": bool(new_val)}
+
+
+@router.get("/shared")
+async def list_shared(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            select(DimensionSet)
+            .where(
+                DimensionSet.is_shared == 1,
+                DimensionSet.owner_user_id != user.id,
+            )
+            .order_by(DimensionSet.created_at.desc())
+        )
+    ).scalars().all()
+    result = []
+    for ds in rows:
+        count = (
+            await db.execute(
+                select(func.count()).select_from(DimensionItem).where(
+                    DimensionItem.set_id == ds.id
+                )
+            )
+        ).scalar() or 0
+        owner_name = ds.owner.username if ds.owner else "未知"
+        result.append(
+            {
+                "id": ds.id,
+                "name": ds.name,
+                "description": ds.description,
+                "item_count": count,
+                "owner_name": owner_name,
+            }
+        )
+    return result
+
+
+@router.post("/shared/{set_id}/import", status_code=status.HTTP_201_CREATED)
+async def import_shared(
+    set_id: int,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ds = (
+        await db.execute(
+            select(DimensionSet).where(
+                DimensionSet.id == set_id,
+                DimensionSet.is_shared == 1,
+            )
+        )
+    ).scalar_one_or_none()
+    if ds is None:
+        raise HTTPException(status_code=404, detail="共享集合不存在")
+
+    new_name = ds.name
+    suffix = 1
+    while True:
+        dup = (
+            await db.execute(
+                select(DimensionSet).where(
+                    DimensionSet.owner_user_id == user.id,
+                    DimensionSet.name == new_name,
+                )
+            )
+        ).scalar_one_or_none()
+        if dup is None:
+            break
+        suffix += 1
+        new_name = f"{ds.name} ({suffix})"
+
+    max_order = (
+        await db.execute(
+            select(func.coalesce(func.max(DimensionSet.sort_order), -1)).where(
+                DimensionSet.owner_user_id == user.id
+            )
+        )
+    ).scalar()
+
+    new_ds = DimensionSet(
+        owner_user_id=user.id,
+        name=new_name,
+        description=ds.description,
+        is_default=0,
+        is_system=0,
+        is_shared=0,
+        sort_order=max_order + 1,
+    )
+    db.add(new_ds)
+    await db.flush()
+
+    items = (
+        await db.execute(
+            select(DimensionItem)
+            .where(DimensionItem.set_id == set_id)
+            .order_by(DimensionItem.sort_order)
+        )
+    ).scalars().all()
+    for item in items:
+        db.add(
+            DimensionItem(
+                set_id=new_ds.id,
+                dim_key=item.dim_key,
+                dim_name=item.dim_name,
+                description=item.description,
+                prompt_content=item.prompt_content,
+                default_question=item.default_question,
+                sort_order=item.sort_order,
+                group_name=item.group_name,
+                is_builtin=0,
+            )
+        )
+    await db.commit()
+    return {"id": new_ds.id, "name": new_ds.name}
 
 
 @router.post("/sets/{set_id}/activate")
@@ -388,6 +527,7 @@ async def list_items(
             "default_question": it.default_question,
             "sort_order": it.sort_order,
             "is_builtin": bool(it.is_builtin),
+            "group_name": it.group_name,
         }
         for it in items
     ]
@@ -657,8 +797,261 @@ async def import_template(
                 default_question=item.default_question,
                 sort_order=item.sort_order,
                 is_builtin=1,
+                group_name=item.group_name,
             )
         )
 
     await db.commit()
     return {"id": ds.id, "name": ds.name, "dim_count": len(items)}
+
+
+# ---------------------------------------------------------------------------
+# AI Generation
+# ---------------------------------------------------------------------------
+
+_generation_cache: dict[str, dict] = {}
+
+
+
+class SaveGeneratedRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    category: str = "AI生成"
+    dimensions: list[dict]
+
+
+@router.post("/generate")
+async def generate_template(
+    file_upload: Optional[UploadFile] = File(None),
+    file_id: Optional[str] = Form(None),
+    dim_count: int = Form(12),
+    api_key: Optional[str] = Form(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    print(f"[generate] file_upload={file_upload}, file_id={file_id}, dim_count={dim_count}, api_key={'***' if api_key else None}")
+    import traceback as _tb
+    from services.ai_template_generator import generate_template_from_paper
+
+    try:
+        text = ""
+        if file_id:
+            from db.models import File
+
+            file_record = (
+                await db.execute(select(File).where(File.id == int(file_id)))
+            ).scalar_one_or_none()
+            if file_record is None:
+                raise HTTPException(status_code=404, detail="文件不存在")
+
+            storage_path = file_record.storage_path  # type: ignore[attr-defined]
+            if not storage_path or not os.path.exists(storage_path):
+                raise HTTPException(status_code=400, detail="文件路径无效")
+
+            from routers.reading import extract_paper_text
+
+            text = extract_paper_text(storage_path) or ""
+        elif file_upload:
+            content = await file_upload.read()
+            fname = file_upload.filename or "upload.txt"
+            ext = os.path.splitext(fname)[1].lower()
+            if ext == ".pdf":
+                import tempfile
+
+                tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+                try:
+                    tmp.write(content)
+                    tmp.close()
+                    from routers.reading import extract_paper_text
+
+                    text = extract_paper_text(tmp.name) or ""
+                finally:
+                    if os.path.exists(tmp.name):
+                        os.unlink(tmp.name)
+            else:
+                text = content.decode("utf-8", errors="ignore")
+        else:
+            raise HTTPException(status_code=400, detail="请提供 file_id 或上传文件")
+
+        if not text or len(text.strip()) < 100:
+            raise HTTPException(status_code=400, detail="无法从文件中提取有效文本（至少需要100字符）")
+
+        cache_key = hashlib.md5(text[:1000].encode()).hexdigest()
+        if cache_key in _generation_cache:
+            return _generation_cache[cache_key]
+
+        result = generate_template_from_paper(
+            paper_text=text,
+            api_key=api_key or "",
+            dim_count=dim_count,
+        )
+
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+
+        _generation_cache[cache_key] = result
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        _tb.print_exc()
+        raise HTTPException(status_code=500, detail=f"生成失败: {e}")
+
+
+@router.post("/generate/save")
+async def save_generated_template(
+    body: SaveGeneratedRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    new_name = body.name
+    suffix = 1
+    while True:
+        dup = (
+            await db.execute(
+                select(DimensionSet).where(
+                    DimensionSet.owner_user_id == user.id,
+                    DimensionSet.name == new_name,
+                )
+            )
+        ).scalar_one_or_none()
+        if dup is None:
+            break
+        suffix += 1
+        new_name = f"{body.name} ({suffix})"
+
+    ds = DimensionSet(
+        owner_user_id=user.id,
+        name=new_name,
+        description=body.description,
+        is_default=0,
+        is_system=0,
+    )
+    db.add(ds)
+    await db.flush()
+
+    for idx, dim in enumerate(body.dimensions):
+        dim_key = f"ai_{re.sub(r'[^\w]', '_', dim.get('dim_name', ''))[:20]}_{idx}"
+        db.add(
+            DimensionItem(
+                set_id=ds.id,
+                dim_key=dim_key,
+                dim_name=dim.get("dim_name", f"维度{idx + 1}"),
+                description=dim.get("description"),
+                prompt_content=dim.get("prompt_content", ""),
+                default_question=dim.get("default_question", ""),
+                sort_order=idx,
+                is_builtin=0,
+                group_name=dim.get("group_name"),
+            )
+        )
+
+    await db.commit()
+    return {"id": ds.id, "name": ds.name, "dim_count": len(body.dimensions)}
+
+
+# ---------------------------------------------------------------------------
+# Document Import
+# ---------------------------------------------------------------------------
+
+
+class ConfirmImportRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    dimensions: list[dict]
+
+
+@router.post("/import/preview")
+async def preview_import(
+    file: UploadFile,
+    user: User = Depends(current_user),
+):
+    from services.document_parser import ParseError, parse_document
+
+    try:
+        content = await file.read()
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="文件编码错误，请保存为 UTF-8 格式后重试",
+        )
+
+    ext = os.path.splitext(file.filename or ".txt")[1]
+
+    try:
+        result = parse_document(text, ext)
+    except ParseError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
+
+    return {
+        "template_name": result.get("template_name", ""),
+        "description": result.get("description", ""),
+        "dimension_count": len(result.get("dimensions", [])),
+        "dimensions": [
+            {
+                "dim_name": d.get("dim_name", ""),
+                "description": d.get("description", ""),
+                "default_question": d.get("default_question", ""),
+                "prompt_content": d.get("prompt_content", ""),
+                "group_name": d.get("group_name"),
+            }
+            for d in result.get("dimensions", [])
+        ],
+    }
+
+
+@router.post("/import/confirm")
+async def confirm_import(
+    body: ConfirmImportRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    new_name = body.name
+    suffix = 1
+    while True:
+        dup = (
+            await db.execute(
+                select(DimensionSet).where(
+                    DimensionSet.owner_user_id == user.id,
+                    DimensionSet.name == new_name,
+                )
+            )
+        ).scalar_one_or_none()
+        if dup is None:
+            break
+        suffix += 1
+        new_name = f"{body.name} ({suffix})"
+
+    ds = DimensionSet(
+        owner_user_id=user.id,
+        name=new_name,
+        description=body.description,
+        is_default=0,
+        is_system=0,
+    )
+    db.add(ds)
+    await db.flush()
+
+    for idx, dim in enumerate(body.dimensions):
+        db.add(
+            DimensionItem(
+                set_id=ds.id,
+                dim_key=f"import_{idx}",
+                dim_name=dim.get("dim_name", f"维度{idx + 1}"),
+                description=dim.get("description"),
+                prompt_content=dim.get("prompt_content", ""),
+                default_question=dim.get("default_question", ""),
+                sort_order=idx,
+                is_builtin=0,
+                group_name=dim.get("group_name"),
+            )
+        )
+
+    await db.commit()
+    return {"id": ds.id, "name": ds.name, "dim_count": len(body.dimensions)}
