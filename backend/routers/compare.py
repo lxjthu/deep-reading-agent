@@ -1129,11 +1129,13 @@ async def synthesize_dimensions(
             user_message = metadata_block + "\n\n" + dim_prompt
 
             response = client.chat.completions.create(
-                model="deepseek-reasoner",
+                model="deepseek-v4-flash",
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
                     {"role": "user", "content": user_message},
                 ],
+                temperature=0.65,
                 max_tokens=4000,
             )
 
@@ -1237,7 +1239,8 @@ async def synthesize_long_dimensions(
             user_message = metadata_block + "\n\n" + dim_prompt
 
             response = client.chat.completions.create(
-                model="deepseek-reasoner",
+                model="deepseek-v4-flash",
+                extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
                     {"role": "user", "content": user_message},
