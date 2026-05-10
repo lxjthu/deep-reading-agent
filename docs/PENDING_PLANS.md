@@ -11,6 +11,7 @@
 | P0.5 | 双栏 PDF 参考文献提取修复 | **已完成（2026-05-03）** | 建议在 P0 进入实施前先修 | [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | pypdf 对 CJK 编码双栏 PDF 的文本提取完全失败（中文乱码），需切换为 pdfplumber。影响所有中文学术期刊论文的参考文献提取。 |
 | P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
 | P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **部分完成**，核心 bug 未修 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 合并为独立模块，不侵入现有代码。详见下方 2.2 节。 |
+| P2.5 | AI 综述二次引用目录过滤 | **待修复** | AI 综述模块已上线 | 无 | 当前 `build_gbt7714_references()` 将所有 BibReference 都放入二次引用目录，应只保留综述正文实际引用过的文献。详见下方 2.2.1 节。 |
 
 | ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
 | P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
@@ -254,6 +255,21 @@ PDF 结构复杂度：
 - **新建独立模块**（如 `backend/services/synthesis_builder.py`），封装：引用列表构建（含兜底）、提示词组装、引用锚点注入
 - **不修改 `compare.py` 现有函数**，新模块作为上游数据准备层被 compare 流程调用
 - 保证现有功能不受影响，新模块可独立测试和回退
+
+### 2.2.1 AI 综述二次引用目录过滤（P2.5）
+
+**状态：待修复（2026-05-10 记录）**
+
+**问题**：`build_gbt7714_references()` 当前将所有从 BibReference 收集到的参考文献都放入「二次引用文献」目录，但 LLM 生成的综述正文只引用了其中一小部分。结果：参考文献目录膨胀，大量未引用的条目被列出。
+
+**修复思路**：
+
+1. 综述正文全部维度拼接完成后，扫描全文中的 `(作者, 年份)` / `(Author et al., Year)` 引用标注
+2. 用正则提取所有引用标注，构建「已引用集合」
+3. 二次引用目录只保留被综述正文实际引用过的条目
+4. 匹配逻辑：`format_cite_tag()` 生成的标签与正文中的标注做交叉匹配
+
+**涉及文件**：`backend/routers/compare.py` 的 `build_gbt7714_references()` 函数
 
 ### ~~2.3 文献综述提示词纳入提示词管理~~
 
