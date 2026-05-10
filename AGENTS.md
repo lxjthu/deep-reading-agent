@@ -56,6 +56,7 @@ new_architecture/
 筛选题录 → Job(filter) → BibEntry + BibFilterLink → Artifact(filter_excel)
 精读     → Job(reading_*) → ReadingItem + Artifact(reading_final) → 自动提取参考文献
 对比综述 → 从 ReadingItem 聚合 → Job(compare) → Artifact(compare_md/synthesis_md)
+AI综述  → /synthesis 或 /synthesis_long → 串行逐维度 deepseek-v4-flash → Artifact(synthesis_md) + GB/T 7714 参考文献
 文献库   → BibEntry 聚合展示（关联筛选评分、精读结果、时间线产物）
 ```
 
@@ -70,7 +71,7 @@ new_architecture/
 - **任务类型**：filter / reading_long / reading_quant / reading_qual / compare / synthesis / reference。
 - **产物类型**：filter_excel / reading_final / compare_md / synthesis_md / references_excel 等。
 - **角色**：admin / vip / normal，normal 用户数据 24h 过期自动清理。
-- **LLM**：精读用 deepseek-reasoner，分类/筛选/对比用 deepseek-chat，参考文献用 deepseek-v4-flash。
+- **LLM**：精读用 deepseek-reasoner，分类/筛选/对比/AI综述用 deepseek-v4-flash，参考文献用 deepseek-v4-flash。
 - **文本上限**：150k 字符（超出中间截断）。
 - **PDF 提取**：PaddleOCR 优先（需远程 API），自动回退 pdfplumber。
 - **输出 Markdown**：含 YAML frontmatter，兼容 Obsidian Dataview。
@@ -106,6 +107,7 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 | 题录筛选 | `routers/filter.py` `App.tsx FilterTab` |
 | 精读 | `routers/reading.py` `conversation_engine.py` `App.tsx *Tab` |
 | 对比综述 | `routers/compare.py` `public/compare_*.html` |
+| AI综述 | `routers/compare.py`（synthesize_dimensions/synthesize_long_dimensions） |
 | 文献库 | `routers/library.py` `LibraryTab.tsx` |
 | 提示词 | `prompt_registry.py` `prompt_service.py` `routers/prompts.py` |
 | 参考文献 | `services/deepseek_refs.py` `routers/references.py` |

@@ -206,6 +206,17 @@
 | `get_structured_reading(...)` | 返回某个精读任务的结构化结果 | 对比页结构化接口 |
 | `analyze_comparison(...)` | 生成七步/四步对比综述 | 七步/四步综述生成问题 |
 | `analyze_long_comparison(...)` | 生成长文本对比综述 | 长文本综述生成问题 |
+| `SynthesisDimensionRequest` | 七步/四步 AI 综述请求体 | AI 综述请求字段问题 |
+| `SynthesisLongRequest` | 长文本 AI 综述请求体 | 长文本 AI 综述请求问题 |
+| `gather_bib_references(...)` | 从 BibReference 收集二次引用数据 | 二次引用缺失 |
+| `format_cite_tag(...)` | 中文间注法引用标注格式化 | 引用标注格式异常 |
+| `build_paper_metadata_block(...)` | 构建文献元数据+二次引用信息块 | prompt 中元数据异常 |
+| `build_synthesis_dimension_prompt(...)` | 单维度综述 prompt 构建 | 综述内容匹配不准 |
+| `_match_dimension_content(...)` | 维度内容匹配（精确→去前缀→模糊→兜底） | 维度内容找不到 |
+| `build_gbt7714_references(...)` | 生成 GB/T 7714 参考文献目录 | 参考文献格式问题 |
+| `persist_synthesis_result(...)` | 保存 synthesis_md 产物 | 综述产物保存异常 |
+| `synthesize_dimensions(...)` | `POST /synthesis` 七步/四步 AI 综述 | AI 综述生成失败 |
+| `synthesize_long_dimensions(...)` | `POST /synthesis_long` 长文本 AI 综述 | 长文本 AI 综述失败 |
 
 ## 2.13 `backend/routers/library.py`
 

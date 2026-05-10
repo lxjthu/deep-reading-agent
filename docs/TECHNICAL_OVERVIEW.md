@@ -79,6 +79,13 @@
 - 四步对比
 - 支持单问题、多问题、跨步骤综述
 - 对比优先读取结构化精读结果
+- **AI 文献综述**（2026-05-10 新增）
+  - 独立的 `/synthesis`（七步/四步）和 `/synthesis_long`（长文本）端点
+  - 按维度串行生成综述，五层写作结构（梳理总结→源流比较→学术对话→缺漏分析→新起点）
+  - 利用已提取的参考文献（BibReference）支持二次引用
+  - 正文使用中文间注法引用标注，文末生成 GB/T 7714 参考文献目录
+  - 使用 `deepseek-v4-flash` 模型（经测试 reasoner 仅慢不优，flash 性价比更高）
+  - 产物保存为 `synthesis_md` Artifact
 
 ### 2.6 我的文献库
 
@@ -561,14 +568,29 @@
 - `get_structured_reading(...)`
   - 对外提供结构化读取接口
 - `analyze_comparison(...)`
-  - 七步/四步对比综述
+  - 七步/四步对比综述（`deepseek-v4-flash`）
 - `analyze_long_comparison(...)`
-  - 长文本对比综述
+  - 长文本对比综述（`deepseek-v4-flash`）
+- `gather_bib_references(...)`
+  - 从 BibReference 收集已提取的参考文献（二次引用数据源）
+- `build_paper_metadata_block(...)`
+  - 构建文献元数据+二次引用信息块（prompt 缓存优化）
+- `build_synthesis_dimension_prompt(...)`
+  - 单维度综述 prompt 构建（含 `_match_dimension_content` 匹配逻辑）
+- `build_gbt7714_references(...)`
+  - 生成 GB/T 7714 格式参考文献目录（主要+二次引用）
+- `persist_synthesis_result(...)`
+  - 保存 synthesis_md 产物
+- `synthesize_dimensions(...)`
+  - `POST /synthesis`，七步/四步 AI 综述端点
+- `synthesize_long_dimensions(...)`
+  - `POST /synthesis_long`，长文本 AI 综述端点
 
 当前注意点：
 
-- 综述提示词目前仍主要由这里拼装
-- 未来计划迁到 `synthesis` 提示词类型
+- 旧的 `/analyze` 和 `/analyze_long` 端点保持不变，供对比分析使用
+- AI 综述使用独立的 `/synthesis` 和 `/synthesis_long` 端点
+- 综述提示词目前仍主要由这里拼装，未来可迁到 prompt_registry
 
 ## 5.9 文献库：`backend/routers/library.py`
 
@@ -1268,6 +1290,21 @@ export_20260506_username.dra
 - `/api/compare/analyze*` 生成 `Job(compare)` 和 `Artifact(compare_md)`
 - 用户保存到历史时，再由 `/api/history/synthesis/` 额外生成 `Job(synthesis)` 和 `Artifact(synthesis_md)`
 
+### 7.5.1 AI 文献综述（新，2026-05-10）
+
+- 前端「AI 综述」按钮改为调用独立端点
+  - 七步/四步：`POST /api/compare/synthesis`（dimensions 为 `[{label, step}]`）
+  - 长文本：`POST /api/compare/synthesis_long`（dimensions 为 `["维度1", "维度2"]`）
+- 数据流：
+  1. `resolve_compare_members()` — 复用现有函数解析文献
+  2. `ensure_paper_data()` — 复用，优先读结构化精读结果
+  3. `gather_bib_references()` — 新增，从 BibReference 收集二次引用
+  4. 串行逐维度调用 `deepseek-v4-flash`，每维度独立 prompt
+  5. `build_gbt7714_references()` — 新增，生成 GB/T 7714 参考文献目录
+  6. `persist_synthesis_result()` — 新增，保存为 `synthesis_md` Artifact
+- 前端三个 compare_*.html 均已改为调用新端点
+- 旧的 `/analyze` 和 `/analyze_long` 端点不受影响，仍供「对比分析」按钮使用
+
 ## 7.6 文献库与历史
 
 - 文献库围绕 `BibEntry` 聚合展示
@@ -1533,6 +1570,50 @@ Bug 修复：
 - 用户可将自建维度集共享到模板市场，其他用户可一键导入
 - LongTab 精读结果按 group_name 分组渲染维度
 - 自定义维度集不再被强制追加系统默认维度
+
+### 8.12 AI 文献综述模块
+
+改动目标：
+
+- 新增独立的 AI 文献综述端点，使用 deepseek-v4-flash 按维度串行生成高质量综述
+- 支持二次引用（利用已提取的 BibReference 数据）和 GB/T 7714 参考文献目录
+- 前端改造现有「AI 综述」按钮调用新端点，不破坏旧对比功能
+
+落点文件：
+
+- `backend/routers/compare.py`（新增约 300 行：请求模型、辅助函数、2 个端点）
+- `frontend/public/compare_7step.html`（btnSynthesis 改调 `/api/compare/synthesis`）
+- `frontend/public/compare_4step.html`（btnSynthesis 改调 `/api/compare/synthesis`）
+- `frontend/public/compare_long.html`（btnSynthesis 改调 `/api/compare/synthesis_long`）
+
+新增函数：
+
+- `SynthesisDimensionRequest` / `SynthesisLongRequest` — 请求体模型
+- `gather_bib_references()` — 从 BibReference 收集二次引用数据
+- `format_cite_tag()` — 引用标注格式化（中文间注法）
+- `build_paper_metadata_block()` — 文献元数据+二次引用信息块
+- `build_synthesis_dimension_prompt()` — 单维度综述 prompt
+- `_match_dimension_content()` — 维度内容匹配（精确→去前缀→模糊→兜底）
+- `build_gbt7714_references()` — GB/T 7714 参考文献目录生成
+- `persist_synthesis_result()` — 保存 synthesis_md 产物
+- `POST /synthesis` — 七步/四步 AI 综述端点
+- `POST /synthesis_long` — 长文本 AI 综述端点
+
+设计文档：
+
+- `docs/superpowers/specs/2026-05-10-ai-synthesis-design.md`
+- `docs/superpowers/plans/2026-05-10-ai-synthesis.md`
+
+踩坑记录：
+
+- **模型选择**：最初计划用 `deepseek-reasoner`（thinking 模式），但实测与 `deepseek-v4-flash` 相比耗时接近（25s vs 28s）、质量差异不大，而 reasoner 额外消耗 thinking tokens 且多维度串行时易超时。最终改用 `deepseek-v4-flash`
+- **"Failed to fetch"**：Vite proxy timeout 默认 60s，reasoner 多维度串行调用容易超时。改用 flash 后单维度 ~25s，不再超时
+
+当前结果：
+
+- 三个 compare 页面的「AI 综述」按钮调用新端点
+- 综述输出按维度分节，含 GB/T 7714 参考文献目录和二次引用
+- 旧的「对比分析」按钮和 `/analyze`、`/analyze_long` 端点完全不受影响
 
 ## 9. 改代码时的推荐查找路径
 
