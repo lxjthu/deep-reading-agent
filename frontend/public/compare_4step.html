@@ -699,76 +699,63 @@
       modal.classList.add('active');
       loading.style.display = 'block';
       content.style.display = 'none';
-      
+
       const papers = allReports.filter(r => selectedPapers.includes(r.filename));
       const selectedEntries = Array.from(selectedSubQuestions).map(parseQuestionKey).filter(entry => entry.stepId && entry.questionLabel);
-      const selectedStepIds = Array.from(new Set(selectedEntries.map(entry => entry.stepId)));
-      const isCrossStep = selectedStepIds.length > 1;
-      const singleStepId = selectedStepIds[0];
-      const singleStepQuestions = selectedEntries.filter(entry => entry.stepId === singleStepId).map(entry => entry.questionLabel);
-      const requestMode = isCrossStep ? 'cross' : (singleStepQuestions.length > 1 ? 'multi' : 'single');
-      const requestStep = isCrossStep ? '跨步骤综述' : getStepLabel(singleStepId);
-      const requestSubQuestions = isCrossStep ? Array.from(selectedSubQuestions) : singleStepQuestions;
+
+      const dimensions = Array.from(selectedSubQuestions).map(key => {
+        const { stepId, questionLabel } = parseQuestionKey(key);
+        return { label: questionLabel, step: getStepLabel(stepId) };
+      });
+
       const paperData = papers.map(paper => {
         const meta = buildPaperMeta(paper);
         const selectedContent = {};
-        if (isCrossStep) {
-          for (const key of selectedSubQuestions) {
-            const { stepId, questionLabel } = parseQuestionKey(key);
-            const allSubQs = getPaperSubQuestions(paper, stepId);
-            if (allSubQs[questionLabel]) selectedContent[key] = allSubQs[questionLabel];
-          }
-        } else {
-          const allSubQs = getPaperSubQuestions(paper, singleStepId);
-          for (const questionLabel of singleStepQuestions) {
-            if (allSubQs[questionLabel]) selectedContent[questionLabel] = allSubQs[questionLabel];
-          }
+        for (const key of selectedSubQuestions) {
+          const { stepId, questionLabel } = parseQuestionKey(key);
+          const allSubQs = getPaperSubQuestions(paper, stepId);
+          if (allSubQs[questionLabel]) selectedContent[questionLabel] = allSubQs[questionLabel];
         }
-        return {
-          ...meta,
-          subQuestions: selectedContent
-        };
+        return { ...meta, subQuestions: selectedContent };
       });
-      
+
       try {
         const apiKey = promptForApiKey();
         if (!apiKey) { alert('请先设置 DeepSeek API Key'); return; }
-        const response = await authFetch('/api/compare/analyze', {
+        const response = await authFetch('/api/compare/synthesis', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ step: requestStep, papers: selectedPapers, subQuestions: requestSubQuestions, paperData, api_key: apiKey, mode: requestMode })
+          body: JSON.stringify({
+            dimensions: dimensions,
+            paperData: paperData,
+            api_key: apiKey,
+          })
         });
         const result = await response.json();
-        
+
         loading.style.display = 'none';
         content.style.display = 'block';
         content.textContent = result.synthesis || '生成失败';
-        
-        // Show save button
+
         const actions = document.getElementById('synthesisActions');
         actions.style.display = 'block';
-        
-        // Save handler
+
+        const dimLabels = dimensions.map(d => d.label);
         document.getElementById('btnDownloadSynthesis').onclick = async () => {
           try {
             const saveRes = await authFetch('/api/history/synthesis/', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                dimension: isCrossStep ? `跨步骤综述（${selectedSubQuestions.size}个问题）` : requestStep + (singleStepQuestions.length > 1 ? '（多问题）' : ''),
+                dimension: dimLabels.join('、') + `（${dimLabels.length}个维度）`,
                 papers: paperData.map(p => p.title || p.filename),
                 content: result.synthesis
               })
             });
             const saveData = await saveRes.json();
-            if (saveData.success) {
-              alert('✓ 已保存到历史记录');
-            } else {
-              alert('保存失败');
-            }
-          } catch (e) {
-            alert('保存失败: ' + e.message);
-          }
+            if (saveData.success) alert('✓ 已保存到历史记录');
+            else alert('保存失败');
+          } catch (e) { alert('保存失败: ' + e.message); }
         };
       } catch (e) {
         loading.style.display = 'none';
