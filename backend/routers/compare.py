@@ -1185,3 +1185,107 @@ async def synthesize_dimensions(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/synthesis_long")
+async def synthesize_long_dimensions(
+    req: SynthesisLongRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        from openai import OpenAI
+
+        members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
+        paper_data = await ensure_paper_data(db, req.paperData, members)
+        bib_refs = await gather_bib_references(db, members)
+
+        dimensions = req.dimensions
+        if not dimensions:
+            raise HTTPException(status_code=400, detail="请至少选择 1 个维度")
+
+        job_id = await create_compare_job(
+            db, user, "synthesis",
+            {"dimensions": dimensions, "mode": "synthesis_long"},
+            members,
+        )
+        job = await db.get(Job, job_id)
+        job.status = "running"
+        job.progress = 10
+        job.current_stage = "准备长综述..."
+        job.started_at = utcnow_naive()
+        await db.flush()
+
+        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
+
+        metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
+
+        dimension_sections = []
+        total = len(dimensions)
+        for idx, dim_label in enumerate(dimensions):
+            job.current_stage = f"正在生成维度 {idx + 1}/{total}：{dim_label}"
+            job.progress = 10 + int(80 * idx / total)
+            await db.flush()
+
+            dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, "dimensions")
+            user_message = metadata_block + "\n\n" + dim_prompt
+
+            response = client.chat.completions.create(
+                model="deepseek-reasoner",
+                messages=[
+                    {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                max_tokens=4000,
+            )
+
+            content = response.choices[0].message.content
+            dimension_sections.append({"label": dim_label, "content": content or ""})
+
+        section_parts = []
+        for sec in dimension_sections:
+            section_parts.append(f"## {sec['label']}\n\n{sec['content']}")
+        synthesis_body = "\n\n".join(section_parts)
+
+        references = build_gbt7714_references(paper_data, bib_refs, members)
+        final_text = synthesis_body + "\n\n" + references
+
+        dim_labels_joined = "、".join(dimensions[:3])
+        if len(dimensions) > 3:
+            dim_labels_joined += f"等{len(dimensions)}个维度"
+        title = f"AI文献综述：{dim_labels_joined}"
+
+        full_md = build_compare_markdown(title, final_text)
+
+        storage_path = await persist_synthesis_result(
+            db, user, job_id,
+            f"synthesis_long_{job_id[:8]}.md",
+            full_md,
+        )
+
+        job.status = "success"
+        job.progress = 100
+        job.current_stage = "完成"
+        job.finished_at = utcnow_naive()
+        await db.commit()
+
+        return {
+            "synthesis": final_text,
+            "job_id": job_id,
+            "output_path": storage_path,
+            "dimension_sections": dimension_sections,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            job = await db.get(Job, job_id)
+            if job:
+                job.status = "failed"
+                job.error_msg = str(e)
+                job.finished_at = utcnow_naive()
+                await db.commit()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
