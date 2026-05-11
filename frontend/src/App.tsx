@@ -1121,6 +1121,9 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [saveAsName, setSaveAsName] = useState('')
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [overIdx, setOverIdx] = useState<number | null>(null)
+  const [batchFiles, setBatchFiles] = useState<File[]>([])
+  const [showBatchPreview, setShowBatchPreview] = useState(false)
+  const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
     isRunning,
@@ -1383,6 +1386,84 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
     }
   }
 
+  const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return
+    const allowed = ['.pdf', '.md', '.markdown']
+    const filtered = Array.from(e.target.files).filter(f => {
+      const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase()
+      return allowed.includes(ext)
+    })
+    if (filtered.length === 0) { alert('文件夹中没有找到 PDF 或 Markdown 文件'); return }
+    setBatchFiles(filtered)
+    setShowBatchPreview(true)
+  }
+
+  const removeBatchFile = (idx: number) => {
+    setBatchFiles(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const handleBatchStart = async () => {
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { alert('请先设置 DeepSeek API Key'); return }
+    if (batchFiles.length === 0) { alert('没有可处理的文件'); return }
+
+    setIsRunning(true); setProgress(0); setStage('批量上传文件中...'); setLogs([]); setPreview(''); setDownloadUrl('')
+    batchTracker.resetBatch()
+
+    try {
+      const fileIds: string[] = []
+      const failedUploads: string[] = []
+      for (let i = 0; i < batchFiles.length; i++) {
+        const f = batchFiles[i]
+        setStage(`上传文件 ${i + 1}/${batchFiles.length}: ${f.name}`)
+        try {
+          const formData = new FormData()
+          formData.append('file', f)
+          const uploadRes = await fetch('/api/upload/', { method: 'POST', body: formData })
+          const uploadData = await uploadRes.json()
+          if (uploadData.success) {
+            fileIds.push(uploadData.file_id)
+          } else {
+            failedUploads.push(f.name)
+          }
+        } catch {
+          failedUploads.push(f.name)
+        }
+      }
+
+      if (fileIds.length === 0) throw new Error('所有文件上传失败')
+      if (failedUploads.length > 0) {
+        addLog(`⚠ ${failedUploads.length} 个文件上传失败: ${failedUploads.join(', ')}`)
+      }
+      addLog(`✓ ${fileIds.length} 个文件上传成功`)
+
+      setStage('启动批量精读...')
+      const startRes = await fetch('/api/reading/batch/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_ids: fileIds,
+          mode: 'long',
+          analysis_dims: dims,
+          dimension_set_id: dimensionSetId || undefined,
+          custom_question: customQ || undefined,
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          force_overwrite: true,
+        }),
+      })
+      const startData = await startRes.json()
+      if (!startData.batch_id) throw new Error(startData.detail || '启动批量精读失败')
+
+      addLog(`✓ 批量任务已创建: ${startData.batch_id} (${fileIds.length} 篇)`)
+      setShowBatchPreview(false)
+      batchTracker.startBatchTracking(startData.batch_id)
+    } catch (error: any) {
+      setStage('错误'); addLog(`❌ ${error.message}`)
+      setIsRunning(false)
+    }
+  }
+
   const addLog = (msg: string) => setLogs(prev => [...prev, msg])
 
   return (
@@ -1396,6 +1477,15 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
             <span className="text-sm text-gray-600">点击上传 PDF / Markdown</span>
             {file && <span className="mt-2 text-xs text-emerald-600">✓ {file.name}</span>}
           </label>
+          <div className="mt-2 flex items-center gap-2">
+            <label className="flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 cursor-pointer hover:bg-blue-100 transition-colors">
+              <input type="file" {...{ webkitdirectory: 'true' }} onChange={handleFolderChange} className="hidden" />
+              上传文件夹
+            </label>
+            {batchFiles.length > 0 && (
+              <span className="text-xs text-blue-600">{batchFiles.length} 个文件待处理</span>
+            )}
+          </div>
           <p className="mt-2 text-xs text-gray-400">
             PDF 文件过大无法上传？可前往
             <a href="https://aistudio.baidu.com/paddleocr" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:text-emerald-700 underline mx-0.5">百度 PaddleOCR</a>
@@ -1618,6 +1708,28 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
                 ↓ 下载完整报告
               </button>
             )}
+          </div>
+        )}
+
+        {showBatchPreview && batchFiles.length > 0 && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg max-h-[80vh] flex flex-col">
+              <h3 className="text-base font-semibold text-gray-800 mb-3">批量精读文件列表（{batchFiles.length} 篇）</h3>
+              <div className="flex-1 overflow-y-auto space-y-1 mb-4">
+                {batchFiles.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg px-3 py-1.5 hover:bg-gray-50 text-sm">
+                    <span className="truncate text-gray-700">{f.name}</span>
+                    <button onClick={() => removeBatchFile(i)} className="text-red-400 hover:text-red-600 text-xs ml-2 shrink-0">移除</button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => { setShowBatchPreview(false); setBatchFiles([]) }} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">取消</button>
+                <button onClick={handleBatchStart} disabled={isRunning} className="rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-4 py-2 text-sm font-medium text-white hover:from-blue-700 hover:to-blue-600 disabled:opacity-50">
+                  {isRunning ? '上传中...' : `开始批量精读 (${batchFiles.length} 篇)`}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
