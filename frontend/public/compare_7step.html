@@ -338,9 +338,7 @@
           正在生成文献综述，请稍候...
         </div>
         <pre id="synthesisContent" style="display:none;"></pre>
-        <div id="synthesisActions" style="display:none; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-          <button id="btnDownloadSynthesis" class="btn-synthesis" style="background: #3b82f6;">💾 保存到历史记录</button>
-        </div>
+
       </div>
     </div>
   </div>
@@ -898,30 +896,6 @@
                   if (hint) hint.remove();
                   finalResult = parsed;
                   content.textContent = parsed.synthesis || '生成失败';
-                  const actions = document.getElementById('synthesisActions');
-                  actions.style.display = 'block';
-                  const dimLabels = dimensions.map(d => d.label);
-                  document.getElementById('btnDownloadSynthesis').onclick = async () => {
-                    try {
-                      const saveRes = await authFetch('/api/history/synthesis/', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          dimension: dimLabels.join('、') + `（${dimLabels.length}个维度）`,
-                          papers: paperData.map(p => p.title || p.filename),
-                          content: finalResult.synthesis
-                        })
-                      });
-                      const saveData = await saveRes.json();
-                      if (saveData.success) {
-                        alert('✓ 已保存到历史记录');
-                      } else {
-                        alert('保存失败');
-                      }
-                    } catch (e) {
-                      alert('保存失败: ' + e.message);
-                    }
-                  };
                 } else if (currentEvent === 'error') {
                   loading.style.display = 'none';
                   content.textContent = '生成失败: ' + (parsed.detail || '未知错误');
