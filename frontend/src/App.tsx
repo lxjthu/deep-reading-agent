@@ -1659,6 +1659,55 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       </div>
 
       <div className="space-y-4 min-w-0">
+        {batchTracker.batchId && (
+          <div className="rounded-xl border border-blue-200 bg-white p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-blue-700">批量精读进度</h3>
+              <span className="text-xs text-gray-500">
+                {batchTracker.completed + batchTracker.failed}/{batchTracker.total} 完成
+                {batchTracker.failed > 0 && <span className="text-red-500 ml-1">({batchTracker.failed} 失败)</span>}
+              </span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
+              <div
+                className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                style={{ width: `${batchTracker.total > 0 ? ((batchTracker.completed + batchTracker.failed) / batchTracker.total * 100) : 0}%` }}
+              />
+            </div>
+            {batchTracker.isBatchRunning && (
+              <p className="text-xs text-blue-600 animate-pulse mb-3">
+                正在处理第 {batchTracker.completed + batchTracker.running + 1}/{batchTracker.total} 篇...
+              </p>
+            )}
+            {!batchTracker.isBatchRunning && batchTracker.total > 0 && (
+              <p className="text-xs text-emerald-600 mb-3">
+                批量精读完成！成功 {batchTracker.completed} 篇，失败 {batchTracker.failed} 篇。
+              </p>
+            )}
+            <div className="space-y-1 max-h-60 overflow-y-auto">
+              {batchTracker.tasks.map((t, i) => (
+                <div key={t.task_id || i} className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs bg-gray-50">
+                  <span className="truncate text-gray-700 max-w-[200px]">{t.file_name}</span>
+                  <span className={
+                    t.status === 'completed' ? 'text-emerald-600 font-medium' :
+                    t.status === 'failed' || t.status === 'canceled' ? 'text-red-500' :
+                    t.status === 'running' ? 'text-blue-600 animate-pulse' :
+                    'text-gray-400'
+                  }>
+                    {t.status === 'completed' ? '✓ 完成' :
+                     t.status === 'failed' ? '✗ 失败' :
+                     t.status === 'running' ? `⟳ ${t.progress}%` :
+                     t.status === 'canceled' ? '⚠ 取消' :
+                     '○ 排队'}
+                  </span>
+                  {t.status === 'completed' && t.download_url && (
+                    <a href={`/api/download/${encodeURIComponent(t.download_url)}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline ml-2">下载</a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">■ 处理进度</h3>
           {stage && stage.startsWith('排队中') && (
