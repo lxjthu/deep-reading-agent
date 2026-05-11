@@ -577,20 +577,32 @@
   - 构建文献元数据+二次引用信息块（prompt 缓存优化）
 - `build_synthesis_dimension_prompt(...)`
   - 单维度综述 prompt 构建（含 `_match_dimension_content` 匹配逻辑）
+- `_safe_year(...)`
+  - year 值安全转换：None → "年份不详"
+- `_collect_flat_secondary_refs(...)`
+  - 将 bib_refs 展平为编号列表供 DeepSeek 识别
+- `_build_secondary_ref_check_prompt(...)`
+  - 构建让 DeepSeek 识别正文中实际引用的二次文献的 prompt
+- `_parse_cited_ref_ids(...)`
+  - 解析 DeepSeek 返回的引用编号（S1, S3 等）
+- `_filter_bib_refs_by_indices(...)`
+  - 按编号过滤 bib_refs，只保留正文引用过的二次文献
 - `build_gbt7714_references(...)`
-  - 生成 GB/T 7714 格式参考文献目录（主要+二次引用）
+  - 生成 GB/T 7714 格式参考文献目录（主要+二次引用，条目间空行）
 - `persist_synthesis_result(...)`
-  - 保存 synthesis_md 产物
+  - 保存 synthesis_md 产物（文件名格式 `综述-YYYYMMDD-作者姓.md`）
 - `synthesize_dimensions(...)`
-  - `POST /synthesis`，七步/四步 AI 综述端点
+  - `POST /synthesis`，七步/四步 AI 综述端点（SSE 流式返回）
 - `synthesize_long_dimensions(...)`
-  - `POST /synthesis_long`，长文本 AI 综述端点
+  - `POST /synthesis_long`，长文本 AI 综述端点（SSE 流式返回）
 
 当前注意点：
 
 - 旧的 `/analyze` 和 `/analyze_long` 端点保持不变，供对比分析使用
-- AI 综述使用独立的 `/synthesis` 和 `/synthesis_long` 端点
+- AI 综述使用独立的 `/synthesis` 和 `/synthesis_long` 端点，SSE `StreamingResponse` 逐维度推送
+- 二次引用过滤由 DeepSeek 识别（不用正则），复用 system prompt + metadata_block 缓存命中
 - 综述提示词目前仍主要由这里拼装，未来可迁到 prompt_registry
+- 维度内容不再截断（DeepSeek 支持百万上下文），OpenAI client timeout 300s
 
 ## 5.9 文献库：`backend/routers/library.py`
 
@@ -1578,41 +1590,57 @@ Bug 修复：
 - 新增独立的 AI 文献综述端点，使用 deepseek-v4-flash 按维度串行生成高质量综述
 - 支持二次引用（利用已提取的 BibReference 数据）和 GB/T 7714 参考文献目录
 - 前端改造现有「AI 综述」按钮调用新端点，不破坏旧对比功能
+- SSE 流式返回，每维度生成后立即推送，避免多维度长耗时超时
+- 二次引用过滤改用 DeepSeek 识别正文实际引用的文献，避免参考文献目录膨胀
 
 落点文件：
 
-- `backend/routers/compare.py`（新增约 300 行：请求模型、辅助函数、2 个端点）
-- `frontend/public/compare_7step.html`（btnSynthesis 改调 `/api/compare/synthesis`）
-- `frontend/public/compare_4step.html`（btnSynthesis 改调 `/api/compare/synthesis`）
-- `frontend/public/compare_long.html`（btnSynthesis 改调 `/api/compare/synthesis_long`）
+- `backend/routers/compare.py`（新增约 500 行：请求模型、辅助函数、SSE 端点、二次引用过滤）
+- `frontend/public/compare_7step.html`（btnSynthesis 改调 `/api/compare/synthesis`，SSE 流式读取）
+- `frontend/public/compare_4step.html`（btnSynthesis 改调 `/api/compare/synthesis`，SSE 流式读取）
+- `frontend/public/compare_long.html`（btnSynthesis 改调 `/api/compare/synthesis_long`，SSE 流式读取）
+- `frontend/vite.config.ts`（Vite proxy timeout 从 60s 调至 600s）
 
-新增函数：
+新增/修改函数：
 
 - `SynthesisDimensionRequest` / `SynthesisLongRequest` — 请求体模型
-- `gather_bib_references()` — 从 BibReference 收集二次引用数据
-- `format_cite_tag()` — 引用标注格式化（中文间注法）
+- `gather_bib_references()` — 从 BibReference 收集二次引用数据（含 volume/issue/pages/doi）
+- `format_cite_tag()` — 引用标注格式化（中文间注法，None 年份兜底"年份不详"）
+- `_safe_year()` — year 值安全转换：None → "年份不详"
 - `build_paper_metadata_block()` — 文献元数据+二次引用信息块
-- `build_synthesis_dimension_prompt()` — 单维度综述 prompt
+- `build_synthesis_dimension_prompt()` — 单维度综述 prompt（无字符截断）
 - `_match_dimension_content()` — 维度内容匹配（精确→去前缀→模糊→兜底）
-- `build_gbt7714_references()` — GB/T 7714 参考文献目录生成
-- `persist_synthesis_result()` — 保存 synthesis_md 产物
-- `POST /synthesis` — 七步/四步 AI 综述端点
-- `POST /synthesis_long` — 长文本 AI 综述端点
+- `_collect_flat_secondary_refs()` — 将 bib_refs 展平为编号列表
+- `_build_secondary_ref_check_prompt()` — 构建让 DeepSeek 识别二次引用的 prompt
+- `_parse_cited_ref_ids()` — 解析 DeepSeek 返回的引用编号
+- `_filter_bib_refs_by_indices()` — 按编号过滤 bib_refs
+- `build_gbt7714_references()` — GB/T 7714 参考文献目录（主要+二次，条目间空行）
+- `persist_synthesis_result()` — 保存 synthesis_md 产物（文件名 `综述-YYYYMMDD-作者姓.md`）
+- `POST /synthesis` — 七步/四步 AI 综述端点（SSE StreamingResponse）
+- `POST /synthesis_long` — 长文本 AI 综述端点（SSE StreamingResponse）
 
 设计文档：
 
 - `docs/superpowers/specs/2026-05-10-ai-synthesis-design.md`
 - `docs/superpowers/plans/2026-05-10-ai-synthesis.md`
+- `docs/superpowers/plans/2026-05-11-synthesis-secondary-ref-filter.md`
 
 踩坑记录：
 
 - **模型选择**：最初计划用 `deepseek-reasoner`（thinking 模式），但实测与 `deepseek-v4-flash` 相比耗时接近（25s vs 28s）、质量差异不大，而 reasoner 额外消耗 thinking tokens 且多维度串行时易超时。最终改用 `deepseek-v4-flash`
-- **"Failed to fetch"**：Vite proxy timeout 默认 60s，reasoner 多维度串行调用容易超时。改用 flash 后单维度 ~25s，不再超时
+- **"Failed to fetch"**：Vite proxy timeout 默认 60s，reasoner 多维度串行调用容易超时。改用 flash 后单维度 ~25s，但仍可能 10+ 维度超时，最终改为 SSE 流式返回 + proxy timeout 600s
+- **None 年份穿透**：`dict.get('year', 'n.d.')` 当值为 None 时返回 None 而非默认值，输出 `佚名 (None). 标题`。用 `_safe_year()` 统一处理
+- **二次引用膨胀**：`build_gbt7714_references()` 将所有 BibReference 都列入二次引用目录。改用 DeepSeek 识别正文实际引用的文献（temperature=0.1, max_tokens=500），复用 system prompt + metadata_block 前缀保持缓存命中
+- **维度内容截断**：原 `CONTENT_CHAR_LIMIT = 3000` 截断维度文本，DeepSeek 支持百万上下文无此必要，已移除
+- **OpenAI client 超时**：默认 timeout 不够，统一设为 300s（4 处 `OpenAI()` 调用）
 
 当前结果：
 
-- 三个 compare 页面的「AI 综述」按钮调用新端点
-- 综述输出按维度分节，含 GB/T 7714 参考文献目录和二次引用
+- 三个 compare 页面的「AI 综述」按钮调用新端点，SSE 逐维度流式显示
+- 综述输出按维度分节，含 GB/T 7714 参考文献目录和二次引用（仅正文引用过的）
+- 二次引用过滤由 DeepSeek 识别，非正则匹配
+- None 年份统一显示为"年份不详"
+- 产物文件名格式 `综述-YYYYMMDD-作者姓.md`
 - 旧的「对比分析」按钮和 `/analyze`、`/analyze_long` 端点完全不受影响
 
 ## 9. 改代码时的推荐查找路径

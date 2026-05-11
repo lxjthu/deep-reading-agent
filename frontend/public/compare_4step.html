@@ -699,6 +699,8 @@
       modal.classList.add('active');
       loading.style.display = 'block';
       content.style.display = 'none';
+      content.textContent = '';
+      document.getElementById('synthesisActions').style.display = 'none';
 
       const papers = allReports.filter(r => selectedPapers.includes(r.filename));
       const selectedEntries = Array.from(selectedSubQuestions).map(parseQuestionKey).filter(entry => entry.stepId && entry.questionLabel);
@@ -719,6 +721,9 @@
         return { ...meta, subQuestions: selectedContent };
       });
 
+      let finalResult = null;
+      const dimLabels = dimensions.map(d => d.label);
+
       try {
         const apiKey = promptForApiKey();
         if (!apiKey) { alert('请先设置 DeepSeek API Key'); return; }
@@ -731,16 +736,51 @@
             api_key: apiKey,
           })
         });
-        const result = await response.json();
 
-        loading.style.display = 'none';
-        content.style.display = 'block';
-        content.textContent = result.synthesis || '生成失败';
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let streamingHint = document.createElement('div');
+        streamingHint.id = 'streamingHint';
+        streamingHint.style.cssText = 'text-align:center;color:#6b7280;font-size:14px;padding:8px 0;';
+        streamingHint.textContent = '综述中……';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          let currentEvent = null, currentData = null;
+          for (const line of lines) {
+            if (line.startsWith('event: ')) currentEvent = line.slice(7).trim();
+            else if (line.startsWith('data: ')) currentData = line.slice(6);
+            else if (line === '' && currentEvent && currentData) {
+              try {
+                const parsed = JSON.parse(currentData);
+                if (currentEvent === 'dimension') {
+                  loading.style.display = 'none';
+                  content.style.display = 'block';
+                  content.textContent += `## ${parsed.label}\n\n${parsed.content}\n\n`;
+                  if (!document.getElementById('streamingHint')) {
+                    content.parentNode.insertBefore(streamingHint, content.nextSibling);
+                  }
+                } else if (currentEvent === 'complete') {
+                  const hint = document.getElementById('streamingHint');
+                  if (hint) hint.remove();
+                  content.textContent = parsed.synthesis || '生成失败';
+                  document.getElementById('synthesisActions').style.display = 'block';
+                  finalResult = parsed;
+                } else if (currentEvent === 'error') {
+                  loading.style.display = 'none';
+                  content.style.display = 'block';
+                  content.textContent = '生成失败: ' + (parsed.detail || '未知错误');
+                }
+              } catch(e) {}
+              currentEvent = null; currentData = null;
+            }
+          }
+        }
 
-        const actions = document.getElementById('synthesisActions');
-        actions.style.display = 'block';
-
-        const dimLabels = dimensions.map(d => d.label);
         document.getElementById('btnDownloadSynthesis').onclick = async () => {
           try {
             const saveRes = await authFetch('/api/history/synthesis/', {
@@ -749,7 +789,7 @@
               body: JSON.stringify({
                 dimension: dimLabels.join('、') + `（${dimLabels.length}个维度）`,
                 papers: paperData.map(p => p.title || p.filename),
-                content: result.synthesis
+                content: finalResult ? finalResult.synthesis : content.textContent
               })
             });
             const saveData = await saveRes.json();

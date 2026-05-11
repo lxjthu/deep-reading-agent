@@ -208,15 +208,20 @@
 | `analyze_long_comparison(...)` | 生成长文本对比综述 | 长文本综述生成问题 |
 | `SynthesisDimensionRequest` | 七步/四步 AI 综述请求体 | AI 综述请求字段问题 |
 | `SynthesisLongRequest` | 长文本 AI 综述请求体 | 长文本 AI 综述请求问题 |
-| `gather_bib_references(...)` | 从 BibReference 收集二次引用数据 | 二次引用缺失 |
-| `format_cite_tag(...)` | 中文间注法引用标注格式化 | 引用标注格式异常 |
+| `gather_bib_references(...)` | 从 BibReference 收集二次引用数据（含 volume/issue/pages/doi） | 二次引用缺失 |
+| `format_cite_tag(...)` | 中文间注法引用标注格式化（None 年份兜底为"年份不详"） | 引用标注格式异常 |
+| `_safe_year(...)` | year 值安全转换：None → "年份不详" | 年份显示 None |
 | `build_paper_metadata_block(...)` | 构建文献元数据+二次引用信息块 | prompt 中元数据异常 |
-| `build_synthesis_dimension_prompt(...)` | 单维度综述 prompt 构建 | 综述内容匹配不准 |
+| `build_synthesis_dimension_prompt(...)` | 单维度综述 prompt 构建（无字符截断） | 综述内容匹配不准 |
 | `_match_dimension_content(...)` | 维度内容匹配（精确→去前缀→模糊→兜底） | 维度内容找不到 |
-| `build_gbt7714_references(...)` | 生成 GB/T 7714 参考文献目录 | 参考文献格式问题 |
+| `_collect_flat_secondary_refs(...)` | 将 bib_refs 展平为 [(member_id, ref)] 列表 | 二次引用过滤 |
+| `_build_secondary_ref_check_prompt(...)` | 构建让 DeepSeek 识别正文中实际引用的二次文献的 prompt | 二次引用识别 |
+| `_parse_cited_ref_ids(...)` | 解析 DeepSeek 返回的引用编号（S1,S3 等） | 二次引用编号解析 |
+| `_filter_bib_refs_by_indices(...)` | 按编号过滤 bib_refs | 二次引用过滤结果 |
+| `build_gbt7714_references(...)` | 生成 GB/T 7714 参考文献目录（主要+二次，条目间空行） | 参考文献格式问题 |
 | `persist_synthesis_result(...)` | 保存 synthesis_md 产物 | 综述产物保存异常 |
-| `synthesize_dimensions(...)` | `POST /synthesis` 七步/四步 AI 综述 | AI 综述生成失败 |
-| `synthesize_long_dimensions(...)` | `POST /synthesis_long` 长文本 AI 综述 | 长文本 AI 综述失败 |
+| `synthesize_dimensions(...)` | `POST /synthesis` 七步/四步 AI 综述（SSE 流式返回） | AI 综述生成失败 |
+| `synthesize_long_dimensions(...)` | `POST /synthesis_long` 长文本 AI 综述（SSE 流式返回） | 长文本 AI 综述失败 |
 
 ## 2.13 `backend/routers/library.py`
 

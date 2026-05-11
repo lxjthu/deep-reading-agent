@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import StreamingResponse
 
 from auth.dependencies import current_user
 from db import PROJECT_ROOT, get_db
@@ -59,7 +60,7 @@ SYNTHESIS_SYSTEM_PROMPT = (
     "- 不要写参考文献目录，系统会自动生成\n"
 )
 
-CONTENT_CHAR_LIMIT = 3000
+
 
 
 class SynthesisDimensionRequest(BaseModel):
@@ -143,6 +144,9 @@ def bib_entry_to_paper_data(bib_entry: BibEntry) -> dict:
         "year": bib_entry.year,
         "journal": bib_entry.journal or "",
         "doi": bib_entry.doi or "",
+        "volume": bib_entry.volume or "",
+        "issue": bib_entry.issue or "",
+        "pages": bib_entry.pages or "",
         "subQuestions": {},
         "dimensions": {},
         "content": bib_entry.abstract or "",
@@ -419,6 +423,10 @@ async def gather_bib_references(
                 "authors": authors,
                 "year": ref.year,
                 "journal": ref.journal or "",
+                "volume": ref.volume or "",
+                "issue": ref.issue or "",
+                "pages": ref.pages or "",
+                "doi": ref.doi or "",
                 "raw_text": ref.raw_text or "",
             })
         result[member.id] = items
@@ -426,17 +434,103 @@ async def gather_bib_references(
 
 
 def format_cite_tag(authors: list, year) -> str:
+    year_display = year if year else "年份不详"
     if not authors:
-        return f"(佚名, {year or 'n.d.'})"
+        return f"(佚名, {year_display})"
     first = str(authors[0]).strip()
     last_name = first.split()[-1] if first else first
     if len(authors) == 1:
-        return f"({last_name}, {year or 'n.d.'})"
+        return f"({last_name}, {year_display})"
     elif len(authors) == 2:
         second = str(authors[1]).strip().split()[-1]
-        return f"({last_name} & {second}, {year or 'n.d.'})"
+        return f"({last_name} & {second}, {year_display})"
     else:
-        return f"({last_name}等, {year or 'n.d.'})"
+        return f"({last_name}等, {year_display})"
+
+
+def _safe_year(year) -> str:
+    return str(year) if year else "年份不详"
+
+
+_CITE_PATTERN = re.compile(
+    r'\('
+    r'([^,，)]+?)'
+    r'\s*[,\uff0c]\s*'
+    r'(\d{4}|年份不详|n\.d\.)'
+    r'(?:\s*,\s*转引自\s*[^)]+)?'
+    r'\)',
+    re.UNICODE,
+)
+
+
+def extract_cited_tags(text: str) -> set[str]:
+    tags = set()
+    for m in _CITE_PATTERN.finditer(text):
+        author_part = m.group(1).strip()
+        year_part = m.group(2).strip()
+        tags.add(f"({author_part}, {year_part})")
+    return tags
+
+
+def _collect_flat_secondary_refs(
+    bib_refs: dict[str, list[dict]],
+    members: list[BibEntry],
+) -> list[tuple[str, dict]]:
+    flat: list[tuple[str, dict]] = []
+    for member in members:
+        for ref in bib_refs.get(member.id, []):
+            flat.append((member.id, ref))
+    return flat
+
+
+def _build_secondary_ref_check_prompt(synthesis_body: str, flat_refs: list[tuple[str, dict]]) -> str:
+    parts = [
+        "",
+        "【任务】",
+        "以下是已生成的综述正文，以及所有候选的二次引用文献。",
+        "请判断综述正文中实际引用（包括直接引用和转引）了哪些二次引用文献。",
+        "",
+        "【综述正文】",
+        synthesis_body,
+        "",
+        "【候选二次引用文献】",
+        "",
+    ]
+    for idx, (_, ref) in enumerate(flat_refs, 1):
+        ref_cite = format_cite_tag(ref.get('authors', []), _safe_year(ref.get('year')))
+        ref_title = ref.get('title') or ref.get('raw_text', '')[:80]
+        parts.append(f"[S{idx}] {ref_cite} — {ref_title}")
+    parts.append("")
+    parts.append("【输出要求】")
+    parts.append("请只输出被综述正文实际引用的文献编号，用逗号分隔。例如：S1,S3,S7")
+    parts.append("如果没有引用任何二次引用文献，输出：无")
+    return "\n".join(parts)
+
+
+def _parse_cited_ref_ids(response_text: str) -> set[int]:
+    text = response_text.strip()
+    if "无" in text or not text:
+        return set()
+    return {int(m.group(1)) for m in re.finditer(r'S(\d+)', text)}
+
+
+def _filter_bib_refs_by_indices(
+    bib_refs: dict[str, list[dict]],
+    members: list[BibEntry],
+    cited_indices: set[int],
+) -> dict[str, list[dict]]:
+    if not cited_indices:
+        return {m.id: [] for m in members}
+    filtered: dict[str, list[dict]] = {}
+    flat_idx = 0
+    for member in members:
+        kept: list[dict] = []
+        for ref in bib_refs.get(member.id, []):
+            flat_idx += 1
+            if flat_idx in cited_indices:
+                kept.append(ref)
+        filtered[member.id] = kept
+    return filtered
 
 
 def build_paper_metadata_block(papers: list[dict], bib_refs: dict[str, list[dict]], members: list[BibEntry]) -> str:
@@ -449,7 +543,7 @@ def build_paper_metadata_block(papers: list[dict], bib_refs: dict[str, list[dict
     for i, paper in enumerate(papers):
         title = paper.get('title') or paper.get('filename') or '未知'
         authors = paper.get('authors', [])
-        year = paper.get('year', 'n.d.')
+        year = _safe_year(paper.get('year'))
         journal = paper.get('journal') or paper.get('source') or ''
         cite = format_cite_tag(authors, year)
 
@@ -474,7 +568,7 @@ def build_paper_metadata_block(papers: list[dict], bib_refs: dict[str, list[dict
             has_secondary = True
         paper = papers[i] if i < len(papers) else {}
         authors_p = paper.get('authors', [])
-        year_p = paper.get('year', 'n.d.')
+        year_p = _safe_year(paper.get('year'))
         cite_p = format_cite_tag(authors_p, year_p)
         lines.append(f"━━━ {cite_p} 引用了： ━━━")
         for j, ref in enumerate(refs[:15], 1):
@@ -535,15 +629,15 @@ def build_synthesis_dimension_prompt(
     ]
 
     for i, paper in enumerate(papers):
-        cite = format_cite_tag(paper.get('authors', []), paper.get('year', 'n.d.'))
+        cite = format_cite_tag(paper.get('authors', []), _safe_year(paper.get('year')))
         parts.append(f"━━━ 文献 {i + 1} {cite} ━━━")
 
         content_dict = paper.get(content_field, {})
         if isinstance(content_dict, dict):
             matched = _match_dimension_content(content_dict, dim_label)
-            parts.append(matched[:CONTENT_CHAR_LIMIT].strip())
+            parts.append(matched.strip())
         else:
-            parts.append(str(content_dict)[:CONTENT_CHAR_LIMIT].strip())
+            parts.append(str(content_dict).strip())
         parts.append("")
 
     return "\n".join(parts)
@@ -559,7 +653,7 @@ def build_gbt7714_references(
 
     for paper in papers:
         authors = paper.get('authors', [])
-        year = paper.get('year', 'n.d.')
+        year = _safe_year(paper.get('year'))
         title = paper.get('title') or paper.get('filename') or ''
         journal = paper.get('journal') or paper.get('source') or ''
         volume = str(paper.get('volume', '')) if paper.get('volume') else ''
@@ -576,14 +670,16 @@ def build_gbt7714_references(
 
         entry = f"[{ref_num}] {author_str}. {title}[J]."
         if journal:
-            entry += f" {journal}"
+            entry += f" {journal}, {year}"
             if volume:
                 entry += f", {volume}"
                 if issue:
-                    entry += f"({issue})"
+                    entry += f" ({issue})"
             if pages:
                 entry += f": {pages}"
             entry += "."
+        else:
+            entry += f" {year}."
         if doi:
             entry += f" DOI:{doi}"
 
@@ -596,23 +692,24 @@ def build_gbt7714_references(
     lines.append("")
     for _, entry in refs:
         lines.append(entry)
+        lines.append("")
 
     secondary_items = []
     seen_secondary = set()
     for i, member in enumerate(members):
         paper = papers[i] if i < len(papers) else {}
         authors_p = paper.get('authors', [])
-        year_p = paper.get('year', 'n.d.')
+        year_p = _safe_year(paper.get('year'))
         cite_p = format_cite_tag(authors_p, year_p)
 
         for ref in bib_refs.get(member.id, []):
             ref_authors = ref.get('authors', [])
-            ref_year = ref.get('year', 'n.d.')
+            ref_year = _safe_year(ref.get('year'))
             ref_cite = format_cite_tag(ref_authors, ref_year)
             dedup_key = f"{ref_cite}_{ref.get('title', '')}"
             if dedup_key in seen_secondary:
                 continue
-            primary_cites = {format_cite_tag(p.get('authors', []), p.get('year', 'n.d.')) for p in papers}
+            primary_cites = {format_cite_tag(p.get('authors', []), _safe_year(p.get('year'))) for p in papers}
             if ref_cite in primary_cites:
                 continue
             seen_secondary.add(dedup_key)
@@ -620,9 +717,21 @@ def build_gbt7714_references(
             author_str = ", ".join(str(a) for a in ref_authors) if ref_authors else "佚名"
             ref_title = ref.get('title') or ref.get('raw_text', '')[:80]
             ref_journal = ref.get('journal', '')
+            ref_volume = ref.get('volume', '')
+            ref_issue = ref.get('issue', '')
+            ref_pages = ref.get('pages', '')
             entry = f"[{ref_num}] {author_str}. {ref_title}[J]."
             if ref_journal:
-                entry += f" {ref_journal}."
+                entry += f" {ref_journal}, {ref_year}"
+                if ref_volume:
+                    entry += f", {ref_volume}"
+                    if ref_issue:
+                        entry += f" ({ref_issue})"
+                if ref_pages:
+                    entry += f": {ref_pages}"
+                entry += "."
+            else:
+                entry += f" {ref_year}."
             entry += f" (转引自: {cite_p})"
 
             secondary_items.append(entry)
@@ -632,7 +741,9 @@ def build_gbt7714_references(
         lines.append("")
         lines.append("### 二次引用文献")
         lines.append("")
-        lines.extend(secondary_items)
+        for entry in secondary_items:
+            lines.append(entry)
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -664,25 +775,25 @@ async def persist_synthesis_result(
 
 def format_inline_citation(authors: list, year) -> str:
     """Format inline citation: (Author et al., Year)"""
+    year_display = year if year else "年份不详"
     if not authors:
-        return f"(佚名, {year})"
-    # Try to get last name of first author
+        return f"(佚名, {year_display})"
     first = authors[0].strip()
     last_name = first.split()[-1] if first else first
     if len(authors) == 1:
-        return f"({last_name}, {year})"
+        return f"({last_name}, {year_display})"
     elif len(authors) == 2:
         second = authors[1].strip().split()[-1]
-        return f"({last_name} & {second}, {year})"
+        return f"({last_name} & {second}, {year_display})"
     else:
-        return f"({last_name} et al., {year})"
+        return f"({last_name} et al., {year_display})"
 
 
 def build_paper_header(paper: dict) -> str:
     """Build paper identification string for prompt."""
     title = paper.get('title', paper.get('filename', '未知'))
     authors = paper.get('authors', [])
-    year = paper.get('year', 'n.d.')
+    year = _safe_year(paper.get('year'))
     cite = format_inline_citation(authors, year)
     return f"【{title} {cite}】"
 
@@ -695,7 +806,7 @@ def build_reference_list(papers: list) -> str:
     refs = []
     for paper in papers:
         authors = paper.get('authors', [])
-        year = paper.get('year', 'n.d.')
+        year = _safe_year(paper.get('year'))
         title = paper.get('title', paper.get('filename', ''))
         journal = paper.get('journal') or paper.get('source', '')
         volume = str(paper.get('volume', '')) if paper.get('volume') else ''
@@ -962,7 +1073,7 @@ async def analyze_comparison(
         job.started_at = utcnow_naive()
         await db.flush()
 
-        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
+        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
 
         if mode == "cross":
             prompt = build_cross_dim_prompt(paper_data)
@@ -1036,7 +1147,7 @@ async def analyze_long_comparison(
         job.started_at = utcnow_naive()
         await db.flush()
 
-        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
+        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
 
         if mode == "multi":
             all_dims = []
@@ -1089,110 +1200,142 @@ async def synthesize_dimensions(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    try:
-        from openai import OpenAI
+    from openai import OpenAI
 
-        members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
-        paper_data = await ensure_paper_data(db, req.paperData, members)
-        bib_refs = await gather_bib_references(db, members)
+    members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
+    paper_data = await ensure_paper_data(db, req.paperData, members)
+    bib_refs = await gather_bib_references(db, members)
 
-        dimensions = req.dimensions
-        if not dimensions:
-            raise HTTPException(status_code=400, detail="请至少选择 1 个维度")
+    dimensions = req.dimensions
+    if not dimensions:
+        raise HTTPException(status_code=400, detail="请至少选择 1 个维度")
 
-        job_id = await create_compare_job(
-            db, user, "synthesis",
-            {"dimensions": dimensions, "mode": "synthesis"},
-            members,
-        )
-        job = await db.get(Job, job_id)
-        job.status = "running"
-        job.progress = 10
-        job.current_stage = "准备综述..."
-        job.started_at = utcnow_naive()
-        await db.flush()
+    job_id = await create_compare_job(
+        db, user, "synthesis",
+        {"dimensions": dimensions, "mode": "synthesis"},
+        members,
+    )
+    job = await db.get(Job, job_id)
+    job.status = "running"
+    job.progress = 10
+    job.current_stage = "准备综述..."
+    job.started_at = utcnow_naive()
+    await db.commit()
 
-        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
+    async def _stream():
+        try:
+            client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
+            metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
 
-        metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
+            dimension_sections = []
+            total = len(dimensions)
+            for idx, dim_info in enumerate(dimensions):
+                dim_label = dim_info.get("label", f"维度{idx + 1}")
 
-        dimension_sections = []
-        total = len(dimensions)
-        for idx, dim_info in enumerate(dimensions):
-            dim_label = dim_info.get("label", f"维度{idx + 1}")
+                job_cur = await db.get(Job, job_id)
+                job_cur.current_stage = f"正在生成维度 {idx + 1}/{total}：{dim_label}"
+                job_cur.progress = 10 + int(80 * idx / total)
+                await db.commit()
 
-            job.current_stage = f"正在生成维度 {idx + 1}/{total}：{dim_label}"
-            job.progress = 10 + int(80 * idx / total)
-            await db.flush()
+                dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, "subQuestions")
+                user_message = metadata_block + "\n\n" + dim_prompt
 
-            dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, "subQuestions")
-            user_message = metadata_block + "\n\n" + dim_prompt
+                response = client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    extra_body={"thinking": {"type": "disabled"}},
+                    messages=[
+                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=0.65,
+                    max_tokens=8000,
+                )
 
-            response = client.chat.completions.create(
-                model="deepseek-v4-flash",
-                extra_body={"thinking": {"type": "disabled"}},
-                messages=[
-                    {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message},
-                ],
-                temperature=0.65,
-                max_tokens=4000,
+                content = response.choices[0].message.content or ""
+                dimension_sections.append({"label": dim_label, "content": content})
+
+                yield f"event: dimension\ndata: {json.dumps({'label': dim_label, 'content': content, 'index': idx, 'total': total}, ensure_ascii=False)}\n\n"
+
+            section_parts = []
+            for sec in dimension_sections:
+                section_parts.append(f"## {sec['label']}\n\n{sec['content']}")
+            synthesis_body = "\n\n".join(section_parts)
+
+            flat_refs = _collect_flat_secondary_refs(bib_refs, members)
+            if flat_refs:
+                job_cur = await db.get(Job, job_id)
+                job_cur.current_stage = "识别二次引用..."
+                job_cur.progress = 90
+                await db.commit()
+                check_prompt = _build_secondary_ref_check_prompt(synthesis_body, flat_refs)
+                user_message = metadata_block + "\n\n" + check_prompt
+                ref_check_resp = client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    extra_body={"thinking": {"type": "disabled"}},
+                    messages=[
+                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=0.1,
+                    max_tokens=500,
+                )
+                cited_indices = _parse_cited_ref_ids(ref_check_resp.choices[0].message.content or "")
+                filtered_refs = _filter_bib_refs_by_indices(bib_refs, members, cited_indices)
+            else:
+                filtered_refs = bib_refs
+
+            references = build_gbt7714_references(paper_data, filtered_refs, members)
+            final_text = synthesis_body + "\n\n" + references
+
+            title_parts = [d.get("label", "") for d in dimensions[:3]]
+            if len(dimensions) > 3:
+                title_parts.append(f"等{len(dimensions)}个维度")
+            title = "AI文献综述：" + "、".join(title_parts)
+
+            first_authors = []
+            for p in paper_data:
+                a = p.get('authors', [])
+                first_authors.append(str(a[0]).split()[-1] if a else "佚名")
+            date_str = datetime.now(UTC).strftime("%Y%m%d")
+            authors_str = "_".join(first_authors[:3])
+            if len(first_authors) > 3:
+                authors_str += "等"
+            safe_filename = f"综述-{date_str}-{authors_str}.md"
+
+            full_md = build_compare_markdown(title, final_text)
+
+            job_cur = await db.get(Job, job_id)
+            job_cur.current_stage = "保存结果..."
+            job_cur.progress = 95
+            await db.commit()
+
+            storage_path = await persist_synthesis_result(
+                db, user, job_id,
+                safe_filename,
+                full_md,
             )
 
-            content = response.choices[0].message.content
-            dimension_sections.append({"label": dim_label, "content": content or ""})
+            job_cur.status = "success"
+            job_cur.progress = 100
+            job_cur.current_stage = "完成"
+            job_cur.finished_at = utcnow_naive()
+            await db.commit()
 
-        section_parts = []
-        for sec in dimension_sections:
-            section_parts.append(f"## {sec['label']}\n\n{sec['content']}")
-        synthesis_body = "\n\n".join(section_parts)
+            yield f"event: complete\ndata: {json.dumps({'synthesis': final_text, 'job_id': job_id, 'output_path': storage_path, 'dimension_sections': dimension_sections}, ensure_ascii=False)}\n\n"
 
-        references = build_gbt7714_references(paper_data, bib_refs, members)
-        final_text = synthesis_body + "\n\n" + references
+        except Exception as e:
+            try:
+                job_cur = await db.get(Job, job_id)
+                if job_cur:
+                    job_cur.status = "failed"
+                    job_cur.error_msg = str(e)
+                    job_cur.finished_at = utcnow_naive()
+                    await db.commit()
+            except Exception:
+                pass
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
 
-        title_parts = [d.get("label", "") for d in dimensions[:3]]
-        if len(dimensions) > 3:
-            title_parts.append(f"等{len(dimensions)}个维度")
-        title = "AI文献综述：" + "、".join(title_parts)
-
-        full_md = build_compare_markdown(title, final_text)
-
-        job.current_stage = "保存结果..."
-        job.progress = 95
-        await db.flush()
-
-        storage_path = await persist_synthesis_result(
-            db, user, job_id,
-            f"synthesis_{job_id[:8]}.md",
-            full_md,
-        )
-
-        job.status = "success"
-        job.progress = 100
-        job.current_stage = "完成"
-        job.finished_at = utcnow_naive()
-        await db.commit()
-
-        return {
-            "synthesis": final_text,
-            "job_id": job_id,
-            "output_path": storage_path,
-            "dimension_sections": dimension_sections,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        try:
-            job = await db.get(Job, job_id)
-            if job:
-                job.status = "failed"
-                job.error_msg = str(e)
-                job.finished_at = utcnow_naive()
-                await db.commit()
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=str(e))
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
 @router.post("/synthesis_long")
@@ -1201,100 +1344,136 @@ async def synthesize_long_dimensions(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    try:
-        from openai import OpenAI
+    from openai import OpenAI
 
-        members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
-        paper_data = await ensure_paper_data(db, req.paperData, members)
-        bib_refs = await gather_bib_references(db, members)
+    members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
+    paper_data = await ensure_paper_data(db, req.paperData, members)
+    bib_refs = await gather_bib_references(db, members)
 
-        dimensions = req.dimensions
-        if not dimensions:
-            raise HTTPException(status_code=400, detail="请至少选择 1 个维度")
+    dimensions = req.dimensions
+    if not dimensions:
+        raise HTTPException(status_code=400, detail="请至少选择 1 个维度")
 
-        job_id = await create_compare_job(
-            db, user, "synthesis",
-            {"dimensions": dimensions, "mode": "synthesis_long"},
-            members,
-        )
-        job = await db.get(Job, job_id)
-        job.status = "running"
-        job.progress = 10
-        job.current_stage = "准备长综述..."
-        job.started_at = utcnow_naive()
-        await db.flush()
+    job_id = await create_compare_job(
+        db, user, "synthesis",
+        {"dimensions": dimensions, "mode": "synthesis_long"},
+        members,
+    )
+    job = await db.get(Job, job_id)
+    job.status = "running"
+    job.progress = 10
+    job.current_stage = "准备长综述..."
+    job.started_at = utcnow_naive()
+    await db.commit()
 
-        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com")
+    async def _stream():
+        try:
+            client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
+            metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
 
-        metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
+            dimension_sections = []
+            total = len(dimensions)
+            for idx, dim_label in enumerate(dimensions):
+                job_cur = await db.get(Job, job_id)
+                job_cur.current_stage = f"正在生成维度 {idx + 1}/{total}：{dim_label}"
+                job_cur.progress = 10 + int(80 * idx / total)
+                await db.commit()
 
-        dimension_sections = []
-        total = len(dimensions)
-        for idx, dim_label in enumerate(dimensions):
-            job.current_stage = f"正在生成维度 {idx + 1}/{total}：{dim_label}"
-            job.progress = 10 + int(80 * idx / total)
-            await db.flush()
+                dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, "dimensions")
+                user_message = metadata_block + "\n\n" + dim_prompt
 
-            dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, "dimensions")
-            user_message = metadata_block + "\n\n" + dim_prompt
+                response = client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    extra_body={"thinking": {"type": "disabled"}},
+                    messages=[
+                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    max_tokens=8000,
+                )
 
-            response = client.chat.completions.create(
-                model="deepseek-v4-flash",
-                extra_body={"thinking": {"type": "disabled"}},
-                messages=[
-                    {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message},
-                ],
-                max_tokens=4000,
+                content = response.choices[0].message.content or ""
+                dimension_sections.append({"label": dim_label, "content": content})
+
+                yield f"event: dimension\ndata: {json.dumps({'label': dim_label, 'content': content, 'index': idx, 'total': total}, ensure_ascii=False)}\n\n"
+
+            section_parts = []
+            for sec in dimension_sections:
+                section_parts.append(f"## {sec['label']}\n\n{sec['content']}")
+            synthesis_body = "\n\n".join(section_parts)
+
+            flat_refs = _collect_flat_secondary_refs(bib_refs, members)
+            if flat_refs:
+                job_cur = await db.get(Job, job_id)
+                job_cur.current_stage = "识别二次引用..."
+                job_cur.progress = 90
+                await db.commit()
+                check_prompt = _build_secondary_ref_check_prompt(synthesis_body, flat_refs)
+                user_message = metadata_block + "\n\n" + check_prompt
+                ref_check_resp = client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    extra_body={"thinking": {"type": "disabled"}},
+                    messages=[
+                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=0.1,
+                    max_tokens=500,
+                )
+                cited_indices = _parse_cited_ref_ids(ref_check_resp.choices[0].message.content or "")
+                filtered_refs = _filter_bib_refs_by_indices(bib_refs, members, cited_indices)
+            else:
+                filtered_refs = bib_refs
+
+            references = build_gbt7714_references(paper_data, filtered_refs, members)
+            final_text = synthesis_body + "\n\n" + references
+
+            dim_labels_joined = "、".join(dimensions[:3])
+            if len(dimensions) > 3:
+                dim_labels_joined += f"等{len(dimensions)}个维度"
+            title = f"AI文献综述：{dim_labels_joined}"
+
+            first_authors = []
+            for p in paper_data:
+                a = p.get('authors', [])
+                first_authors.append(str(a[0]).split()[-1] if a else "佚名")
+            date_str = datetime.now(UTC).strftime("%Y%m%d")
+            authors_str = "_".join(first_authors[:3])
+            if len(first_authors) > 3:
+                authors_str += "等"
+            safe_filename = f"综述-{date_str}-{authors_str}.md"
+
+            full_md = build_compare_markdown(title, final_text)
+
+            job_cur = await db.get(Job, job_id)
+            job_cur.current_stage = "保存结果..."
+            job_cur.progress = 95
+            await db.commit()
+
+            storage_path = await persist_synthesis_result(
+                db, user, job_id,
+                safe_filename,
+                full_md,
             )
 
-            content = response.choices[0].message.content
-            dimension_sections.append({"label": dim_label, "content": content or ""})
+            job_cur.status = "success"
+            job_cur.progress = 100
+            job_cur.current_stage = "完成"
+            job_cur.finished_at = utcnow_naive()
+            await db.commit()
 
-        section_parts = []
-        for sec in dimension_sections:
-            section_parts.append(f"## {sec['label']}\n\n{sec['content']}")
-        synthesis_body = "\n\n".join(section_parts)
+            yield f"event: complete\ndata: {json.dumps({'synthesis': final_text, 'job_id': job_id, 'output_path': storage_path, 'dimension_sections': dimension_sections}, ensure_ascii=False)}\n\n"
 
-        references = build_gbt7714_references(paper_data, bib_refs, members)
-        final_text = synthesis_body + "\n\n" + references
+        except Exception as e:
+            try:
+                job_cur = await db.get(Job, job_id)
+                if job_cur:
+                    job_cur.status = "failed"
+                    job_cur.error_msg = str(e)
+                    job_cur.finished_at = utcnow_naive()
+                    await db.commit()
+            except Exception:
+                pass
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
 
-        dim_labels_joined = "、".join(dimensions[:3])
-        if len(dimensions) > 3:
-            dim_labels_joined += f"等{len(dimensions)}个维度"
-        title = f"AI文献综述：{dim_labels_joined}"
-
-        full_md = build_compare_markdown(title, final_text)
-
-        storage_path = await persist_synthesis_result(
-            db, user, job_id,
-            f"synthesis_long_{job_id[:8]}.md",
-            full_md,
-        )
-
-        job.status = "success"
-        job.progress = 100
-        job.current_stage = "完成"
-        job.finished_at = utcnow_naive()
-        await db.commit()
-
-        return {
-            "synthesis": final_text,
-            "job_id": job_id,
-            "output_path": storage_path,
-            "dimension_sections": dimension_sections,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        try:
-            job = await db.get(Job, job_id)
-            if job:
-                job.status = "failed"
-                job.error_msg = str(e)
-                job.finished_at = utcnow_naive()
-                await db.commit()
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=str(e))
+    return StreamingResponse(_stream(), media_type="text/event-stream")

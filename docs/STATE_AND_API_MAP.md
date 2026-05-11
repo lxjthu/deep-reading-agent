@@ -150,8 +150,8 @@ API Key 本身没有单独的后端管理接口。
 | 四步精读 | `POST /api/reading/qual/start` | `api_key` |
 | 七步/四步综述 | `POST /api/compare/analyze` | `api_key` |
 | 长文本综述 | `POST /api/compare/analyze_long` | `api_key` |
-| 七步/四步 AI 综述 | `POST /api/compare/synthesis` | `api_key` |
-| 长文本 AI 综述 | `POST /api/compare/synthesis_long` | `api_key` |
+| 七步/四步 AI 综述 | `POST /api/compare/synthesis` | `api_key` | SSE 流式 |
+| 长文本 AI 综述 | `POST /api/compare/synthesis_long` | `api_key` | SSE 流式 |
 
 ## 4.3 数据库映射
 
@@ -367,8 +367,8 @@ API Key 本身没有单独的后端管理接口。
 | 读取结构化精读结果 | `GET /api/compare/jobs/{job_id}/structured` | `compare.py.get_structured_reading(...)` |
 | 七步/四步综述（对比分析） | `POST /api/compare/analyze` | `compare.py.analyze_comparison(...)` |
 | 长文本综述（对比分析） | `POST /api/compare/analyze_long` | `compare.py.analyze_long_comparison(...)` |
-| 七步/四步 AI 综述 | `POST /api/compare/synthesis` | `compare.py.synthesize_dimensions(...)` |
-| 长文本 AI 综述 | `POST /api/compare/synthesis_long` | `compare.py.synthesize_long_dimensions(...)` |
+| 七步/四步 AI 综述 | `POST /api/compare/synthesis` | `compare.py.synthesize_dimensions(...)` | SSE 流式 |
+| 长文本 AI 综述 | `POST /api/compare/synthesis_long` | `compare.py.synthesize_long_dimensions(...)` | SSE 流式 |
 | 保存综述到历史 | `POST /api/history/synthesis/` | `history.py.save_synthesis(...)` |
 
 ## 8.3 数据库映射

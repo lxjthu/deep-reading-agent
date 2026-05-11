@@ -10,8 +10,8 @@
 | ~~P0~~ | ~~参考文献梳理标签页 + 引用关系入库~~ | **已完成（2026-05）** | 无 | [REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md) | 全链路已实现：后端 7 个 API 端点（`/api/references/*`）、DeepSeek v4-flash 提取+追踪服务、`bib_references` + `bib_reference_citations` 表+迁移、前端 `ReferenceTraceTab` 组件。 |
 | P0.5 | 双栏 PDF 参考文献提取修复 | **已完成（2026-05-03）** | 建议在 P0 进入实施前先修 | [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | pypdf 对 CJK 编码双栏 PDF 的文本提取完全失败（中文乱码），需切换为 pdfplumber。影响所有中文学术期刊论文的参考文献提取。 |
 | P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
-| P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **部分完成**，核心 bug 未修 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 合并为独立模块，不侵入现有代码。详见下方 2.2 节。 |
-| P2.5 | AI 综述二次引用目录过滤 | **待修复** | AI 综述模块已上线 | 无 | 当前 `build_gbt7714_references()` 将所有 BibReference 都放入二次引用目录，应只保留综述正文实际引用过的文献。详见下方 2.2.1 节。 |
+| P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **已完成（2026-05-11）**，P3 提示词管理未做 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | P2 兜底修复（None 年份、缺作者）、P4 引用锚点（SSE 分维度流式）、二次引用过滤（DeepSeek 识别）已完成。P3 提示词管理未纳入。 |
+| P2.5 | AI 综述二次引用目录过滤 | **已完成（2026-05-11）** | AI 综述模块已上线 | 无 | 改用 DeepSeek 识别综述正文实际引用的二次文献，复用 system prompt + metadata_block 缓存命中。 |
 | P3.5 | 批量精读（文件夹上传） | **待规划** | 无 | 无 | 支持上传整个文件夹批量精读，统一设置精读模式后逐篇排队执行。详见下方 2.8 节。 |
 
 | ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
@@ -218,59 +218,52 @@ PDF 结构复杂度：
 
 ### 2.2 AI 综述模块重构（P2 参考文献兜底 + P3 提示词管理 + P4 引用锚点）
 
-**状态：部分完成，核心问题未修。决定合并为独立模块，不侵入现有代码。**
+**状态：已完成（2026-05-11）**，P3 提示词管理未纳入。
 
-> 设计意图：将 P2（参考文献目录兜底）、P3（综述提示词管理）、P4（引用锚点强化）合并为一个独立模块。
-> 不修改 `compare.py` 现有函数，而是新建独立模块接管综述流程，确保改动隔离、可回退。
+#### 已完成的改动
 
-#### 待解决的问题
+**P2 — 参考文献目录兜底修复**
 
-**P2 — 参考文献目录兜底修复（AI 综述场景）**
+- `_safe_year()` 辅助函数统一处理 `None` 年份 → `"年份不详"`
+- `format_cite_tag()` / `format_inline_citation()` 内部 None 兜底
+- 全文 8 处 `dict.get('year', 'n.d.')` 替换为 `_safe_year()`
+- `bib_entry_to_paper_data()` 补上 `volume/issue/pages` 字段
+- `build_gbt7714_references()` 主要和二次引用均输出完整 GB/T 7714 格式（含年份、卷期、页码）
+- 参考文献条目之间增加空行分隔
+- 产物文件名改为 `综述-日期-主要作者.md`
 
-已完成：
+**P4 — 综述引用锚点强化 + SSE 流式返回**
 
-- `compare.py` 的 `build_reference_list()` 已有作者缺失 → `"佚名"` 兜底（line 409-410）
-- `compare.py` 的 `format_inline_citation()` 已有无作者 → `"(佚名, {year})"` 兜底（line 369-370）
-- `compare.py` 的 `build_reference_list()` 和 `build_paper_header()` 已有 `dict.get('year', 'n.d.')` 兜底
+- `/synthesis` 和 `/synthesis_long` 改为 `StreamingResponse(media_type="text/event-stream")`
+- 每个维度生成完立即推送 `event: dimension` 事件，前端逐维度显示
+- 完成后推送 `event: complete`，出错推送 `event: error`
+- 前端 3 个 HTML 文件（`compare_7step.html`、`compare_4step.html`、`compare_long.html`）改用 `fetch + ReadableStream` 读取
+- 流式期间底部显示"综述中……"提示
+- 维度内容不再截断（移除 `CONTENT_CHAR_LIMIT = 3000`），DeepSeek 支持百万上下文
+- OpenAI client timeout 统一设为 300 秒，Vite proxy timeout 调至 10 分钟
 
-未修复的核心 bug（均为 AI 综述生成时的问题）：
-
-1. **`None` 年份穿透**：`bib_entry.year` 为 `None` 时 `dict.get('year', 'n.d.')` 返回 `None`（键存在但值为 `None`），输出显示 `佚名 (None). 标题...`
-2. **行内引用 `None` 年份**：`format_inline_citation()` 中 `f"(佚名, {year})"` 当 `year=None` 时输出 `"(佚名, None)"`
-3. **中英文不一致**：代码使用英文 `"n.d."`，应统一为中文
-
-**P3 — 文献综述提示词纳入提示词管理**
+**P3 — 文献综述提示词纳入提示词管理（未实施）**
 
 - 将当前 `compare.py` 中硬编码的综述 prompt 迁入提示词管理
 - 新增 `synthesis` 类型，支持系统默认 + 用户覆盖
 - 建议槽位：`synthesis.system` / `synthesis.citation_guard` / `synthesis.compare_single` / `synthesis.compare_multi` / `synthesis.compare_cross` / `synthesis.long_single` / `synthesis.long_multi`
 
-**P4 — 综述引用锚点强化**
-
-- 为每篇文献生成明确 `citation_label`
-- 强约束模型正文引用必须复用系统给定标签
-- 禁止 `文献1 / 文献2 / 第一篇文献 / 上述研究`
-
-#### 实施策略
-
-- **新建独立模块**（如 `backend/services/synthesis_builder.py`），封装：引用列表构建（含兜底）、提示词组装、引用锚点注入
-- **不修改 `compare.py` 现有函数**，新模块作为上游数据准备层被 compare 流程调用
-- 保证现有功能不受影响，新模块可独立测试和回退
-
 ### 2.2.1 AI 综述二次引用目录过滤（P2.5）
 
-**状态：待修复（2026-05-10 记录）**
+**状态：已完成（2026-05-11）**
 
-**问题**：`build_gbt7714_references()` 当前将所有从 BibReference 收集到的参考文献都放入「二次引用文献」目录，但 LLM 生成的综述正文只引用了其中一小部分。结果：参考文献目录膨胀，大量未引用的条目被列出。
+**方案**：综述正文全部维度拼接完成后，将正文 + 所有候选二次引用文献列表交给 DeepSeek，让它识别正文实际引用了哪些二次引用文献。
 
-**修复思路**：
+**实施**：
 
-1. 综述正文全部维度拼接完成后，扫描全文中的 `(作者, 年份)` / `(Author et al., Year)` 引用标注
-2. 用正则提取所有引用标注，构建「已引用集合」
-3. 二次引用目录只保留被综述正文实际引用过的条目
-4. 匹配逻辑：`format_cite_tag()` 生成的标签与正文中的标注做交叉匹配
+1. `_collect_flat_secondary_refs()` — 将 bib_refs 展平为编号列表
+2. `_build_secondary_ref_check_prompt()` — 构建识别 prompt
+3. 调用 `deepseek-v4-flash`（temperature=0.1, max_tokens=500），复用 `SYNTHESIS_SYSTEM_PROMPT` + `metadata_block` 前缀保持缓存命中
+4. `_parse_cited_ref_ids()` — 解析返回的编号（S1,S3 等）
+5. `_filter_bib_refs_by_indices()` — 按编号过滤 bib_refs
+6. 过滤后的 bib_refs 传给 `build_gbt7714_references()`
 
-**涉及文件**：`backend/routers/compare.py` 的 `build_gbt7714_references()` 函数
+**涉及文件**：`backend/routers/compare.py`
 
 ### ~~2.3 文献综述提示词纳入提示词管理~~
 
