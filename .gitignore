@@ -40,3 +40,6 @@ test_*.txt
 # Database (multi-user system) — sqlite file lives at repo-root db/
 # Use a leading slash to anchor to repo root so backend/db/ (the package) is NOT ignored.
 /db/
+
+# Worktrees
+.worktrees/
