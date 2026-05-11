@@ -661,6 +661,80 @@ function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
   }
 }
 
+interface BatchTaskItem {
+  task_id: string | null
+  file_name: string
+  status: string
+  progress: number
+  stage: string
+  download_url: string
+  error?: string
+}
+
+interface BatchState {
+  batchId: string | null
+  total: number
+  completed: number
+  failed: number
+  running: number
+  queued: number
+  tasks: BatchTaskItem[]
+  isBatchRunning: boolean
+}
+
+function useBatchReadingTracker() {
+  const [state, setState] = useState<BatchState>({
+    batchId: null, total: 0, completed: 0, failed: 0, running: 0, queued: 0, tasks: [], isBatchRunning: false,
+  })
+  const pollRef = useRef<number | null>(null)
+
+  const stopPolling = () => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }
+
+  const resetBatch = () => {
+    stopPolling()
+    setState({
+      batchId: null, total: 0, completed: 0, failed: 0, running: 0, queued: 0, tasks: [], isBatchRunning: false,
+    })
+  }
+
+  const startBatchTracking = (batchId: string) => {
+    setState(prev => ({ ...prev, batchId, isBatchRunning: true }))
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/reading/batch/${batchId}/status`)
+        const data = await res.json()
+        const allDone = data.completed + data.failed >= data.total
+        setState(prev => ({
+          ...prev,
+          total: data.total,
+          completed: data.completed,
+          failed: data.failed,
+          running: data.running,
+          queued: data.queued,
+          tasks: data.tasks,
+          isBatchRunning: !allDone,
+        }))
+        if (allDone) stopPolling()
+      } catch {
+        stopPolling()
+        setState(prev => ({ ...prev, isBatchRunning: false }))
+      }
+    }
+    void poll()
+    stopPolling()
+    pollRef.current = window.setInterval(() => void poll(), 2000)
+  }
+
+  useEffect(() => () => stopPolling(), [])
+
+  return { ...state, startBatchTracking, resetBatch }
+}
+
 // Tab 0: 文献筛选
 function FilterTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [file, setFile] = useState<File | null>(null)
