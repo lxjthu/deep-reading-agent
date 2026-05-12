@@ -219,6 +219,17 @@ class SimpleReadingRequest(BaseModel):
     force_overwrite: bool = False
 
 
+class BatchReadingRequest(BaseModel):
+    file_ids: list[str]
+    mode: str  # long / quant / qual
+    analysis_dims: Optional[list[str]] = None
+    custom_question: Optional[str] = None
+    extraction_method: str = "full"
+    api_key: Optional[str] = None
+    force_overwrite: bool = False
+    dimension_set_id: Optional[int] = None
+
+
 def utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -1443,6 +1454,155 @@ async def start_qual(
     thread.start()
     
     return {"task_id": task_id, "status": "queued"}
+
+
+@router.post("/batch/start")
+async def start_batch_reading(
+    request: BatchReadingRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.file_ids:
+        raise HTTPException(status_code=400, detail="file_ids 不能为空。")
+    if request.mode not in ("long", "quant", "qual"):
+        raise HTTPException(status_code=400, detail="mode 必须是 long/quant/qual 之一。")
+    if len(request.file_ids) > 50:
+        raise HTTPException(status_code=400, detail="单次批量最多 50 个文件。")
+
+    batch_id = str(uuid.uuid4())
+    job_type_map = {"long": "reading_long", "quant": "reading_quant", "qual": "reading_qual"}
+    job_type = job_type_map[request.mode]
+    prompt_type_map = {"long": "long", "quant": "quant", "qual": "qual"}
+    prompt_type = prompt_type_map[request.mode]
+
+    prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type=prompt_type)
+
+    batch_tasks = []
+    for file_id in request.file_ids:
+        try:
+            file_record = await get_file_record(db, user, file_id)
+            ensure_readable_file_type(file_record)
+            file_path = get_file_path(file_id)
+            if not file_path:
+                batch_tasks.append({"file_id": file_id, "file_name": file_record.original_name, "task_id": None, "status": "skipped", "error": "文件路径未找到"})
+                continue
+            bib_entry = await get_or_create_bib_entry(db, user, file_record)
+            if request.force_overwrite and bib_entry.reading_status in ("reading", "read"):
+                await cleanup_old_reading_data(db, bib_entry)
+
+            params: dict = {}
+            if request.mode == "long":
+                params = {
+                    "analysis_dims": request.analysis_dims or [],
+                    "custom_question": request.custom_question,
+                    "extraction_method": request.extraction_method,
+                }
+
+            task_id = await create_reading_job(db, user, file_record, bib_entry, job_type, params)
+            await db.flush()
+            job_obj = (await db.execute(select(Job).where(Job.id == task_id))).scalar_one()
+            job_obj.batch_id = batch_id
+
+            await db.commit()
+
+            tasks[task_id] = init_task_payload(task_id, request.mode, user.id, file_id, bib_entry.id)
+            task_queue.enqueue(task_id, user.id, request.mode)
+
+            if request.mode == "long":
+                thread = threading.Thread(
+                    target=run_long_context_task,
+                    args=(task_id, user.id, bib_entry.id, file_path, request.analysis_dims or [], request.custom_question, request.extraction_method, prompt_overrides, request.api_key, request.dimension_set_id),
+                    daemon=True,
+                )
+            elif request.mode == "quant":
+                thread = threading.Thread(
+                    target=run_quant_task,
+                    args=(task_id, user.id, bib_entry.id, file_path, prompt_overrides, request.api_key),
+                    daemon=True,
+                )
+            else:
+                thread = threading.Thread(
+                    target=run_qual_task,
+                    args=(task_id, user.id, bib_entry.id, file_path, prompt_overrides, request.api_key),
+                    daemon=True,
+                )
+            thread.start()
+
+            batch_tasks.append({"file_id": file_id, "file_name": file_record.original_name, "task_id": task_id, "status": "queued"})
+        except Exception as exc:
+            batch_tasks.append({"file_id": file_id, "file_name": file_id, "task_id": None, "status": "error", "error": str(exc)[:200]})
+
+    return {"batch_id": batch_id, "tasks": batch_tasks}
+
+
+@router.get("/batch/{batch_id}/status")
+async def get_batch_status(
+    batch_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    jobs = (
+        await db.execute(
+            select(Job).where(Job.batch_id == batch_id, Job.owner_user_id == user.id)
+        )
+    ).scalars().all()
+
+    if not jobs:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    task_summaries = []
+    completed = 0
+    failed = 0
+    running = 0
+    queued = 0
+
+    for job in jobs:
+        status_str = job.status
+        if status_str == "success":
+            completed += 1
+        elif status_str in ("failed", "canceled"):
+            failed += 1
+        elif status_str == "running":
+            running += 1
+        else:
+            queued += 1
+
+        file_name = ""
+        if job.input_file_id:
+            file_rec = (await db.execute(select(File).where(File.id == job.input_file_id))).scalar_one_or_none()
+            file_name = file_rec.original_name if file_rec else ""
+
+        in_memory = tasks.get(job.id, {})
+        progress = in_memory.get("progress", job.progress or 0)
+        stage = in_memory.get("stage", job.current_stage or "")
+        download_url = ""
+        if status_str == "success":
+            artifact = (
+                await db.execute(
+                    select(Artifact).where(Artifact.job_id == job.id, Artifact.artifact_type == "reading_final").limit(1)
+                )
+            ).scalar_one_or_none()
+            if artifact:
+                download_url = artifact.storage_path
+
+        task_summaries.append({
+            "task_id": job.id,
+            "file_name": file_name,
+            "status": status_str if status_str != "success" else "completed",
+            "progress": progress,
+            "stage": stage,
+            "download_url": download_url,
+        })
+
+    return {
+        "batch_id": batch_id,
+        "total": len(jobs),
+        "completed": completed,
+        "failed": failed,
+        "running": running,
+        "queued": queued,
+        "tasks": task_summaries,
+    }
 
 
 @router.get("/task/{task_id}/status")

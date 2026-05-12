@@ -182,6 +182,9 @@
 | `start_long_context(...)` | 启动长文本任务 | 前端开始长文本无响应 |
 | `start_quant(...)` | 启动七步任务 | 前端开始七步无响应 |
 | `start_qual(...)` | 启动四步任务 | 前端开始四步无响应 |
+| `BatchReadingRequest` | 批量精读请求体（`file_ids`, `mode`, `api_key` 等） | 批量精读请求字段问题 |
+| `start_batch_reading(...)` | 批量精读入口，循环创建 Job（共享 `batch_id`） | 批量精读全部启动失败 |
+| `get_batch_status(...)` | 按 `batch_id` 聚合查询所有 job 状态 | 批量进度 404 / 状态不对 |
 
 ## 2.12 `backend/routers/compare.py`
 
@@ -585,6 +588,7 @@ Key functions/endpoints:
 | `persistReadingTaskId(...)` | 保存任务 id 到本地 | 精读任务恢复 |
 | `restoreReadingTaskId(...)` | 读取本地任务 id | 精读任务恢复 |
 | `useReadingTaskTracker(...)` | 统一管理长文本/七步/四步任务轮询状态 | 精读进度条、日志、恢复逻辑 |
+| `useBatchReadingTracker(...)` | 管理批量精读轮询状态（`batchId`, `total`, `completed`, `failed`, `tasks`） | 批量精读进度面板、轮询逻辑 |
 
 ### 3.4.3 业务组件函数
 

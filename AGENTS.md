@@ -55,6 +55,7 @@ new_architecture/
 上传 PDF/MD → files 表 → BibEntry 匹配/创建
 筛选题录 → Job(filter) → BibEntry + BibFilterLink → Artifact(filter_excel)
 精读     → Job(reading_*) → ReadingItem + Artifact(reading_final) → 自动提取参考文献
+批量精读 → POST /batch/start → 多个 Job(reading_*, 共享 batch_id) → GET /batch/{batch_id}/status 轮询进度
 对比综述 → 从 ReadingItem 聚合 → Job(compare) → Artifact(compare_md/synthesis_md)
 AI综述  → /synthesis 或 /synthesis_long → 串行逐维度 deepseek-v4-flash → Artifact(synthesis_md) + GB/T 7714 参考文献
 文献库   → BibEntry 聚合展示（关联筛选评分、精读结果、时间线产物）
@@ -106,6 +107,7 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 | 上传/文件绑定 | `routers/upload.py` `db/utils.py` |
 | 题录筛选 | `routers/filter.py` `App.tsx FilterTab` |
 | 精读 | `routers/reading.py` `conversation_engine.py` `App.tsx *Tab` |
+| 批量精读 | `routers/reading.py`（`start_batch_reading` / `get_batch_status`） `App.tsx`（`useBatchReadingTracker`） |
 | 对比综述 | `routers/compare.py` `public/compare_*.html` |
 | AI综述 | `routers/compare.py`（synthesize_dimensions/synthesize_long_dimensions） |
 | 文献库 | `routers/library.py` `LibraryTab.tsx` |

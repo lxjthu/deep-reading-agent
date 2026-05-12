@@ -12,7 +12,7 @@
 | P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
 | P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **已完成（2026-05-11）**，P3 提示词管理未做 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | P2 兜底修复（None 年份、缺作者）、P4 引用锚点（SSE 分维度流式）、二次引用过滤（DeepSeek 识别）已完成。P3 提示词管理未纳入。 |
 | P2.5 | AI 综述二次引用目录过滤 | **已完成（2026-05-11）** | AI 综述模块已上线 | 无 | 改用 DeepSeek 识别综述正文实际引用的二次文献，复用 system prompt + metadata_block 缓存命中。 |
-| P3.5 | 批量精读（文件夹上传） | **待规划** | 无 | 无 | 支持上传整个文件夹批量精读，统一设置精读模式后逐篇排队执行。详见下方 2.8 节。 |
+| ~~P3.5~~ | ~~批量精读（文件夹上传）~~ | **已完成（2026-05-11）** | 无 | [实施计划](./superpowers/plans/2026-05-11-batch-folder-reading.md) | 三个 Tab 各有「上传文件夹」按钮，复用单篇精读逻辑，`POST /batch/start` + `GET /batch/{batch_id}/status`。修复了 `create_reading_job` 后缺少 `flush` 导致 `scalar_one()` 找不到新 Job 的 bug。 |
 
 | ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
 | P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
@@ -303,23 +303,23 @@ PDF 结构复杂度：
 
 ### 2.8 批量精读（文件夹上传）（P3.5）
 
-**状态：待规划（2026-05-10 记录）**
+**状态：已完成（2026-05-11）**
 
-**需求**：支持用户上传整个文件夹（含多个 PDF/MD 文件），统一设置精读模式（七步/四步/长文本）和维度集后，逐篇排队执行精读。
+**实施内容**：
 
-**初步思路**：
+- 后端 `reading.py` 新增 `BatchReadingRequest` 模型、`POST /batch/start` 和 `GET /batch/{batch_id}/status` 两个端点
+- `POST /batch/start`：接收 `file_ids` + `mode`，循环为每个文件创建 Job 并设 `batch_id`，复用单篇精读的 `create_reading_job` + worker 线程
+- `GET /batch/{batch_id}/status`：按 `Job.batch_id` 聚合查询所有 job 状态，返回 total/completed/failed/running/queued + 每篇 task 明细
+- 前端三个精读 Tab（LongTab / QuantTab / QualTab）各增加「上传文件夹」按钮（`webkitdirectory`）、文件预览弹窗、`useBatchReadingTracker` hook 管理轮询状态、批量进度面板
+- 前端错误处理：检查 `startRes.ok` + 校验 queued 计数，全部失败时抛出明确错误不再盲目轮询
+- 修复 `create_reading_job` 后缺少 `await db.flush()` 导致 `scalar_one()` 抛 `NoResultFound` 的 bug
 
-- 前端：精读入口新增「上传文件夹」选项（`webkitdirectory` 属性），展示文件列表预览，用户确认模式和参数后一次性提交
-- 后端：新增 `POST /api/reading/batch` 端点，接收文件列表 + 精读参数，为每个文件创建独立 Job 并入队，返回 batch_id
-- 进度：前端通过 batch_id 轮询整体进度（已完成/总数/失败数），单个文件精读结果独立查看
-- 复用：文件上传、PDF 提取、精读执行均复用现有 `routers/reading.py` 的单篇逻辑
-- 并发控制：复用 `queue_manager.py` 的排队机制，按用户并发上限串行执行
+**关键决策**：
+- 文件类型过滤：前端过滤 `.pdf/.md/.markdown`，递归子目录
+- 重复处理：批量模式 `force_overwrite=true` 静默覆盖
+- 进度展示：内联进度面板（当前第 N/M 篇 + 文件列表状态），每 2 秒轮询
 
-**待确认**：
-
-- 文件夹内是否需要文件类型过滤（只取 .pdf/.md/.markdown）
-- 是否需要支持混合模式（同一文件夹内不同文件用不同精读模式）
-- 批量结果导出形式（逐篇下载 vs 打包 zip）
+无需 Alembic 迁移（`batch_id` 字段已存在于 `jobs` 表）。
 
 ### 2.7 P13 Playwright E2E + 部署验收
 

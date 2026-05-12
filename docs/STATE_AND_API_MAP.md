@@ -148,6 +148,8 @@ API Key 本身没有单独的后端管理接口。
 | 长文本精读 | `POST /api/reading/long/start` | `api_key` |
 | 七步精读 | `POST /api/reading/quant/start` | `api_key` |
 | 四步精读 | `POST /api/reading/qual/start` | `api_key` |
+| 批量精读 | `POST /api/reading/batch/start` | `api_key`, `file_ids`, `mode` |
+| 批量进度 | `GET /api/reading/batch/{batch_id}/status` | — |
 | 七步/四步综述 | `POST /api/compare/analyze` | `api_key` |
 | 长文本综述 | `POST /api/compare/analyze_long` | `api_key` |
 | 七步/四步 AI 综述 | `POST /api/compare/synthesis` | `api_key` | SSE 流式 |
@@ -299,6 +301,7 @@ API Key 本身没有单独的后端管理接口。
 - 维度选择
 - 自定义问题
 - 提取模式
+- 批量文件列表（`batchFiles`）、批量预览（`showBatchPreview`）、批量进度追踪器（`batchTracker`，来自 `useBatchReadingTracker`）
 
 ## 7.2 API 映射
 
@@ -307,6 +310,8 @@ API Key 本身没有单独的后端管理接口。
 | 启动长文本 | `POST /api/reading/long/start` | `reading.py.start_long_context(...)` |
 | 启动七步 | `POST /api/reading/quant/start` | `reading.py.start_quant(...)` |
 | 启动四步 | `POST /api/reading/qual/start` | `reading.py.start_qual(...)` |
+| 批量精读 | `POST /api/reading/batch/start` | `reading.py.start_batch_reading(...)` |
+| 批量进度 | `GET /api/reading/batch/{batch_id}/status` | `reading.py.get_batch_status(...)` |
 | 查任务状态 | `GET /api/reading/task/{task_id}/status` | `reading.py.get_task_status(...)` |
 | 取消任务 | `POST /api/reading/task/{task_id}/cancel` | `reading.py.cancel_task(...)` |
 

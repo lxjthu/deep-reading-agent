@@ -65,6 +65,11 @@
 - 长文本精读
 - 七步精读
 - 四步精读
+- **批量文件夹精读**（2026-05-11 新增）
+  - 三个精读 Tab 各有「上传文件夹」按钮，通过 `webkitdirectory` 属性选择文件夹
+  - 前端过滤 `.pdf/.md/.markdown`，展示文件预览列表，用户确认后逐个上传再调用 `POST /api/reading/batch/start`
+  - 后端为每个文件创建独立 Job（共享 `batch_id`），复用单篇精读的完整逻辑
+  - 前端通过 `GET /api/reading/batch/{batch_id}/status` 轮询整体进度，内联展示每篇状态
 - 结果保存为 Markdown
 - 同时拆成结构化结果写入数据库
 - **精读完成后自动从前三页提取元数据并写入 `BibEntry`**（2026-05-10 修复）
@@ -499,6 +504,7 @@
 职责：
 
 - 长文本 / 七步 / 四步精读
+- **批量文件夹精读**（2026-05-11 新增）
 - **精读过程中自动提取参考文献**（场景一实现）
 
 关键函数：
@@ -507,6 +513,10 @@
 - `start_quant(...)`
 - `start_qual(...)`
   - 分别启动三类精读任务
+- `start_batch_reading(...)`
+  - 批量精读入口，接收 `file_ids` + `mode`，循环创建 Job 并设 `batch_id`
+- `get_batch_status(...)`
+  - 按 `batch_id` 聚合查询所有 job 状态，返回整体进度和每篇明细
 - `run_long_task(...)`
 - `run_quant_task(...)`
 - `run_qual_task(...)`
@@ -528,7 +538,7 @@
 关键数据流：
 
 - 文件 -> `BibEntry`
-- 创建 `Job(reading_*)`
+- 创建 `Job(reading_*)`（批量时共享 `batch_id`）
 - 绑定 `JobBibEntry(target)`
 - 调用 `ConversationEngine`
 - 保存 Markdown 产物
