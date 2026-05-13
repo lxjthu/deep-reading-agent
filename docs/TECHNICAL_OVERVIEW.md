@@ -1136,6 +1136,10 @@ export_20260506_username.dra
 - [compare_7step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_7step.html)
 - [compare_4step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_4step.html)
 
+独立 demo 入口：
+
+- [compare_index.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_index.html) — 通过 `backend/compare_demo_server.py`（端口 8001）访问
+
 在 `App.tsx` 中的职责：
 
 - 负责给这三个页面提供全屏容器
@@ -1593,7 +1597,88 @@ Bug 修复：
 - LongTab 精读结果按 group_name 分组渲染维度
 - 自定义维度集不再被强制追加系统默认维度
 
-### 8.12 AI 文献综述模块
+### 8.12 对比综述页面 v2.0 Redesign Demo
+
+改动目标：
+
+- 对三个对比页面（长文本/四步/七步）进行视觉和交互的彻底重构，打造学术优雅、现代精致的文献对比工作台
+- 设计独立于主应用的 demo 后端服务，使用静态 JSON 数据驱动，不依赖生产数据库
+- 建立完整的设计规范文档（色彩/字体/布局/组件/动画/Markdown 渲染），供后续正式实现参考
+
+设计规范文档：
+
+- `docs/compare-design-spec.md` — v2.0 完整设计方案，包含：
+  - 色彩系统（温暖米白底色 + 深墨绿强调色）
+  - 字体系统（衬线标题 + 无衬线正文 + 等宽代码）
+  - 间距/圆角/阴影系统
+  - 组件规范（标题区、文献选择区、步骤导航、操作栏、维度折叠面板、论文回答卡片）
+  - Markdown + KaTeX 渲染规范（含表格样式）
+  - 动画微交互规范
+  - 编码规范（UTF-8 强制要求）
+
+独立 demo 后端：
+
+- `backend/compare_demo_server.py` — 端口 8001，FastAPI 应用
+  - `GET /api/compare-demo/long` → 读取 `docs/compare-long-demo-data.json`
+  - `GET /api/compare-demo/qual` → 读取 `docs/compare-qual-demo-data.json`
+  - `GET /api/compare-demo/quant` → 读取 `docs/compare-quant-demo-data.json`
+  - 同时静态服务三个 HTML 页面和入口页
+  - 启动命令：`python backend/compare_demo_server.py`
+
+Demo 数据文件：
+
+- `docs/compare-long-demo-data.json` — 长文本精读，3 篇文献（土地整治、AI企业生产率、电子支付），每篇含 10 个分析维度
+- `docs/compare-qual-demo-data.json` — 四步精读，2 篇文献（土地整治、生态颜值），4 个步骤共 20+ 子问题
+- `docs/compare-quant-demo-data.json` — 七步精读，3 篇文献（土地整治、生态产品、灌溉公地），7 个步骤共 27+ 子问题
+
+落点文件：
+
+- `backend/compare_demo_server.py` — 独立 demo 后端（~80 行）
+- `frontend/public/compare_long.html` — 长文本对比 v2（维度式，~350 行）
+- `frontend/public/compare_4step.html` — 四步对比 v2（步骤式，~900 行）
+- `frontend/public/compare_7step.html` — 七步对比 v2（步骤式，~750 行）
+- `frontend/public/compare_index.html` — demo 入口导航页（~100 行）
+- `docs/compare-design-spec.md` — v2.0 设计规范
+- `docs/compare-long-demo-data.json` / `compare-qual-demo-data.json` / `compare-quant-demo-data.json`
+
+v2 页面核心架构（与 v1 对比）：
+
+| 维度 | v1（旧 compare） | v2（redesign demo） |
+|------|-------------------|---------------------|
+| 数据来源 | 生产 API（需登录+API Key） | 静态 JSON 文件（独立服务） |
+| 配色 | 基础白色/蓝色 | 温暖米白 + 深墨绿学术配色 |
+| 字体 | 系统默认 | Noto Serif SC 标题 + Noto Sans SC 正文 |
+| 布局 | 步骤切换重载整个列表 | 固定导航 + 纵向维度列表 + 横向卡片滚动 |
+| 折叠 | 无 | 手风琴折叠面板（350ms 动画） |
+| 文献选择 | 简单列表 | 卡片式选择（绿色边框+脉冲动画） |
+| 步骤导航 | 下拉菜单 | 胶囊标签横向滚动 |
+| 卡片设计 | 基础表格 | 精致卡片（悬停抬升、阴影层次） |
+| 公式 | 无 | KaTeX 完整支持 |
+| 表格 | 基础 | 学术优雅风格（横向滚动包装） |
+| 动画 | 无 | fadeInUp 进场 + 选中脉冲 + 展开过渡 |
+
+三种数据结构的页面适配：
+
+1. **长文本（long）**：`papers[].dimensions[]` — 扁平维度列表，无步骤分组。导航标签 = 所有维度的 label 集合
+2. **四步（qual）**：`papers[].steps[stepName].subQuestions[]` — 4 步分组，每步含多个子问题。导航标签 = 4 个步骤名
+3. **七步（quant）**：`papers[].steps[stepName].subQuestions[]` — 7 步分组，每步含多个子问题。导航标签 = 7 个步骤名（缩短显示）
+
+交互逻辑：
+
+- 文献选择：卡片点击 toggle，≥2 篇才能触发 AI 综述
+- 步骤/维度导航：胶囊标签切换，"全部"显示所有
+- 折叠面板：点击展开/收起，默认全部折叠
+- 复选框：子问题级别的选择，跨步骤持久化
+- 全选/清空：作用于当前可见的子问题集合
+- AI 综述按钮：≥2 文献 + ≥1 子问题选中时可用
+
+当前状态：
+
+- 三个 demo 页面功能完整，可直接通过 `python backend/compare_demo_server.py` 启动体验
+- 对比 v1 的正式页面（iframe 承载）尚未替换，v2 页面仅在 demo 服务中可用
+- 下一步：将 v2 设计正式集成到主应用中，替换 iframe 承载方案
+
+### 8.13 AI 文献综述模块
 
 改动目标：
 
@@ -1692,10 +1777,12 @@ Bug 修复：
 
 先看：
 
-- `backend/routers/compare.py`
-- `frontend/public/compare_long.html`
-- `frontend/public/compare_7step.html`
-- `frontend/public/compare_4step.html`
+- `backend/routers/compare.py` — 生产 API
+- `frontend/public/compare_long.html` — 长文本对比页
+- `frontend/public/compare_7step.html` — 七步对比页
+- `frontend/public/compare_4step.html` — 四步对比页
+- `docs/compare-design-spec.md` — v2 设计规范
+- `backend/compare_demo_server.py` — 独立 demo 后端（端口 8001）
 
 ## 9.6 要改文献库
 
