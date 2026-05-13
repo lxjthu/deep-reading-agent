@@ -77,6 +77,13 @@ class SynthesisLongRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class CompareSynthesisRequest(BaseModel):
+    mode: str
+    bib_entry_ids: list[str] = Field(default_factory=list)
+    api_key: Optional[str] = None
+    selected_dimensions: list[str] = Field(default_factory=list)
+
+
 class StructuredStepResponse(BaseModel):
     label: str
     sub_questions: dict[str, str] = Field(default_factory=dict)
@@ -1423,6 +1430,152 @@ async def synthesize_dimensions(
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
+
+@router.post("/synthesis-stream")
+async def synthesis_stream(
+    req: CompareSynthesisRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from openai import OpenAI
+
+    if req.mode not in ("long", "quant", "qual"):
+        raise HTTPException(status_code=400, detail="mode 必须为 long / quant / qual")
+
+    if not req.selected_dimensions:
+        raise HTTPException(status_code=400, detail="请至少选择 1 个维度")
+
+    content_field = "dimensions" if req.mode == "long" else "subQuestions"
+
+    members = await resolve_compare_members(db, user, req.bib_entry_ids, [])
+    paper_data = await ensure_paper_data(db, [], members)
+    bib_refs = await gather_bib_references(db, members)
+
+    dimensions = req.selected_dimensions
+    job_id = await create_compare_job(
+        db, user, "synthesis",
+        {"dimensions": dimensions, "mode": f"synthesis_{req.mode}"},
+        members,
+    )
+    job = await db.get(Job, job_id)
+    job.status = "running"
+    job.progress = 10
+    job.current_stage = f"准备{'长' if req.mode == 'long' else ''}综述..."
+    job.started_at = utcnow_naive()
+    await db.commit()
+
+    async def _stream():
+        try:
+            client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
+            metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
+
+            dimension_sections = []
+            total = len(dimensions)
+            for idx, dim_label in enumerate(dimensions):
+                job_cur = await db.get(Job, job_id)
+                job_cur.current_stage = f"正在生成维度 {idx + 1}/{total}：{dim_label}"
+                job_cur.progress = 10 + int(80 * idx / total)
+                await db.commit()
+
+                dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, content_field)
+                user_message = metadata_block + "\n\n" + dim_prompt
+
+                response = client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    extra_body={"thinking": {"type": "disabled"}},
+                    messages=[
+                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=0.65,
+                    max_tokens=8000,
+                )
+
+                content = response.choices[0].message.content or ""
+                dimension_sections.append({"label": dim_label, "content": content})
+
+                yield f"event: dimension\ndata: {json.dumps({'label': dim_label, 'content': content, 'index': idx, 'total': total}, ensure_ascii=False)}\n\n"
+
+            section_parts = []
+            for sec in dimension_sections:
+                section_parts.append(f"## {sec['label']}\n\n{sec['content']}")
+            synthesis_body = "\n\n".join(section_parts)
+
+            flat_refs = _collect_flat_secondary_refs(bib_refs, members)
+            if flat_refs:
+                job_cur = await db.get(Job, job_id)
+                job_cur.current_stage = "识别二次引用..."
+                job_cur.progress = 90
+                await db.commit()
+                check_prompt = _build_secondary_ref_check_prompt(synthesis_body, flat_refs)
+                user_message = metadata_block + "\n\n" + check_prompt
+                ref_check_resp = client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    extra_body={"thinking": {"type": "disabled"}},
+                    messages=[
+                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=0.1,
+                    max_tokens=500,
+                )
+                cited_indices = _parse_cited_ref_ids(ref_check_resp.choices[0].message.content or "")
+                filtered_refs = _filter_bib_refs_by_indices(bib_refs, members, cited_indices)
+            else:
+                filtered_refs = bib_refs
+
+            references = build_gbt7714_references(paper_data, filtered_refs, members)
+            final_text = synthesis_body + "\n\n" + references
+
+            dim_labels_joined = "、".join(dimensions[:3])
+            if len(dimensions) > 3:
+                dim_labels_joined += f"等{len(dimensions)}个维度"
+            title = f"AI文献综述：{dim_labels_joined}"
+
+            first_authors = []
+            for p in paper_data:
+                a = p.get('authors', [])
+                first_authors.append(str(a[0]).split()[-1] if a else "佚名")
+            date_str = datetime.now(UTC).strftime("%Y%m%d")
+            authors_str = "_".join(first_authors[:3])
+            if len(first_authors) > 3:
+                authors_str += "等"
+            safe_filename = f"综述-{date_str}-{authors_str}.md"
+
+            full_md = build_compare_markdown(title, final_text)
+
+            job_cur = await db.get(Job, job_id)
+            job_cur.current_stage = "保存结果..."
+            job_cur.progress = 95
+            await db.commit()
+
+            storage_path = await persist_synthesis_result(
+                db, user, job_id,
+                safe_filename,
+                full_md,
+            )
+
+            job_cur.status = "success"
+            job_cur.progress = 100
+            job_cur.current_stage = "完成"
+            job_cur.finished_at = utcnow_naive()
+            await db.commit()
+
+            yield f"event: complete\ndata: {json.dumps({'synthesis': final_text, 'job_id': job_id, 'output_path': storage_path, 'dimension_sections': dimension_sections}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            try:
+                job_cur = await db.get(Job, job_id)
+                if job_cur:
+                    job_cur.status = "failed"
+                    job_cur.error_msg = str(e)
+                    job_cur.finished_at = utcnow_naive()
+                    await db.commit()
+            except Exception:
+                pass
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
 @router.post("/synthesis_long")
 async def synthesize_long_dimensions(
