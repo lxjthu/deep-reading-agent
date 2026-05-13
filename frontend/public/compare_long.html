@@ -79,20 +79,35 @@
     .accordion-arrow { font-size: 11px; color: var(--text-tertiary); transition: transform 0.3s ease; flex-shrink: 0; }
     .accordion-item.expanded .accordion-arrow { transform: rotate(180deg); }
     .accordion-body { max-height: 0; overflow: hidden; transition: max-height 0.35s ease; }
-    .accordion-body-inner { padding: 0 20px 20px; }
+    .accordion-preview { padding: 4px 20px 16px; }
+    .preview-cards-scroll { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
+    .preview-cards-scroll::-webkit-scrollbar { height: 5px; }
+    .preview-cards-scroll::-webkit-scrollbar-track { background: transparent; }
+    .preview-cards-scroll::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+    .preview-card { min-width: 380px; max-width: 380px; max-height: 500px; border-radius: 8px; border: 1px solid var(--border-light); background: var(--bg-canvas); scroll-snap-align: start; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+    .preview-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .preview-card-header { padding: 12px 16px; border-bottom: 1px solid var(--border-light); background: var(--bg-surface); flex-shrink: 0; }
+    .preview-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .preview-card-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+    .preview-card-content { padding: 12px 16px; overflow: hidden; flex: 1; font-size: 13px; line-height: 1.65; color: var(--text-secondary); position: relative; }
+    .preview-card-content::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 48px; background: linear-gradient(transparent, var(--bg-canvas)); pointer-events: none; }
+    .accordion-preview .expand-divider { display: flex; align-items: center; justify-content: center; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border-light); }
+    .accordion-preview .expand-btn { font-size: 12px; color: var(--accent-primary); font-weight: 500; cursor: pointer; padding: 4px 14px; border-radius: 14px; border: 1px solid rgba(22,101,52,0.2); background: rgba(22,101,52,0.04); transition: all 0.2s ease; }
+    .accordion-preview .expand-btn:hover { background: rgba(22,101,52,0.1); border-color: rgba(22,101,52,0.35); }
+    .accordion-full-content { padding: 0 20px 20px; position: relative; }
+    .collapse-full { display: flex; align-items: center; justify-content: center; padding: 10px 0 0; border-top: 1px dashed var(--border-light); }
+    .collapse-full-btn { font-size: 12px; color: var(--text-tertiary); font-weight: 500; cursor: pointer; padding: 4px 14px; border-radius: 14px; border: 1px solid var(--border-light); background: var(--bg-surface); transition: all 0.2s ease; }
+    .collapse-full-btn:hover { color: var(--text-secondary); border-color: var(--border-medium); background: var(--bg-hover); }
     .answer-cards-scroll { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
     .answer-cards-scroll::-webkit-scrollbar { height: 5px; }
     .answer-cards-scroll::-webkit-scrollbar-track { background: transparent; }
     .answer-cards-scroll::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
-    .answer-card { min-width: 380px; max-width: 380px; max-height: 500px; overflow-y: auto; border-radius: 8px; border: 1px solid var(--border-light); background: var(--bg-canvas); scroll-snap-align: start; flex-shrink: 0; display: flex; flex-direction: column; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .answer-card { min-width: 380px; max-width: 380px; border-radius: 8px; border: 1px solid var(--border-light); background: var(--bg-canvas); scroll-snap-align: start; flex-shrink: 0; display: flex; flex-direction: column; transition: transform 0.2s ease, box-shadow 0.2s ease; }
     .answer-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-    .answer-card::-webkit-scrollbar { width: 4px; }
-    .answer-card::-webkit-scrollbar-track { background: transparent; }
-    .answer-card::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 2px; }
-    .answer-card-header { padding: 12px 16px; border-bottom: 1px solid var(--border-light); background: var(--bg-surface); flex-shrink: 0; position: sticky; top: 0; z-index: 1; }
+    .answer-card-header { padding: 12px 16px; border-bottom: 1px solid var(--border-light); background: var(--bg-surface); flex-shrink: 0; }
     .answer-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .answer-card-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
-    .answer-card-content { padding: 16px; flex: 1; overflow-y: auto; }
+    .answer-card-content { padding: 16px; }
     .answer-card-empty { padding: 40px 16px; text-align: center; color: var(--text-muted); font-style: italic; font-size: 13px; }    .md-content h1,.md-content h2,.md-content h3,.md-content h4,.md-content h5,.md-content h6 { font-family: var(--font-title); color: var(--text-primary); margin: 14px 0 6px; line-height: 1.4; }
     .md-content h1 { font-size: 18px; }
     .md-content h2 { font-size: 16px; }
@@ -162,7 +177,7 @@
     <section class="accordion-section" id="accordionSection"></section>
   </div>
   <script>    var API_URL = 'http://localhost:8001/api/compare-demo/long';
-    var st = { papers: [], dims: [], selPapers: new Set(), activePill: 'all', selDims: new Set(), expanded: new Set() };
+    var st = { papers: [], dims: [], selPapers: new Set(), activePill: 'all', selDims: new Set(), dimState: {} };
     var firstRender = true;
     function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
     function md2html(raw) {
@@ -192,6 +207,25 @@
       });
       return Array.from(m.values());
     }
+    function selectedDims() {
+      var m = new Map();
+      st.papers.filter(function(p) { return st.selPapers.has(p.id); }).forEach(function(p) {
+        (p.dimensions || []).forEach(function(d) {
+          if (!m.has(d.id)) m.set(d.id, { id: d.id, label: d.label });
+        });
+      });
+      return Array.from(m.values());
+    }
+    function firstParagraphs(raw) {
+      if (!raw) return '';
+      var result = [];
+      var lines = raw.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        var t = lines[i].replace(/^#+\s*/, '').trim();
+        if (t) { result.push(t); if (result.length >= 3) break; }
+      }
+      return result.join('\n');
+    }
     function renderPaperCards() {
       var c = document.getElementById('paperCards');
       if (!st.papers.length) { c.innerHTML = '<div class="empty-state"><p>\u6682\u65e0\u6587\u732e\u6570\u636e</p></div>'; return; }
@@ -209,13 +243,29 @@
     }
     function renderDimPills() {
       var c = document.getElementById('dimNav');
-      if (!st.dims.length) { c.innerHTML = ''; return; }
+      var dims = selectedDims();
+      if (!dims.length) { c.innerHTML = ''; return; }
+      if (st.activePill !== 'all' && !dims.find(function(d) { return d.id === st.activePill; })) {
+        st.activePill = 'all';
+      }
       var h = '<button class="dim-pill' + (st.activePill === 'all' ? ' active' : '') + '" onclick="selectPill(\'all\')">\u5168\u90e8</button>';
-      st.dims.forEach(function(d) {
+      dims.forEach(function(d) {
         h += '<button class="dim-pill' + (st.activePill === d.id ? ' active' : '') + '" onclick="selectPill(\'' + d.id + '\')">' + esc(d.label) + '</button>';
       });
       c.innerHTML = h;
-    }    function answerCard(paper, dim) {
+    }    function answerCardPreview(paper, dim) {
+      var dd = null;
+      (paper.dimensions || []).forEach(function(d) { if (d.id === dim.id) dd = d; });
+      var auth = (paper.authors || []).slice(0, 3).join(', ');
+      var yr = paper.year ? ' (' + paper.year + ')' : '';
+      var ct = (dd && dd.content && dd.content.trim())
+        ? '<div class="preview-card-content md-content">' + md2html(dd.content) + '</div>'
+        : '<div class="preview-card-content" style="color:var(--text-muted);font-style:italic;text-align:center;">\uff08\u672a\u5305\u542b\u6b64\u7ef4\u5ea6\uff09</div>';
+      return '<div class="preview-card"><div class="preview-card-header">'
+        + '<div class="preview-card-title">' + esc(paper.title || '\u672a\u547d\u540d\u6587\u732e') + '</div>'
+        + '<div class="preview-card-meta">' + esc(auth) + yr + '</div></div>' + ct + '</div>';
+    }
+    function answerCard(paper, dim) {
       var dd = null;
       (paper.dimensions || []).forEach(function(d) { if (d.id === dim.id) dd = d; });
       var auth = (paper.authors || []).slice(0, 3).join(', ');
@@ -233,30 +283,45 @@
         section.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\ud83d\udcc4</div><p>\u8bf7\u5148\u9009\u62e9\u6587\u732e\u5f00\u59cb\u5bf9\u6bd4</p></div>';
         return;
       }
-      if (!st.dims.length) {
+      var dims = selectedDims();
+      if (!dims.length) {
         section.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\ud83d\udccb</div><p>\u6682\u65e0\u7ef4\u5ea6\u6570\u636e</p></div>';
         return;
       }
       var selPapers = st.papers.filter(function(p) { return st.selPapers.has(p.id); });
       var html = '';
-      st.dims.forEach(function(dim, i) {
-        var exp = st.expanded.has(dim.id);
+      dims.forEach(function(dim, i) {
+        var state = st.dimState[dim.id] || 'collapsed';
         var chk = st.selDims.has(dim.id);
         var vis = st.activePill === 'all' || st.activePill === dim.id;
         var anim = firstRender
           ? 'animation:fadeInUp .4s ease both;animation-delay:' + (i * 50) + 'ms;'
           : 'animation:none;';
-        html += '<div class="accordion-item' + (exp ? ' expanded' : '') + '" data-dim-id="' + dim.id + '"'
+        var bodyStyle = state === 'collapsed' ? '' : ' style="max-height:none;"';
+        var cls = state !== 'collapsed' ? ' expanded' : '';
+        html += '<div class="accordion-item' + cls + '" data-dim-id="' + dim.id + '"'
           + ' style="' + anim + (!vis ? 'display:none;' : '') + '">'
           + '<div class="accordion-header" onclick="toggleAccordion(\'' + dim.id + '\',event)">'
           + '<input type="checkbox" class="accordion-checkbox"' + (chk ? ' checked' : '')
           + ' onclick="handleCheckbox(event,\'' + dim.id + '\')">'
           + '<span class="accordion-label">' + esc(dim.label) + '</span>'
           + '<span class="accordion-arrow">\u25bc</span></div>'
-          + '<div class="accordion-body"' + (exp ? ' style="max-height:none;"' : '') + '>'
-          + '<div class="accordion-body-inner"><div class="answer-cards-scroll">'
-          + selPapers.map(function(p) { return answerCard(p, dim); }).join('')
-          + '</div></div></div></div>';
+          + '<div class="accordion-body"' + bodyStyle + '>';
+        if (state === 'preview') {
+          html += '<div class="accordion-preview">'
+            + '<div class="preview-cards-scroll">'
+            + selPapers.map(function(p) { return answerCardPreview(p, dim); }).join('')
+            + '</div>'
+            + '<div class="expand-divider"><span class="expand-btn" onclick="expandFull(event,\'' + dim.id + '\')">\u5c55\u5f00\u8be6\u7ec6\u5bf9\u6bd4</span></div>'
+            + '</div>';
+        } else if (state === 'full') {
+          html += '<div class="accordion-full-content"><div class="answer-cards-scroll">'
+            + selPapers.map(function(p) { return answerCard(p, dim); }).join('')
+            + '</div>'
+            + '<div class="collapse-full"><span class="collapse-full-btn" onclick="collapseToPreview(event,\'' + dim.id + '\')">\u6536\u8d77\u8be6\u7ec6\u5bf9\u6bd4</span></div>'
+            + '</div>';
+        }
+        html += '</div></div>';
       });
       section.innerHTML = html;
       firstRender = false;
@@ -267,10 +332,12 @@
         var did = item.getAttribute('data-dim-id');
         item.style.display = (st.activePill === 'all' || st.activePill === did) ? '' : 'none';
       });
-    }    function updateActionBar() {
+    }
+    function updateActionBar() {
+      var dims = selectedDims();
       var dl = st.activePill === 'all'
         ? '\u5168\u90e8\u7ef4\u5ea6'
-        : (st.dims.find(function(d) { return d.id === st.activePill; }) || {}).label || '\u5168\u90e8\u7ef4\u5ea6';
+        : (dims.find(function(d) { return d.id === st.activePill; }) || {}).label || '\u5168\u90e8\u7ef4\u5ea6';
       document.getElementById('badgeDim').textContent = dl;
       document.getElementById('badgePaper').textContent = st.selPapers.size + ' \u7bc7\u6587\u732e';
       document.getElementById('badgeCount').textContent = '\u5df2\u9009 ' + st.selDims.size + ' \u4e2a\u7ef4\u5ea6';
@@ -278,7 +345,7 @@
     }
     function togglePaper(id) {
       if (st.selPapers.has(id)) st.selPapers.delete(id); else st.selPapers.add(id);
-      renderPaperCards(); renderAccordion(); updateActionBar();
+      renderPaperCards(); renderDimPills(); renderAccordion(); updateActionBar();
     }
     function selectPill(id) {
       st.activePill = id; renderDimPills();
@@ -294,28 +361,32 @@
     }
     function toggleAccordion(dimId, e) {
       if (e.target.type === 'checkbox') return;
-      var item = document.querySelector('[data-dim-id="' + dimId + '"]');
-      if (!item) return;
-      var body = item.querySelector('.accordion-body');
-      if (st.expanded.has(dimId)) {
-        st.expanded.delete(dimId);
-        body.style.maxHeight = body.scrollHeight + 'px';
-        body.offsetHeight;
-        body.style.maxHeight = '0';
-        item.classList.remove('expanded');
+      var state = st.dimState[dimId] || 'collapsed';
+      if (state === 'collapsed') {
+        st.dimState[dimId] = 'preview';
       } else {
-        st.expanded.add(dimId);
-        item.classList.add('expanded');
-        body.style.maxHeight = body.scrollHeight + 'px';
-        var done = function() { body.style.maxHeight = 'none'; body.removeEventListener('transitionend', done); };
-        body.addEventListener('transitionend', done);
+        st.dimState[dimId] = 'collapsed';
       }
+      renderAccordion();
+    }
+    function expandFull(e, dimId) {
+      e.stopPropagation();
+      st.dimState[dimId] = 'full';
+      renderAccordion();
+      updateActionBar();
+    }
+    function collapseToPreview(e, dimId) {
+      e.stopPropagation();
+      st.dimState[dimId] = 'preview';
+      renderAccordion();
+      updateActionBar();
     }
     document.getElementById('btnSelectAll').addEventListener('click', function() {
-      var dims = st.activePill === 'all'
-        ? st.dims
-        : st.dims.filter(function(d) { return d.id === st.activePill; });
-      dims.forEach(function(d) {
+      var dims = selectedDims();
+      var filtered = st.activePill === 'all'
+        ? dims
+        : dims.filter(function(d) { return d.id === st.activePill; });
+      filtered.forEach(function(d) {
         st.selDims.add(d.id);
         var cb = document.querySelector('[data-dim-id="' + d.id + '"] .accordion-checkbox');
         if (cb) cb.checked = true;

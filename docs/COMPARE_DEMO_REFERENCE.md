@@ -151,46 +151,72 @@ python backend/compare_demo_server.py    # → http://localhost:8001
 
 ## 4. 前端页面：`compare_long.html`
 
-### 全局状态（L164-165）
+### 全局状态（L170）
 
 ```javascript
-var API_URL = 'http://localhost:8001/api/compare-demo/long';
 var st = {
   papers: [],           // 全部论文数据
-  dims: [],             // 去重后的维度列表 [{id, label}]
+  dims: [],             // 全部论文去重后的维度列表 [{id, label}]
   selPapers: new Set(),  // 选中的论文 ID
-  activePill: 'all',     // 当前维度标签，'all' 或维度 label
+  activePill: 'all',     // 当前维度标签，'all' 或维度 id
   selDims: new Set(),    // 选中的维度 ID（复选框）
-  expanded: new Set()    // 展开的维度 ID
+  dimState: {}           // 维度展开状态：dimId → 'collapsed' | 'preview' | 'full'
 };
 ```
 
+### 三级展开交互
+
+每个维度面板有三种状态，通过 `st.dimState[dimId]` 控制：
+
+| 状态 | 触发 | 显示内容 |
+|------|------|---------|
+| `collapsed` | 默认 / 点击 header（从 preview） | 仅 header 标题行 |
+| `preview` | 点击 header（从 collapsed） | 横向滚动的预览卡片（500px 高、Markdown 渲染、渐变遮罩）+ "展开详细对比" 按钮 |
+| `full` | 点击 "展开详细对比" | 完整横向滚动卡片（无高度限制）+ "收起详细对比" 按钮 |
+
+状态流转：`collapsed → preview → full → preview → collapsed`
+
+### 动态维度胶囊
+
+维度导航胶囊（`renderDimPills`）仅显示**选中论文所包含的维度**，而非全部论文的维度并集。选中/取消论文时胶囊列表和折叠面板同步更新。若当前 `activePill` 对应维度不再存在，自动回退到"全部"。
+
 ### 函数索引
 
-| 函数 | 行号 | 参数 | 说明 |
-|------|------|------|------|
-| `esc(s)` | L167 | `s: string` | HTML 转义 |
-| `md2html(raw)` | L168 | `raw: string` | marked.parse + 包裹 `<table>` 为 `.table-wrapper` |
-| `mathRender(el)` | L174 | `el: DOM元素` | KaTeX 公式渲染，处理 `$...$` 和 `$$...$$` |
-| `uniqueDims(papers)` | L186 | `papers: array` | 从所有论文中提取去重维度列表 |
-| `renderPaperCards()` | L195 | — | 渲染文献选择区的卡片 |
-| `renderDimPills()` | L210 | — | 渲染维度导航胶囊标签 |
-| `renderAccordion()` | L230 | — | 渲染维度折叠面板列表 |
-| `updateVisibility()` | L265 | — | 根据 activePill 显示/隐藏维度面板 |
-| `togglePaper(id)` | L279 | `id: string` | 切换论文选中状态，重新渲染卡片和折叠面板 |
-| `selectPill(label)` | L283 | `label: string` | 切换维度标签，更新 activePill 和可见性 |
-| `handleCheckbox(dimId)` | L290 | `dimId: string` | 切换维度复选框选中状态 |
-| `toggleAccordion(dimId)` | L295 | `dimId: string` | 展开/折叠维度面板 |
-| `init()` | (底部) | — | fetch 数据 → 填充 st → 调用各 render 函数 |
+| 函数 | 参数 | 说明 |
+|------|------|------|
+| `esc(s)` | `s: string` | HTML 转义 |
+| `md2html(raw)` | `raw: string` | marked.parse + 包裹 `<table>` 为 `.table-wrapper` |
+| `mathRender(el)` | `el: DOM元素` | KaTeX 公式渲染，处理 `$...$` 和 `$$...$$` |
+| `uniqueDims(papers)` | `papers: array` | 从所有论文中提取去重维度列表（用于 st.dims） |
+| `selectedDims()` | — | 从**选中的论文**中提取去重维度列表（用于胶囊和面板渲染） |
+| `firstParagraphs(raw)` | `raw: string` | 从 Markdown 原文中提取前 3 段有效文本（预览文本用，已被卡片预览替代但仍保留） |
+| `renderPaperCards()` | — | 渲染文献选择区的卡片 |
+| `renderDimPills()` | — | 渲染维度导航胶囊（基于 `selectedDims()` 动态显示） |
+| `answerCardPreview(paper, dim)` | `paper, dim` | 生成预览阶段卡片 HTML（500px 高、Markdown 渲染、渐变遮罩） |
+| `answerCard(paper, dim)` | `paper, dim` | 生成完整展开阶段的卡片 HTML（无高度限制） |
+| `renderAccordion()` | — | 渲染维度折叠面板列表（根据 dimState 三态渲染） |
+| `updateVisibility()` | — | 根据 activePill 显示/隐藏维度面板 |
+| `updateActionBar()` | — | 更新操作栏文案和按钮状态（基于 selectedDims） |
+| `togglePaper(id)` | `id: string` | 切换论文选中状态，同步重新渲染胶囊、面板、操作栏 |
+| `selectPill(id)` | `id: string` | 切换维度标签，更新 activePill 和可见性 |
+| `handleCheckbox(e, dimId)` | `e, dimId` | 切换维度复选框选中状态 |
+| `toggleAccordion(dimId, e)` | `dimId, e` | collapsed↔preview 切换 |
+| `expandFull(e, dimId)` | `e, dimId` | preview → full |
+| `collapseToPreview(e, dimId)` | `e, dimId` | full → preview |
 
 ### 关键 DOM 结构
 
 ```
-#header          → 标题区
-#paper-bar       → 文献选择区（内含 .paper-cards）
-#dim-nav         → 维度导航胶囊
-#action-bar      → 操作栏
-#accordion-list  → 维度折叠面板列表
+#header            → 标题区
+#paper-bar         → 文献选择区（内含 .paper-cards）
+#dim-nav           → 维度导航胶囊（动态，仅显示选中论文的维度）
+#action-bar        → 操作栏
+.accordion-section → 维度折叠面板列表
+  .accordion-item[data-dim-id]
+    .accordion-header  → 标题 + 复选框 + 箭头
+    .accordion-body    → 根据 dimState 显示不同内容：
+      preview: .preview-cards-scroll > .preview-card (500px, 渐变遮罩) + 展开按钮
+      full:    .answer-cards-scroll > .answer-card (无高度限制) + 收起按钮
 ```
 
 ---
@@ -316,11 +342,13 @@ KaTeX v0.16: 公式渲染（katex.min.js + auto-render.min.js）
 
 ### 交互规则
 
-- 文献选择：≥2 篇才能触发 AI 综述
-- 复选框：子问题级别，跨步骤/维度持久化
-- 折叠：默认全部折叠，350ms max-height 动画
-- 全选：仅作用于当前可见的子问题
-- 清空：清空所有已选子问题
+- **文献选择**：≥2 篇才能触发 AI 综述
+- **维度胶囊动态显示**：仅显示选中论文所包含的维度，选中/取消论文时同步更新
+- **复选框**：维度级别，跨步骤持久化
+- **折叠三级状态**：collapsed（仅标题）→ preview（500px 卡片预览 + 渐变遮罩）→ full（完整内容），双向切换
+- **预览卡片**：380px 宽、500px 高，Markdown 渲染，超出内容渐变遮罩截断
+- **全选**：仅作用于当前可见的维度
+- **清空**：清空所有已选维度
 
 ---
 
@@ -333,7 +361,10 @@ KaTeX v0.16: 公式渲染（katex.min.js + auto-render.min.js）
 ### 8.2 改长文本页面的维度展示
 
 文件：`compare_long.html`
-核心函数：`renderAccordion()` (L230) — 每个维度面板的 HTML 结构
+核心函数：`renderAccordion()` — 根据 `st.dimState[dimId]` 三态渲染（collapsed/preview/full）
+预览卡片：`answerCardPreview()` — 500px 高卡片 + 渐变遮罩
+完整卡片：`answerCard()` — 无高度限制的完整 Markdown 渲染
+动态胶囊：`selectedDims()` + `renderDimPills()` — 仅显示选中论文的维度
 
 ### 8.3 改四步/七步的子问题卡片样式
 
@@ -370,9 +401,9 @@ KaTeX v0.16: 公式渲染（katex.min.js + auto-render.min.js）
 |---|---|---|---|
 | API | `/api/compare-demo/long` | `/api/compare-demo/qual` | `/api/compare-demo/quant` |
 | 数据结构 | `papers[].dimensions[]` | `papers[].steps[name].subQuestions[]` | `papers[].steps[name].subQuestions[]` |
-| 导航粒度 | 维度（动态提取） | 4 步（硬编码） | 7 步（硬编码） |
-| 折叠单位 | 维度 | 子问题 | 子问题 |
-| 全局状态 | `st` 对象 | 6 个独立变量 | 4 个独立变量 |
+| 导航粒度 | 维度（动态，仅选中论文） | 4 步（硬编码） | 7 步（硬编码） |
+| 折叠单位 | 维度（三级：collapsed/preview/full） | 子问题 | 子问题 |
+| 全局状态 | `st` 对象（含 dimState 三态） | 6 个独立变量 | 4 个独立变量 |
 | papers 存储 | `st.papers` | `rawData.papers` | 局部变量（loadData 内） |
 | 综述弹窗 | 无 | `#synthesis-modal` | 无 |
-| 代码量 | ~349 行 | ~928 行 | ~817 行 |
+| 代码量 | ~420 行 | ~928 行 | ~817 行 |
