@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -153,6 +153,56 @@ def bib_entry_to_paper_data(bib_entry: BibEntry) -> dict:
     }
 
 
+def build_compare_response(
+    mode: str,
+    bib_entries_items: dict[str, list[ReadingItem]],
+    bib_entries: dict[str, BibEntry],
+) -> dict:
+    mode_labels = {"long": "长文本精读", "quant": "七步精读", "qual": "四步精读"}
+    papers = []
+
+    for bib_id, items in bib_entries_items.items():
+        bib = bib_entries[bib_id]
+        paper = {
+            "id": bib.id,
+            "title": bib.title,
+            "authors": json.loads(bib.authors_json or "[]"),
+            "year": bib.year,
+            "journal": bib.journal or "",
+            "doi": bib.doi or "",
+        }
+
+        if mode == "long":
+            dimensions = []
+            seen: set[str] = set()
+            for item in items:
+                if item.item_key in seen:
+                    continue
+                seen.add(item.item_key)
+                dimensions.append({
+                    "id": item.item_key,
+                    "label": item.item_label,
+                    "content": item.content or "",
+                })
+            paper["dimensions"] = dimensions
+        else:
+            steps: dict[str, dict] = {}
+            for item in items:
+                step_name = item.parent_key or item.item_label
+                if step_name not in steps:
+                    steps[step_name] = {"label": step_name, "subQuestions": []}
+                steps[step_name]["subQuestions"].append({
+                    "id": item.item_key,
+                    "label": item.item_label,
+                    "content": item.content or "",
+                })
+            paper["steps"] = steps
+
+        papers.append(paper)
+
+    return {"mode": mode, "label": mode_labels.get(mode, ""), "papers": papers}
+
+
 async def build_structured_paper_data(
     db: AsyncSession,
     members: list[BibEntry],
@@ -187,6 +237,42 @@ async def build_structured_paper_data(
         paper_data.append(paper)
 
     return paper_data
+
+
+@router.get("/reading-data")
+async def get_reading_data(
+    mode: str = Query(..., pattern=r"^(long|quant|qual)$"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    all_items = (
+        await db.execute(
+            select(ReadingItem)
+            .where(
+                ReadingItem.owner_user_id == user.id,
+                ReadingItem.mode == mode,
+            )
+            .order_by(ReadingItem.bib_entry_id, ReadingItem.sort_order.asc(), ReadingItem.id.asc())
+        )
+    ).scalars().all()
+
+    if not all_items:
+        return {"mode": mode, "label": {"long": "长文本精读", "quant": "七步精读", "qual": "四步精读"}.get(mode, ""), "papers": []}
+
+    bib_entries_items: dict[str, list[ReadingItem]] = {}
+    bib_ids: set[str] = set()
+    for item in all_items:
+        bib_entries_items.setdefault(item.bib_entry_id, []).append(item)
+        bib_ids.add(item.bib_entry_id)
+
+    bib_rows = (
+        await db.execute(
+            select(BibEntry).where(BibEntry.id.in_(bib_ids))
+        )
+    ).scalars().all()
+    bib_entries = {b.id: b for b in bib_rows}
+
+    return build_compare_response(mode, bib_entries_items, bib_entries)
 
 
 async def resolve_compare_members(
