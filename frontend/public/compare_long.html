@@ -3,738 +3,347 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>长文本精读对比分析</title>
-  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-  <script src="/auth-client.js"></script>
+  <title>对比分析 · 长文本精读</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/contrib/auto-render.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      height: 100%;
+    :root {
+      --bg-canvas: #faf8f5;
+      --bg-surface: #ffffff;
+      --bg-hover: #f5f2ee;
+      --bg-selected: rgba(22, 101, 52, 0.06);
+      --bg-warm: #f5efe8;
+      --text-primary: #2d2a26;
+      --text-secondary: #5c554d;
+      --text-tertiary: #9a9188;
+      --text-muted: #b5ada5;
+      --accent-primary: #166534;
+      --accent-primary-hover: #14532d;
+      --accent-gold: #b45309;
+      --accent-coral: #9f1239;
+      --border-light: #ebe7e0;
+      --border-medium: #ddd8cf;
+      --border-focus: #166534;
+      --shadow-sm: 0 1px 3px rgba(45, 42, 38, 0.05);
+      --shadow-md: 0 4px 12px rgba(45, 42, 38, 0.08);
+      --shadow-lg: 0 12px 32px rgba(45, 42, 38, 0.1);
+      --font-title: 'Noto Serif SC', 'Songti SC', serif;
+      --font-body: 'Noto Sans SC', -apple-system, sans-serif;
+      --font-code: 'JetBrains Mono', monospace;
     }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f5f5;
-      padding: 12px 16px;
-      line-height: 1.6;
-    }
-    .container {
-      width: 100%;
-      max-width: none;
-      margin: 0;
-      min-height: 100%;
-    }
-    h1 { color: #1a1a2e; margin-bottom: 8px; }
-    .subtitle { color: #666; margin-bottom: 24px; }
-    
-    /* Navigation */
-    .nav-tabs { display: none; }
-    .nav-tab {
-      padding: 8px 16px;
-      border-radius: 6px;
-      text-decoration: none;
-      color: #6b7280;
-      background: white;
-      border: 1px solid #e5e7eb;
-      font-size: 14px;
-      transition: all 0.2s;
-    }
-    .nav-tab:hover { background: #f9fafb; }
-    .nav-tab.active {
-      background: #059669;
-      color: white;
-      border-color: #059669;
-    }
-    
-    /* Controls */
-    .controls {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .controls-row {
-      display: flex;
-      gap: 16px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-    }
-    .controls-row:last-child { margin-bottom: 0; }
-    label { font-weight: 600; color: #374151; font-size: 14px; }
-    select {
-      padding: 8px 12px;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      font-size: 14px;
-      background: white;
-      cursor: pointer;
-    }
-    select:focus { outline: none; border-color: #059669; }
-    
-    /* Paper selection */
-    .paper-list {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .paper-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .paper-checkbox {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      background: #f3f4f6;
-      border-radius: 20px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-    }
-    .paper-checkbox:hover { background: #e5e7eb; }
-    .paper-checkbox input { cursor: pointer; }
-    .paper-checkbox.checked { background: #d1fae5; color: #065f46; }
-    .dim-checkbox-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 5px 10px;
-      background: #f3f4f6;
-      border-radius: 16px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-      user-select: none;
-    }
-    .dim-checkbox-label:hover { background: #e5e7eb; }
-    .dim-checkbox-label.checked { background: #d1fae5; color: #065f46; }
-    .btn-delete {
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      padding: 4px;
-      border-radius: 4px;
-      opacity: 0.5;
-      transition: opacity 0.2s;
-    }
-    .btn-delete:hover { opacity: 1; background: #fee2e2; }
-    
-    /* AI Synthesis button */
-    .btn-synthesis {
-      background: linear-gradient(135deg, #059669, #047857);
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      margin-left: auto;
-    }
-    .btn-synthesis:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(5,150,105,0.3); }
-    .btn-synthesis:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-    
-    /* Table */
-    .table-container {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      overflow-x: auto;
-    }
-    table { width: 100%; border-collapse: collapse; }
-    th, td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid #e5e7eb;
-      vertical-align: top;
-    }
-    th {
-      background: #f9fafb;
-      font-weight: 600;
-      color: #374151;
-      font-size: 13px;
-      position: sticky;
-      top: 0;
-    }
-    .paper-title { font-weight: 600; color: #1a1a2e; font-size: 13px; }
-    .paper-header { color: #6b7280; font-size: 11px; margin-top: 2px; }
-    .cell-content {
-      max-height: 300px;
-      overflow: hidden;
-      cursor: pointer;
-      font-size: 13px;
-      line-height: 1.6;
-      color: #374151;
-      transition: max-height 0.3s;
-      position: relative;
-    }
-    .cell-content::after {
-      content: '';
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 40px;
-      background: linear-gradient(transparent, white);
-      pointer-events: none;
-    }
-    .cell-content.expanded {
-      max-height: none;
-      overflow: visible;
-    }
-    .cell-content.expanded::after { display: none; }
-    .cell-empty { color: #9ca3af; font-style: italic; font-size: 13px; }
-    .table-scroll {
-      min-height: 420px;
-      max-height: calc(100vh - 220px);
-      overflow-y: auto;
-    }
-    
-    /* Loading */
-    .loading { display: flex; align-items: center; gap: 8px; color: #6b7280; }
-    .spinner {
-      width: 16px; height: 16px;
-      border: 2px solid #e5e7eb;
-      border-top-color: #059669;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { font-family: var(--font-body); background: var(--bg-canvas); color: var(--text-primary); line-height: 1.6; min-height: 100vh; }
+    .page-wrapper { max-width: 1400px; margin: 0 auto; padding: 0 24px 80px; }
+    .header { padding: 40px 60px; border-bottom: 1px solid var(--border-light); }
+    .header h1 { font-family: var(--font-title); font-size: 28px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; letter-spacing: 0.02em; }
+    .header .subtitle { font-size: 15px; color: var(--text-secondary); }
+    .paper-bar { background: var(--bg-surface); border-radius: 12px; padding: 24px; margin-top: 24px; box-shadow: var(--shadow-sm); }
+    .paper-bar-label { font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .paper-cards { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
+    .paper-cards::-webkit-scrollbar { height: 5px; }
+    .paper-cards::-webkit-scrollbar-track { background: transparent; }
+    .paper-cards::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+    .paper-card { min-width: 240px; max-width: 320px; padding: 16px 20px; border-radius: 10px; border: 2px solid var(--border-light); background: var(--bg-surface); cursor: pointer; transition: all 0.25s ease; scroll-snap-align: start; flex-shrink: 0; user-select: none; }
+    .paper-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--border-medium); }
+    .paper-card.selected { border-color: var(--accent-primary); background: var(--bg-selected); box-shadow: 0 0 0 1px var(--accent-primary); }
+    .paper-card-title { font-family: var(--font-title); font-size: 14px; font-weight: 600; color: var(--text-primary); line-height: 1.45; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .paper-card-meta { font-size: 12px; color: var(--text-tertiary); line-height: 1.5; }
+    .paper-card-dims { display: inline-block; margin-top: 8px; font-size: 11px; color: var(--accent-primary); background: rgba(22,101,52,0.08); padding: 2px 8px; border-radius: 10px; }
+    .dim-nav { margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .dim-pill { padding: 8px 18px; border-radius: 20px; border: 1px solid var(--border-light); background: var(--bg-surface); font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer; transition: all 0.2s ease; white-space: nowrap; font-family: var(--font-body); }
+    .dim-pill:hover { background: var(--bg-hover); border-color: var(--border-medium); }
+    .dim-pill.active { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
+    .action-bar { margin-top: 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 20px; background: var(--bg-surface); border-radius: 10px; box-shadow: var(--shadow-sm); }
+    .action-bar-info { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 10px; }
+    .badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge-dim { background: var(--bg-warm); color: var(--accent-gold); }
+    .badge-paper { background: rgba(180,83,9,0.08); color: var(--accent-gold); }
+    .badge-count { background: rgba(22,101,52,0.08); color: var(--accent-primary); }
+    .action-bar-spacer { flex: 1; }
+    .btn { padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; border: none; font-family: var(--font-body); }
+    .btn-outline { background: var(--bg-surface); color: var(--text-secondary); border: 1px solid var(--border-medium); }
+    .btn-outline:hover { background: var(--bg-hover); }
+    .btn-primary { background: var(--accent-primary); color: #fff; }
+    .btn-primary:hover { background: var(--accent-primary-hover); }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; background: var(--accent-primary); }
+    .accordion-section { margin-top: 20px; }
+    .accordion-item { background: var(--bg-surface); border-radius: 10px; margin-bottom: 12px; box-shadow: var(--shadow-sm); overflow: hidden; }
+    .accordion-header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; cursor: pointer; transition: background 0.15s; user-select: none; }
+    .accordion-header:hover { background: var(--bg-hover); }
+    .accordion-checkbox { width: 18px; height: 18px; accent-color: var(--accent-primary); cursor: pointer; flex-shrink: 0; }
+    .accordion-label { font-size: 15px; font-weight: 600; color: var(--text-primary); flex: 1; }
+    .accordion-arrow { font-size: 11px; color: var(--text-tertiary); transition: transform 0.3s ease; flex-shrink: 0; }
+    .accordion-item.expanded .accordion-arrow { transform: rotate(180deg); }
+    .accordion-body { max-height: 0; overflow: hidden; transition: max-height 0.35s ease; }
+    .accordion-body-inner { padding: 0 20px 20px; }
+    .answer-cards-scroll { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
+    .answer-cards-scroll::-webkit-scrollbar { height: 5px; }
+    .answer-cards-scroll::-webkit-scrollbar-track { background: transparent; }
+    .answer-cards-scroll::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+    .answer-card { min-width: 380px; max-width: 380px; max-height: 500px; overflow-y: auto; border-radius: 8px; border: 1px solid var(--border-light); background: var(--bg-canvas); scroll-snap-align: start; flex-shrink: 0; display: flex; flex-direction: column; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .answer-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    .answer-card::-webkit-scrollbar { width: 4px; }
+    .answer-card::-webkit-scrollbar-track { background: transparent; }
+    .answer-card::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 2px; }
+    .answer-card-header { padding: 12px 16px; border-bottom: 1px solid var(--border-light); background: var(--bg-surface); flex-shrink: 0; position: sticky; top: 0; z-index: 1; }
+    .answer-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .answer-card-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+    .answer-card-content { padding: 16px; flex: 1; overflow-y: auto; }
+    .answer-card-empty { padding: 40px 16px; text-align: center; color: var(--text-muted); font-style: italic; font-size: 13px; }    .md-content h1,.md-content h2,.md-content h3,.md-content h4,.md-content h5,.md-content h6 { font-family: var(--font-title); color: var(--text-primary); margin: 14px 0 6px; line-height: 1.4; }
+    .md-content h1 { font-size: 18px; }
+    .md-content h2 { font-size: 16px; }
+    .md-content h3 { font-size: 14.5px; }
+    .md-content h4 { font-size: 13.5px; }
+    .md-content p { margin: 6px 0; font-size: 13px; line-height: 1.75; color: var(--text-secondary); }
+    .md-content ul,.md-content ol { margin: 6px 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); }
+    .md-content li { margin: 3px 0; line-height: 1.7; }
+    .md-content blockquote { border-left: 3px solid var(--accent-primary); padding: 8px 14px; margin: 10px 0; background: var(--bg-selected); border-radius: 0 6px 6px 0; font-size: 13px; color: var(--text-secondary); }
+    .md-content code { font-family: var(--font-code); font-size: 12px; background: var(--bg-warm); padding: 1px 5px; border-radius: 4px; color: var(--accent-coral); }
+    .md-content pre { background: #2d2a26; color: #e8e4de; padding: 14px; border-radius: 8px; overflow-x: auto; margin: 10px 0; font-family: var(--font-code); font-size: 12px; line-height: 1.55; }
+    .md-content pre code { background: none; color: inherit; padding: 0; border-radius: 0; }
+    .md-content .table-wrapper { overflow-x: auto; margin: 10px 0; -webkit-overflow-scrolling: touch; }
+    .md-content table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .md-content th,.md-content td { padding: 7px 10px; border: 1px solid var(--border-light); text-align: left; }
+    .md-content th { background: var(--bg-warm); font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+    .md-content td { color: var(--text-secondary); }
+    .md-content a { color: var(--accent-primary); text-decoration: none; }
+    .md-content a:hover { text-decoration: underline; }
+    .md-content strong { color: var(--text-primary); font-weight: 600; }
+    .md-content hr { border: none; border-top: 1px solid var(--border-light); margin: 14px 0; }
+    .md-content img { max-width: 100%; border-radius: 6px; }
+    .loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--text-tertiary); }
+    .spinner { width: 28px; height: 28px; border: 3px solid var(--border-light); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.75s linear infinite; margin-bottom: 14px; }
+    .empty-state { text-align: center; padding: 48px 20px; color: var(--text-tertiary); font-size: 14px; }
+    .empty-state-icon { font-size: 36px; margin-bottom: 10px; opacity: 0.5; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes spin { to { transform: rotate(360deg); } }
-    
-    /* Empty state */
-    .empty {
-      text-align: center;
-      padding: 60px 20px;
-      color: #6b7280;
-    }
-    .empty-icon { font-size: 48px; margin-bottom: 12px; }
-    
-    /* Modal */
-    .modal-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 100;
-      justify-content: center;
-      align-items: center;
-    }
-    .modal-overlay.active { display: flex; }
-    .modal {
-      background: white;
-      border-radius: 12px;
-      width: 90%;
-      max-width: 900px;
-      max-height: 80vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-    .modal-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .modal-header h2 { font-size: 18px; color: #1a1a2e; }
-    .modal-close {
-      background: none;
-      border: none;
-      font-size: 24px;
-      cursor: pointer;
-      color: #6b7280;
-    }
-    .modal-body {
-      padding: 20px;
-      overflow-y: auto;
-      flex: 1;
-    }
-    .modal-body pre {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      font-family: inherit;
-      line-height: 1.8;
+    @media (max-width: 768px) {
+      .page-wrapper { padding: 0 12px 40px; }
+      .header { padding: 24px 20px; }
+      .header h1 { font-size: 22px; }
+      .paper-bar { padding: 16px; }
+      .paper-card { min-width: 200px; max-width: 280px; }
+      .answer-card { min-width: 300px; max-width: 300px; }
+      .action-bar { padding: 12px 16px; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>📊 长文本精读对比分析</h1>
-    <p class="subtitle">选择分析维度和文献，横向对比每篇论文的回答</p>
-    
-    <div class="controls">
-      <div class="controls-row" style="align-items:flex-start">
-        <label style="padding-top:6px">选择维度：<span id="dimCount" style="font-weight:400;font-size:12px;color:#059669;margin-left:6px"></span></label>
-        <div id="dimCheckboxes" style="display:flex;flex-wrap:wrap;gap:8px;">
-          <span style="color:#9ca3af;font-size:13px">加载中...</span>
-        </div>
-        <button class="btn-synthesis" id="btnSynthesis" disabled style="flex-shrink:0">🤖 生成 AI 综述</button>
-      </div>
-      <div class="controls-row">
-        <label>选择文献：</label>
-        <div class="paper-list" id="paperList">
-          <span class="loading"><span class="spinner"></span>加载中...</span>
+  <div class="page-wrapper">
+    <header class="header">
+      <h1>&#x5BF9;&#x6BD4;&#x5206;&#x6790; &middot; &#x957F;&#x6587;&#x672C;&#x7CBE;&#x8BFB;</h1>
+      <p class="subtitle">&#x9009;&#x62E9;&#x6587;&#x732E;&#x4E0E;&#x7EF4;&#x5EA6;&#xFF0C;&#x6A2A;&#x5411;&#x5BF9;&#x6BD4;&#x957F;&#x6587;&#x672C;&#x7CBE;&#x8BFB;&#x7ED3;&#x679C;</p>
+    </header>
+    <section class="paper-bar">
+      <div class="paper-bar-label">&#x9009;&#x62E9;&#x6587;&#x732E;</div>
+      <div class="paper-cards" id="paperCards">
+        <div class="loading-state" id="paperLoading">
+          <div class="spinner"></div>
+          <span>&#x52A0;&#x8F7D;&#x4E2D;...</span>
         </div>
       </div>
-    </div>
-    
-    <div class="table-container" id="tableContainer">
-      <div class="empty">
-        <div class="empty-icon">📋</div>
-        <p>请选择维度和文献开始对比</p>
+    </section>
+    <nav class="dim-nav" id="dimNav"></nav>
+    <div class="action-bar" id="actionBar" style="display:none">
+      <div class="action-bar-info">
+        <span class="badge badge-dim" id="badgeDim">&#x5168;&#x90E8;&#x7EF4;&#x5EA6;</span>
+        <span class="badge badge-paper" id="badgePaper">0 &#x7BC7;&#x6587;&#x732E;</span>
+        <span class="badge badge-count" id="badgeCount">&#x5DF2;&#x9009; 0 &#x4E2A;&#x7EF4;&#x5EA6;</span>
       </div>
+      <div class="action-bar-spacer"></div>
+      <button class="btn btn-outline" id="btnSelectAll">&#x5168;&#x9009;</button>
+      <button class="btn btn-outline" id="btnClear">&#x6E05;&#x7A7A;</button>
+      <button class="btn btn-primary" id="btnSynthesis" disabled>AI &#x7EFC;&#x8FF0;</button>
     </div>
+    <section class="accordion-section" id="accordionSection"></section>
   </div>
-  
-  <!-- Modal for AI Synthesis -->
-  <div class="modal-overlay" id="modalOverlay">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>🤖 AI 文献综述</h2>
-        <button class="modal-close" id="modalClose">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="loading" id="synthesisLoading">
-          <span class="spinner"></span>
-          正在生成文献综述，请稍候...
-        </div>
-        <pre id="synthesisContent" style="display:none;"></pre>
-
-      </div>
-    </div>
-  </div>
-
-  <script>
-    if (!window.requireAuthSession()) { throw new Error('auth required'); }
-    function getCurrentApiKey() {
-      try {
-        const rawUser = localStorage.getItem('dra_user');
-        const user = rawUser ? JSON.parse(rawUser) : null;
-        const username = typeof user?.username === 'string' ? user.username.trim() : '';
-        return username ? (localStorage.getItem(`deepseek_api_key:${username}`) || '') : '';
-      } catch (error) {
-        console.warn('Failed to load scoped API key:', error);
-        return '';
-      }
+  <script>    var API_URL = 'http://localhost:8001/api/compare-demo/long';
+    var st = { papers: [], dims: [], selPapers: new Set(), activePill: 'all', selDims: new Set(), expanded: new Set() };
+    var firstRender = true;
+    function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function md2html(raw) {
+      var h = marked.parse(raw || '');
+      h = h.replace(/<table>/g, '<div class="table-wrapper"><table>');
+      h = h.replace(/<\/table>/g, '</table></div>');
+      return h;
     }
-
-    function promptForApiKey() {
-      let key = getCurrentApiKey();
-      if (key) return key;
-      key = prompt('请输入 DeepSeek API Key（sk-开头）：');
-      if (!key || !key.trim()) return '';
-      key = key.trim();
-      try {
-        const rawUser = localStorage.getItem('dra_user');
-        const user = rawUser ? JSON.parse(rawUser) : null;
-        const username = typeof user?.username === 'string' ? user.username.trim() : '';
-        if (username) localStorage.setItem(`deepseek_api_key:${username}`, key);
-      } catch (_) {}
-      return key;
-    }
-    // Global state
-    let allReports = [];
-    let selectedDims = new Set();
-    let selectedPapers = [];
-    let allDimensions = new Set();
-    
-    // Parse YAML frontmatter
-    function parseFrontmatter(content) {
-      if (!content.startsWith('---')) return {};
-      const end = content.indexOf('---', 3);
-      if (end === -1) return {};
-      const yamlContent = content.substring(3, end).trim();
-      try {
-        return jsyaml.load(yamlContent) || {};
-      } catch (e) {
-        console.error('YAML parse error:', e);
-        return {};
-      }
-    }
-    
-    /**
-     * Extract all dimension names from a long context report
-     * Uses DIMENSION_BOUNDARY markers for reliable splitting
-     * Falls back to legacy ### heading extraction for old reports
-     */
-    function extractDimensions(content) {
-      // New reports with DIMENSION_BOUNDARY markers
-      if (content.includes('<!--DIMENSION_BOUNDARY-->')) {
-        const dims = [];
-        const sections = content.split('<!--DIMENSION_BOUNDARY-->');
-        for (const section of sections) {
-          const trimmed = section.trim();
-          if (!trimmed) continue;
-          const match = trimmed.match(/^###\s+(.+)$/m);
-          if (match) {
-            const dim = match[1].trim();
-            if (dim && dim !== '分析维度') dims.push(dim);
-          }
-        }
-        return dims;
-      }
-      
-      // Legacy fallback: extract ### headings between ## 分析维度 and next ##
-      const dims = [];
-      const lines = content.split('\n');
-      let inAnalysisSection = false;
-      for (const line of lines) {
-        if (line.match(/^##\s+分析维度/)) {
-          inAnalysisSection = true;
-          continue;
-        }
-        if (inAnalysisSection && line.match(/^##\s+/) && !line.match(/^###\s+/)) {
-          break;
-        }
-        if (inAnalysisSection) {
-          const match = line.match(/^###\s+(.+)$/);
-          if (match) {
-            const dim = match[1].trim();
-            if (dim) dims.push(dim);
-          }
-        }
-      }
-      return dims;
-    }
-    
-    /**
-     * Get content for a specific dimension
-     * Uses DIMENSION_BOUNDARY markers for reliable extraction
-     * Falls back to legacy heading-based extraction for old reports
-     */
-    function getDimensionContent(content, dimName) {
-      // New reports with DIMENSION_BOUNDARY markers
-      if (content.includes('<!--DIMENSION_BOUNDARY-->')) {
-        const sections = content.split('<!--DIMENSION_BOUNDARY-->');
-        for (const section of sections) {
-          const trimmed = section.trim();
-          if (!trimmed) continue;
-          const match = trimmed.match(/^###\s+(.+)$/m);
-          if (match && match[1].trim() === dimName) {
-            const lines = trimmed.split('\n');
-            const contentLines = [];
-            let foundHeading = false;
-            for (const line of lines) {
-              if (!foundHeading && line.match(/^###\s+/)) {
-                foundHeading = true;
-                continue;
-              }
-              if (foundHeading) {
-                contentLines.push(line);
-              }
-            }
-            return contentLines.join('\n').trim();
-          }
-        }
-        return '';
-      }
-      
-      // Legacy fallback
-      const lines = content.split('\n');
-      let inAnalysisSection = false;
-      let inTargetDim = false;
-      const result = [];
-      
-      for (const line of lines) {
-        if (line.match(/^##\s+分析维度/)) {
-          inAnalysisSection = true;
-          continue;
-        }
-        if (inAnalysisSection && line.match(/^##\s+/) && !line.match(/^###\s+/)) {
-          break;
-        }
-        if (inAnalysisSection && line.match(/^###\s+(.+)$/)) {
-          const dim = line.match(/^###\s+(.+)$/)[1].trim();
-          if (dim === dimName) {
-            inTargetDim = true;
-            continue;
-          } else if (inTargetDim) {
-            break;
-          }
-        }
-        if (inTargetDim) {
-          result.push(line);
-        }
-      }
-      
-      return result.join('\n').trim();
-    }
-    
-    // Fetch all long context reports
-    async function loadReports() {
-      try {
-        const response = await authFetch('/api/history/');
-        const data = await response.json();
-        const reports = data.reading.filter(r => r.filename.includes('_long_context'));
-        
-        allReports = [];
-        allDimensions = new Set();
-        
-        for (const report of reports) {
-          try {
-            const contentResponse = await authFetch(`/api/download/${encodeURIComponent(report.filename)}`);
-            const content = await contentResponse.text();
-            const frontmatter = parseFrontmatter(content);
-            const dims = extractDimensions(content);
-            dims.forEach(d => allDimensions.add(d));
-            
-            allReports.push({
-              filename: report.filename,
-              frontmatter: frontmatter,
-              content: content,
-              title: frontmatter.title || report.filename.replace('_long_context.md', ''),
-              dimensions: dims
-            });
-          } catch (e) {
-            console.error('Error loading report:', report.filename, e);
-          }
-        }
-        
-        renderPaperList();
-        renderDimCheckboxes();
-      } catch (e) {
-        console.error('Error loading reports:', e);
-        document.getElementById('paperList').innerHTML = '<span style="color:red">加载失败，请刷新重试</span>';
-      }
-    }
-    
-    function renderPaperList() {
-      const container = document.getElementById('paperList');
-      if (allReports.length === 0) {
-        container.innerHTML = '<span>没有找到长文本精读报告</span>';
-        return;
-      }
-      
-      container.innerHTML = allReports.map(report => {
-        const fm = report.frontmatter;
-        const label = fm.title ? `${fm.title.slice(0, 30)}${fm.title.length > 30 ? '...' : ''}` : report.filename;
-        const meta = fm.year ? `(${fm.year})` : '';
-        const dimCount = report.dimensions.length;
-        return `
-          <div class="paper-item" style="display:flex;align-items:center;gap:4px;">
-            <label class="paper-checkbox" data-filename="${report.filename}">
-              <input type="checkbox" value="${report.filename}" onchange="togglePaper('${report.filename}')">
-              <span>${label} ${meta} <small style="color:#9ca3af">[${dimCount}维度]</small></span>
-            </label>
-            <button class="btn-delete" onclick="deleteReport('${report.filename}')" title="删除">🗑</button>
-          </div>
-        `;
-      }).join('');
-    }
-    
-    function renderDimCheckboxes() {
-      const container = document.getElementById('dimCheckboxes');
-      const dims = Array.from(allDimensions).sort();
-      if (dims.length === 0) {
-        container.innerHTML = '<span style="color:#9ca3af;font-size:13px">暂无可用维度</span>';
-        return;
-      }
-      container.innerHTML = dims.map(d => {
-        const escaped = d.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const checked = selectedDims.has(d);
-        return `<label class="dim-checkbox-label${checked ? ' checked' : ''}">
-          <input type="checkbox" style="cursor:pointer" ${checked ? 'checked' : ''} onchange="toggleDim('${escaped}', this.parentElement)"> ${d}
-        </label>`;
-      }).join('');
-    }
-    
-    async function deleteReport(filename) {
-      if (!confirm(`确定删除 ${filename}？\n此操作不可恢复。`)) return;
-      try {
-        const response = await authFetch(`/api/history/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-        if (response.ok) {
-          const idx = selectedPapers.indexOf(filename);
-          if (idx > -1) selectedPapers.splice(idx, 1);
-          allReports = allReports.filter(r => r.filename !== filename);
-          renderPaperList();
-          if (selectedDims.size > 0 && selectedPapers.length > 0) renderComparisonTable();
-          else document.getElementById('tableContainer').innerHTML = `<div class="empty"><div class="empty-icon">📋</div><p>请选择维度和文献开始对比</p></div>`;
-        } else alert('删除失败');
-      } catch (e) { alert('删除失败: ' + e.message); }
-    }
-    
-    function togglePaper(filename) {
-      const idx = selectedPapers.indexOf(filename);
-      if (idx > -1) selectedPapers.splice(idx, 1);
-      else selectedPapers.push(filename);
-      updateUI();
-    }
-    
-    function toggleDim(dimName, labelEl) {
-      if (selectedDims.has(dimName)) {
-        selectedDims.delete(dimName);
-        labelEl.classList.remove('checked');
-        labelEl.querySelector('input').checked = false;
-      } else {
-        selectedDims.add(dimName);
-        labelEl.classList.add('checked');
-        labelEl.querySelector('input').checked = true;
-      }
-      updateUI();
-    }
-    
-    function updateUI() {
-      const btn = document.getElementById('btnSynthesis');
-      const canSynthesize = selectedDims.size > 0 && selectedPapers.length > 0;
-      btn.disabled = !canSynthesize;
-      const badge = document.getElementById('dimCount');
-      if (badge) badge.textContent = selectedDims.size > 0 ? `已选 ${selectedDims.size} 个` : '';
-      if (selectedDims.size > 0 && selectedPapers.length > 0) renderComparisonTable();
-    }
-    
-    function renderComparisonTable() {
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      if (papers.length === 0 || selectedDims.size === 0) return;
-      const dims = Array.from(selectedDims);
-
-      let html = '<div class="table-scroll"><table>';
-      html += '<thead><tr><th style="width:160px">维度</th>';
-      for (const paper of papers) {
-        const fm = paper.frontmatter;
-        html += `<th>
-          <div class="paper-title">${fm.title || paper.filename}</div>
-          <div class="paper-header">${fm.authors ? fm.authors.join(', ') : ''} ${fm.year ? `(${fm.year})` : ''}</div>
-        </th>`;
-      }
-      html += '</tr></thead><tbody>';
-
-      for (const dim of dims) {
-        html += '<tr>';
-        html += `<td style="font-weight:600;color:#374151;background:#f9fafb;vertical-align:top;padding-top:12px">${dim}</td>`;
-        for (const paper of papers) {
-          const content = getDimensionContent(paper.content, dim);
-          if (content && content.trim()) {
-            html += `<td><div class="cell-content" onclick="this.classList.toggle('expanded')">${content}</div></td>`;
-          } else {
-            html += `<td><span class="cell-empty">（未包含此维度）</span></td>`;
-          }
-        }
-        html += '</tr>';
-      }
-
-      html += '</tbody></table></div>';
-      document.getElementById('tableContainer').innerHTML = html;
-    }
-    
-    document.getElementById('btnSynthesis').onclick = async () => {
-      if (selectedDims.size === 0 || selectedPapers.length === 0) return;
-
-      const modal = document.getElementById('modalOverlay');
-      const loading = document.getElementById('synthesisLoading');
-      const content = document.getElementById('synthesisContent');
-      modal.classList.add('active');
-      loading.style.display = 'block';
-      content.style.display = 'none';
-      content.textContent = '';
-
-      const dims = Array.from(selectedDims);
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-
-      const paperData = papers.map(paper => {
-        const fm = paper.frontmatter;
-        const base = {
-          filename: paper.filename,
-          title: fm.title || paper.filename,
-          authors: fm.authors || [],
-          year: fm.year,
-          journal: fm.journal || fm.source || fm['期刊'] || '',
-          volume: fm.volume || fm['卷'] || '',
-          issue: fm.issue || fm['期'] || '',
-          pages: fm.pages || fm['页码'] || '',
-          doi: fm.doi || '',
-        };
-        const dimensions = {};
-        for (const dim of dims) {
-          const c = getDimensionContent(paper.content, dim);
-          if (c && c.trim()) dimensions[dim] = c;
-        }
-        return { ...base, dimensions };
-      }).filter(p => Object.keys(p.dimensions || {}).length > 0);
-
-      if (paperData.length === 0) {
-        loading.style.display = 'none';
-        content.style.display = 'block';
-        content.textContent = '所选文献均未包含所选维度的内容，无法生成综述。';
-        return;
-      }
-
-      let finalResult = null;
-
-      try {
-        const apiKey = promptForApiKey();
-        if (!apiKey) { alert('请先设置 DeepSeek API Key'); return; }
-        const response = await authFetch('/api/compare/synthesis_long', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dimensions: dims,
-            paperData: paperData,
-            api_key: apiKey,
-          })
+    function mathRender(el) {
+      if (typeof renderMathInElement === 'function') {
+        renderMathInElement(el, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false },
+            { left: '\\(', right: '\\)', display: false },
+            { left: '\\[', right: '\\]', display: true }
+          ]
         });
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let streamingHint = document.createElement('div');
-        streamingHint.id = 'streamingHint';
-        streamingHint.style.cssText = 'text-align:center;color:#6b7280;font-size:14px;padding:8px 0;';
-        streamingHint.textContent = '综述中……';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          let currentEvent = null, currentData = null;
-          for (const line of lines) {
-            if (line.startsWith('event: ')) currentEvent = line.slice(7).trim();
-            else if (line.startsWith('data: ')) currentData = line.slice(6);
-            else if (line === '' && currentEvent && currentData) {
-              try {
-                const parsed = JSON.parse(currentData);
-                if (currentEvent === 'dimension') {
-                  loading.style.display = 'none';
-                  content.style.display = 'block';
-                  content.textContent += `## ${parsed.label}\n\n${parsed.content}\n\n`;
-                  if (!document.getElementById('streamingHint')) {
-                    content.parentNode.insertBefore(streamingHint, content.nextSibling);
-                  }
-                } else if (currentEvent === 'complete') {
-                  const hint = document.getElementById('streamingHint');
-                  if (hint) hint.remove();
-                  content.textContent = parsed.synthesis || '生成失败';
-                  finalResult = parsed;
-                } else if (currentEvent === 'error') {
-                  loading.style.display = 'none';
-                  content.style.display = 'block';
-                  content.textContent = '生成失败: ' + (parsed.detail || '未知错误');
-                }
-              } catch(e) {}
-              currentEvent = null; currentData = null;
-            }
-          }
-        }
-
-      } catch (e) {
-        loading.style.display = 'none';
-        content.style.display = 'block';
-        content.textContent = '生成失败: ' + e.message;
       }
-    };
-    
-    document.getElementById('modalClose').onclick = () => document.getElementById('modalOverlay').classList.remove('active');
-    document.getElementById('modalOverlay').onclick = (e) => { if (e.target === document.getElementById('modalOverlay')) document.getElementById('modalOverlay').classList.remove('active'); };
-    
-    loadReports();
+    }
+    function uniqueDims(papers) {
+      var m = new Map();
+      papers.forEach(function(p) {
+        (p.dimensions || []).forEach(function(d) {
+          if (!m.has(d.id)) m.set(d.id, { id: d.id, label: d.label });
+        });
+      });
+      return Array.from(m.values());
+    }
+    function renderPaperCards() {
+      var c = document.getElementById('paperCards');
+      if (!st.papers.length) { c.innerHTML = '<div class="empty-state"><p>\u6682\u65e0\u6587\u732e\u6570\u636e</p></div>'; return; }
+      c.innerHTML = st.papers.map(function(p) {
+        var sel = st.selPapers.has(p.id);
+        var auth = (p.authors || []).slice(0, 3).join(', ');
+        var yr = p.year ? ' (' + p.year + ')' : '';
+        var dc = p.dimensions ? p.dimensions.length : 0;
+        return '<div class="paper-card' + (sel ? ' selected' : '') + '" onclick="togglePaper(\'' + p.id + '\')">'
+          + '<div class="paper-card-title">' + esc(p.title || '\u672a\u547d\u540d\u6587\u732e') + '</div>'
+          + '<div class="paper-card-meta">' + esc(auth) + yr + '</div>'
+          + (dc ? '<span class="paper-card-dims">' + dc + ' \u4e2a\u7ef4\u5ea6</span>' : '')
+          + '</div>';
+      }).join('');
+    }
+    function renderDimPills() {
+      var c = document.getElementById('dimNav');
+      if (!st.dims.length) { c.innerHTML = ''; return; }
+      var h = '<button class="dim-pill' + (st.activePill === 'all' ? ' active' : '') + '" onclick="selectPill(\'all\')">\u5168\u90e8</button>';
+      st.dims.forEach(function(d) {
+        h += '<button class="dim-pill' + (st.activePill === d.id ? ' active' : '') + '" onclick="selectPill(\'' + d.id + '\')">' + esc(d.label) + '</button>';
+      });
+      c.innerHTML = h;
+    }    function answerCard(paper, dim) {
+      var dd = null;
+      (paper.dimensions || []).forEach(function(d) { if (d.id === dim.id) dd = d; });
+      var auth = (paper.authors || []).slice(0, 3).join(', ');
+      var yr = paper.year ? ' (' + paper.year + ')' : '';
+      var ct = (dd && dd.content && dd.content.trim())
+        ? '<div class="answer-card-content md-content">' + md2html(dd.content) + '</div>'
+        : '<div class="answer-card-empty">\uff08\u672a\u5305\u542b\u6b64\u7ef4\u5ea6\uff09</div>';
+      return '<div class="answer-card"><div class="answer-card-header">'
+        + '<div class="answer-card-title">' + esc(paper.title || '\u672a\u547d\u540d\u6587\u732e') + '</div>'
+        + '<div class="answer-card-meta">' + esc(auth) + yr + '</div></div>' + ct + '</div>';
+    }
+    function renderAccordion() {
+      var section = document.getElementById('accordionSection');
+      if (!st.selPapers.size) {
+        section.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\ud83d\udcc4</div><p>\u8bf7\u5148\u9009\u62e9\u6587\u732e\u5f00\u59cb\u5bf9\u6bd4</p></div>';
+        return;
+      }
+      if (!st.dims.length) {
+        section.innerHTML = '<div class="empty-state"><div class="empty-state-icon">\ud83d\udccb</div><p>\u6682\u65e0\u7ef4\u5ea6\u6570\u636e</p></div>';
+        return;
+      }
+      var selPapers = st.papers.filter(function(p) { return st.selPapers.has(p.id); });
+      var html = '';
+      st.dims.forEach(function(dim, i) {
+        var exp = st.expanded.has(dim.id);
+        var chk = st.selDims.has(dim.id);
+        var vis = st.activePill === 'all' || st.activePill === dim.id;
+        var anim = firstRender
+          ? 'animation:fadeInUp .4s ease both;animation-delay:' + (i * 50) + 'ms;'
+          : 'animation:none;';
+        html += '<div class="accordion-item' + (exp ? ' expanded' : '') + '" data-dim-id="' + dim.id + '"'
+          + ' style="' + anim + (!vis ? 'display:none;' : '') + '">'
+          + '<div class="accordion-header" onclick="toggleAccordion(\'' + dim.id + '\',event)">'
+          + '<input type="checkbox" class="accordion-checkbox"' + (chk ? ' checked' : '')
+          + ' onclick="handleCheckbox(event,\'' + dim.id + '\')">'
+          + '<span class="accordion-label">' + esc(dim.label) + '</span>'
+          + '<span class="accordion-arrow">\u25bc</span></div>'
+          + '<div class="accordion-body"' + (exp ? ' style="max-height:none;"' : '') + '>'
+          + '<div class="accordion-body-inner"><div class="answer-cards-scroll">'
+          + selPapers.map(function(p) { return answerCard(p, dim); }).join('')
+          + '</div></div></div></div>';
+      });
+      section.innerHTML = html;
+      firstRender = false;
+      section.querySelectorAll('.md-content').forEach(function(el) { mathRender(el); });
+    }
+    function updateVisibility() {
+      document.querySelectorAll('#accordionSection .accordion-item').forEach(function(item) {
+        var did = item.getAttribute('data-dim-id');
+        item.style.display = (st.activePill === 'all' || st.activePill === did) ? '' : 'none';
+      });
+    }    function updateActionBar() {
+      var dl = st.activePill === 'all'
+        ? '\u5168\u90e8\u7ef4\u5ea6'
+        : (st.dims.find(function(d) { return d.id === st.activePill; }) || {}).label || '\u5168\u90e8\u7ef4\u5ea6';
+      document.getElementById('badgeDim').textContent = dl;
+      document.getElementById('badgePaper').textContent = st.selPapers.size + ' \u7bc7\u6587\u732e';
+      document.getElementById('badgeCount').textContent = '\u5df2\u9009 ' + st.selDims.size + ' \u4e2a\u7ef4\u5ea6';
+      document.getElementById('btnSynthesis').disabled = !(st.selPapers.size >= 2 && st.selDims.size >= 1);
+    }
+    function togglePaper(id) {
+      if (st.selPapers.has(id)) st.selPapers.delete(id); else st.selPapers.add(id);
+      renderPaperCards(); renderAccordion(); updateActionBar();
+    }
+    function selectPill(id) {
+      st.activePill = id; renderDimPills();
+      var section = document.getElementById('accordionSection');
+      if (section.querySelector('.accordion-item')) updateVisibility();
+      else renderAccordion();
+      updateActionBar();
+    }
+    function handleCheckbox(e, dimId) {
+      e.stopPropagation();
+      if (st.selDims.has(dimId)) st.selDims.delete(dimId); else st.selDims.add(dimId);
+      updateActionBar();
+    }
+    function toggleAccordion(dimId, e) {
+      if (e.target.type === 'checkbox') return;
+      var item = document.querySelector('[data-dim-id="' + dimId + '"]');
+      if (!item) return;
+      var body = item.querySelector('.accordion-body');
+      if (st.expanded.has(dimId)) {
+        st.expanded.delete(dimId);
+        body.style.maxHeight = body.scrollHeight + 'px';
+        body.offsetHeight;
+        body.style.maxHeight = '0';
+        item.classList.remove('expanded');
+      } else {
+        st.expanded.add(dimId);
+        item.classList.add('expanded');
+        body.style.maxHeight = body.scrollHeight + 'px';
+        var done = function() { body.style.maxHeight = 'none'; body.removeEventListener('transitionend', done); };
+        body.addEventListener('transitionend', done);
+      }
+    }
+    document.getElementById('btnSelectAll').addEventListener('click', function() {
+      var dims = st.activePill === 'all'
+        ? st.dims
+        : st.dims.filter(function(d) { return d.id === st.activePill; });
+      dims.forEach(function(d) {
+        st.selDims.add(d.id);
+        var cb = document.querySelector('[data-dim-id="' + d.id + '"] .accordion-checkbox');
+        if (cb) cb.checked = true;
+      });
+      updateActionBar();
+    });
+    document.getElementById('btnClear').addEventListener('click', function() {
+      st.selDims.clear();
+      document.querySelectorAll('.accordion-checkbox').forEach(function(cb) { cb.checked = false; });
+      updateActionBar();
+    });
+    document.getElementById('btnSynthesis').addEventListener('click', function() {
+      alert('AI \u7efc\u8ff0\u529f\u80fd\uff08Demo \u6a21\u5f0f\u4e0b\u6682\u4e0d\u53ef\u7528\uff09');
+    });
+    (async function init() {
+      try {
+        var res = await fetch(API_URL);
+        var data = await res.json();
+        st.papers = data.papers || [];
+        st.dims = uniqueDims(st.papers);
+        renderPaperCards(); renderDimPills(); renderAccordion(); updateActionBar();
+        document.getElementById('actionBar').style.display = 'flex';
+      } catch (err) {
+        document.getElementById('paperCards').innerHTML =
+          '<div class="empty-state"><div class="empty-state-icon">\u26a0\ufe0f</div>'
+          + '<p>\u52a0\u8f7d\u5931\u8d25: ' + esc(err.message) + '</p></div>';
+      }
+    })();
   </script>
 </body>
 </html>
