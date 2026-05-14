@@ -804,6 +804,53 @@ def _clean_for_excel(text):
     return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
 
 
+def _is_empty_result(content: str, min_chars: int = 50) -> bool:
+    if not content or not content.strip():
+        return True
+    stripped = content.strip()
+    if stripped.startswith("[分析出错"):
+        return True
+    if len(stripped) < min_chars and not any(c in stripped for c in "。；：？！\n"):
+        return True
+    return False
+
+
+def _check_and_retry_empty_dimensions(
+    results: dict[str, str],
+    task_id: str,
+    retry_fn,
+    max_retries: int = 2,
+) -> dict[str, str]:
+    for attempt in range(1, max_retries + 1):
+        empty_keys = [k for k, v in results.items() if _is_empty_result(v)]
+        if not empty_keys:
+            break
+        tasks[task_id]["logs"].append(
+            f"[后检查] 第 {attempt} 次重试：{len(empty_keys)} 个维度需要重新分析"
+        )
+        for key in empty_keys:
+            if tasks[task_id].get("status") == "cancelled":
+                return results
+            try:
+                tasks[task_id]["stage"] = f"重试维度: {key} ({attempt}/{max_retries})"
+                new_content = retry_fn(key)
+                if new_content and not _is_empty_result(new_content):
+                    results[key] = new_content
+                    tasks[task_id]["logs"].append(f"✓ [重试] {key} 完成")
+                else:
+                    tasks[task_id]["logs"].append(f"⚠ [重试] {key} 仍为空")
+            except Exception as e:
+                tasks[task_id]["logs"].append(f"⚠ [重试] {key} 失败: {str(e)[:80]}")
+    still_empty = [k for k, v in results.items() if _is_empty_result(v)]
+    if still_empty:
+        tasks[task_id]["logs"].append(
+            f"⚠ [后检查] {len(still_empty)} 个维度重试后仍为空: {', '.join(still_empty[:5])}"
+        )
+    else:
+        tasks[task_id]["logs"].append("✓ [后检查] 所有维度检查通过")
+    return results
+
+
 def run_long_context_task(
     task_id: str,
     user_id: int,
@@ -956,6 +1003,26 @@ def run_long_context_task(
             except Exception as e:
                 tasks[task_id]["logs"].append(f"⚠ 自定义问题 出错: {str(e)[:80]}")
                 results["自定义问题"] = f"[分析出错: {str(e)[:200]}]"
+        
+        # Post-check: retry empty dimensions
+        _LONG_DIM_MAP = {
+            "研究问题": "overview", "理论框架": "theory", "识别策略": "methodology",
+            "数据来源": "data_source", "变量度量": "variable_measurement",
+            "识别假设": "identification_assumptions", "统计结果": "results",
+            "机制分析": "mechanism", "稳健性检验": "robustness",
+            "外部有效性": "external_validity", "贡献与局限": "contributions_limitations",
+            "写作质量": "writing_quality",
+        }
+        def _retry_long(key):
+            mapped = _LONG_DIM_MAP.get(key)
+            if mapped:
+                return engine.analyze_dimension(mapped)
+            if custom_dim_map and key in custom_dim_map:
+                return engine.analyze_dimension(key, dim_meta=custom_dim_map[key])
+            if key == "自定义问题":
+                return engine.analyze_dimension("custom", custom_question)
+            return engine.analyze_dimension("overview")
+        results = _check_and_retry_empty_dimensions(results, task_id, _retry_long)
         
         # 4. Generate report
         tasks[task_id]["progress"] = 95
@@ -1113,6 +1180,12 @@ def run_quant_task(
                 tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(e)[:80]}")
                 results[step_name] = f"[分析出错: {str(e)[:200]}]"
         
+        # Post-check: retry empty steps
+        def _retry_quant(step_name_inner):
+            pk = QUANT_PROMPT_KEYS[step_name_inner]
+            return engine.ask(normalize_reading_prompt(prompt_overrides.get(pk, "")))
+        results = _check_and_retry_empty_dimensions(results, task_id, _retry_quant)
+        
         # Generate report
         tasks[task_id]["progress"] = 95
         tasks[task_id]["stage"] = "生成七步精读报告..."
@@ -1258,6 +1331,12 @@ def run_qual_task(
             except Exception as e:
                 tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(e)[:80]}")
                 results[step_name] = f"[分析出错: {str(e)[:200]}]"
+        
+        # Post-check: retry empty steps
+        def _retry_qual(step_name_inner):
+            pk = QUAL_PROMPT_KEYS[step_name_inner]
+            return engine.ask(normalize_reading_prompt(prompt_overrides.get(pk, "")))
+        results = _check_and_retry_empty_dimensions(results, task_id, _retry_qual)
         
         # Generate report
         tasks[task_id]["progress"] = 95

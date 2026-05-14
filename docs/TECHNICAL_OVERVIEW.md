@@ -523,6 +523,7 @@
   - 后台线程执行分析
   - 精读完成后自动调用 `_try_extract_references()` 提取参考文献
   - **精读完成后自动调用 `_try_update_bib_metadata()` 从前三页提取元数据并更新 `BibEntry`**
+  - **精读维度收集完成后自动调用 `_check_and_retry_empty_dimensions()` 检查空维度并重试（2026-05-14 新增）**
 - `_try_extract_references(...)`
   - 调用 `services/deepseek_refs.py` 提取参考文献
   - 调用 `routers/references.py` 的 `write_trace_outputs()` 生成产物
@@ -541,6 +542,7 @@
 - 创建 `Job(reading_*)`（批量时共享 `batch_id`）
 - 绑定 `JobBibEntry(target)`
 - 调用 `ConversationEngine`
+- **后检查空维度并自动重试（`_check_and_retry_empty_dimensions`）**
 - 保存 Markdown 产物
 - 保存 `ReadingItem`
 - **自动提取参考文献并生成 Excel/MD/JSON 产物**
@@ -1754,7 +1756,38 @@ v2 页面核心架构（与 v1 对比）：
 - 产物文件名格式 `综述-YYYYMMDD-作者姓.md`
 - 旧的「对比分析」按钮和 `/analyze`、`/analyze_long` 端点完全不受影响
 
-### 8.14 对比综述 Demo → 生产集成（React 组件替换 iframe）
+### 8.14 精读后检查与自动重试
+
+改动目标：
+
+- 三种精读模式（长文本/七步/四步）完成后，在生成报告和元数据提取之前，自动检查每个维度/步骤的结果是否为空
+- 空结果判定：空字符串、`[分析出错...]` 错误占位、少于 50 字符且无中文标点的疑似无意义内容
+- 对空维度最多重试 2 次，复用已有的 `ConversationEngine` 实例重新调用 DeepSeek
+- 重试失败不阻塞主流程，通过任务日志告知用户哪些维度重试失败
+
+落点文件：
+
+- `backend/routers/reading.py`（新增 `_is_empty_result`、`_check_and_retry_empty_dimensions` 辅助函数，三个 `run_*_task` 函数各插入后检查调用）
+
+新增函数：
+
+- `_is_empty_result(content, min_chars=50)` — 检测结果是否为空或错误占位
+- `_check_and_retry_empty_dimensions(results, task_id, retry_fn, max_retries=2)` — 通用后检查+重试函数
+
+插入位置：
+
+- `run_long_context_task`：自定义问题处理之后、生成报告之前；支持内置维度、自定义维度集、自定义问题三种重试路径
+- `run_quant_task`：七步循环之后、生成报告之前；通过 `QUANT_PROMPT_KEYS` 找回 prompt_key
+- `run_qual_task`：四步循环之后、生成报告之前；通过 `QUAL_PROMPT_KEYS` 找回 prompt_key
+
+当前结果：
+
+- 精读完成后自动检测空维度并重试，最多 2 次
+- 重试过程通过 `tasks[task_id]` 日志实时推送，用户可在前端看到「后检查」和「重试」日志
+- 所有维度检查通过时日志显示「✓ [后检查] 所有维度检查通过」
+- 重试失败不阻塞，任务仍正常完成
+
+### 8.15 对比综述 Demo → 生产集成（React 组件替换 iframe）
 
 改动目标：
 
@@ -1783,7 +1816,7 @@ v2 页面核心架构（与 v1 对比）：
 - **React Hooks 位置违规导致白屏**（2026-05-14）：`TemplateMarket.tsx` 中 `useState(exampleTab)` 和 `useState(copied)` 放在了两个 early return（detail 面板、AI 面板）之后。当用户点击「AI 生成专属模板」时 `panel === 'ai'` 触发第 482 行提前返回，后面的 hooks 不会被调用，违反 React「所有 hooks 必须在 early return 之前」的规则，导致 React 崩溃渲染白屏。修复：将这两个 `useState` 移到组件顶部与其他 hooks 并列。**教训：React hooks 声明顺序必须与渲染路径无关，新增 hooks 时务必放在所有 early return 之前**。
 - **长文本对比维度集合名称匹配**（2026-05-14）：对比页胶囊需按维度集合名称分组显示（如「Ostrom制度分析框架」「地理学综述类论文理论建构与批判分析框架」），但 `ReadingItem.item_key`（`long.行动情境的边界界定`）和 `DimensionItem.dim_key`（`action_arena_boundary`）是两套完全不同的 key 体系，通过 key 无法直接 join。**正确匹配方式**：用 `ReadingItem.item_label`（中文维度名，如「行动情境的边界界定」）与 `DimensionItem.dim_name` 匹配，再通过 `set_id` 关联 `DimensionSet.name` 获取集合名称。注意同一个 `dim_name` 可能出现在多个维度集中，取首次出现即可（同一用户不会在不同集合中重复定义同名维度）。**教训**：系统中存在三套维度标识体系（`item_key`/`dim_key`/中文名），跨表关联时务必先确认实际数据格式，不能假设 key 可直接对应。
 
-### 8.15 DeepSeek API 全局超时治理
+### 8.16 DeepSeek API 全局超时治理
 
 改动目标：
 

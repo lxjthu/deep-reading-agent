@@ -179,6 +179,8 @@
 | `run_quant_task(...)` | 后台执行七步精读 | 七步分析失败 |
 | `run_qual_task(...)` | 后台执行四步精读 | 四步分析失败 |
 | `_try_update_bib_metadata(...)` | 从前三页提取元数据并更新 `BibEntry`（只补空字段） | 精读后文献库元数据未更新 |
+| `_is_empty_result(content)` | 检测精读维度结果是否为空（空字符串/错误占位/过短无意义） | 后检查重试逻辑排查 |
+| `_check_and_retry_empty_dimensions(...)` | 检查所有维度结果，空维度自动重试（最多 2 次） | 精读结果部分为空、重试日志排查 |
 | `start_long_context(...)` | 启动长文本任务 | 前端开始长文本无响应 |
 | `start_quant(...)` | 启动七步任务 | 前端开始七步无响应 |
 | `start_qual(...)` | 启动四步任务 | 前端开始四步无响应 |
