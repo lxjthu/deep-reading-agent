@@ -1780,6 +1780,7 @@ v2 页面核心架构（与 v1 对比）：
 - **CSS 全局选择器污染**（2026-05-14）：`compare.css` 中的 `*, *::before, *::after { margin: 0; padding: 0; }` 全局 reset 和 `:root` CSS 变量声明在 Vite 打包后对整个应用生效，清零了 Tailwind 的排版样式（标题、段落、按钮间距全部消失），导致所有页面排版崩溃。修复方案：所有样式用 `.compare-root` 顶层 class 包裹限定作用域，keyframes 加 `compare-` 前缀避免冲突。**以后新增独立 CSS 文件必须遵守此规则**（已写入 AGENTS.md）。
 - **iframe 全屏布局遗留**（2026-05-14）：原 `CompareTab` 使用 iframe 时，App.tsx 对比 Tab 用 `h-screen overflow-hidden` 锁定视口（iframe 内部自行滚动）。迁移为 React 组件后未移除此约束，导致对比页内容超出一屏无法下拉。修复：移除 `isCompareTab` 的特殊布局分支，统一使用 `min-h-screen` 正常滚动。**教训：从 iframe 迁移为 React 组件时，必须同步清理父容器的溢出控制**。
 - **React Hooks 位置违规导致白屏**（2026-05-14）：`TemplateMarket.tsx` 中 `useState(exampleTab)` 和 `useState(copied)` 放在了两个 early return（detail 面板、AI 面板）之后。当用户点击「AI 生成专属模板」时 `panel === 'ai'` 触发第 482 行提前返回，后面的 hooks 不会被调用，违反 React「所有 hooks 必须在 early return 之前」的规则，导致 React 崩溃渲染白屏。修复：将这两个 `useState` 移到组件顶部与其他 hooks 并列。**教训：React hooks 声明顺序必须与渲染路径无关，新增 hooks 时务必放在所有 early return 之前**。
+- **长文本对比维度集合名称匹配**（2026-05-14）：对比页胶囊需按维度集合名称分组显示（如「Ostrom制度分析框架」「地理学综述类论文理论建构与批判分析框架」），但 `ReadingItem.item_key`（`long.行动情境的边界界定`）和 `DimensionItem.dim_key`（`action_arena_boundary`）是两套完全不同的 key 体系，通过 key 无法直接 join。**正确匹配方式**：用 `ReadingItem.item_label`（中文维度名，如「行动情境的边界界定」）与 `DimensionItem.dim_name` 匹配，再通过 `set_id` 关联 `DimensionSet.name` 获取集合名称。注意同一个 `dim_name` 可能出现在多个维度集中，取首次出现即可（同一用户不会在不同集合中重复定义同名维度）。**教训**：系统中存在三套维度标识体系（`item_key`/`dim_key`/中文名），跨表关联时务必先确认实际数据格式，不能假设 key 可直接对应。
 
 ### 8.15 DeepSeek API 全局超时治理
 
