@@ -10,7 +10,7 @@ import './compare/compare.css'
 interface DimItem {
   id: string
   label: string
-  group_name?: string
+  dim_set_name?: string
 }
 
 interface Paper {
@@ -18,7 +18,7 @@ interface Paper {
   title: string
   authors: string[]
   year: number | null
-  dimensions?: Array<{ id: string; label: string; content: string; group_name?: string }>
+  dimensions?: Array<{ id: string; label: string; content: string; dim_set_name?: string }>
   steps?: Record<string, { label: string; subQuestions: Array<{ id: string; label: string; content: string }> }>
 }
 
@@ -39,7 +39,7 @@ function getAvailableDims(papers: Paper[], selectedIds: Set<string>): DimItem[] 
     .filter((p) => selectedIds.has(p.id))
     .forEach((p) => {
       ;(p.dimensions || []).forEach((d) => {
-        if (!map.has(d.id)) map.set(d.id, { id: d.id, label: d.label, group_name: d.group_name })
+        if (!map.has(d.id)) map.set(d.id, { id: d.id, label: d.label, dim_set_name: d.dim_set_name })
       })
     })
   return Array.from(map.values())
@@ -76,32 +76,19 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
   const stepGroups = useMemo<StepGroup[]>(() => {
     if (mode === 'long') {
       const groupMap = new Map<string, StepGroup>()
-      const ungrouped: DimItem[] = []
       availableDims.forEach((d) => {
-        if (d.group_name) {
-          if (!groupMap.has(d.group_name)) {
-            groupMap.set(d.group_name, {
-              stepKey: d.group_name,
-              stepLabel: d.group_name,
-              shortLabel: d.group_name,
-              dims: [],
-            })
-          }
-          groupMap.get(d.group_name)!.dims.push(d)
-        } else {
-          ungrouped.push(d)
+        const key = d.dim_set_name || ''
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            stepKey: key || '__default__',
+            stepLabel: key || '默认维度',
+            shortLabel: key || '默认维度',
+            dims: [],
+          })
         }
+        groupMap.get(key)!.dims.push(d)
       })
-      const groups = Array.from(groupMap.values())
-      if (ungrouped.length) {
-        groups.push({
-          stepKey: '__ungrouped__',
-          stepLabel: '其他',
-          shortLabel: '其他',
-          dims: ungrouped,
-        })
-      }
-      return groups
+      return Array.from(groupMap.values())
     }
 
     const stepMap = new Map<string, StepGroup>()

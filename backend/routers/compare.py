@@ -170,21 +170,19 @@ async def build_compare_response(
     mode_labels = {"long": "长文本精读", "quant": "七步精读", "qual": "四步精读"}
     papers = []
 
-    long_group_map: dict[str, str | None] = {}
+    long_dim_set_map: dict[str, str] = {}
     if mode == "long" and db is not None and user_id is not None:
         from db.models import DimensionSet
-        dim_items = (
+        rows = (
             await db.execute(
-                select(DimensionItem.dim_key, DimensionItem.group_name)
+                select(DimensionItem.dim_key, DimensionSet.name)
                 .join(DimensionSet, DimensionItem.set_id == DimensionSet.id)
                 .where(DimensionSet.owner_user_id == user_id)
             )
         ).all()
-        seen: set[str] = set()
-        for row in dim_items:
-            if row[0] not in seen:
-                long_group_map[row[0]] = row[1]
-                seen.add(row[0])
+        for dim_key, set_name in rows:
+            if dim_key not in long_dim_set_map:
+                long_dim_set_map[dim_key] = set_name
 
     for bib_id, items in bib_entries_items.items():
         bib = bib_entries[bib_id]
@@ -209,9 +207,9 @@ async def build_compare_response(
                     "label": item.item_label,
                     "content": item.content or "",
                 }
-                gn = long_group_map.get(item.item_key)
-                if gn is not None:
-                    dim_dict["group_name"] = gn
+                ds_name = long_dim_set_map.get(item.item_key)
+                if ds_name is not None:
+                    dim_dict["dim_set_name"] = ds_name
                 dimensions.append(dim_dict)
             paper["dimensions"] = dimensions
         else:
