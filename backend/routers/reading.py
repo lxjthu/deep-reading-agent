@@ -966,17 +966,27 @@ def run_long_context_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_long_context.md"
         
-        # Extract metadata from PDF front matter
-        tasks[task_id]["stage"] = "提取论文元数据..."
-        tasks[task_id]["logs"].append("提取论文元数据...")
-        front_matter = extract_front_matter(file_path)
-        metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
-        tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        # Extract metadata from front matter (tolerant — never fail the main task)
+        metadata = None
+        try:
+            tasks[task_id]["stage"] = "提取论文元数据..."
+            tasks[task_id]["logs"].append("提取论文元数据...")
+            front_matter = extract_front_matter(file_path)
+            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+            tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+        if not metadata:
+            from backend.services.pdf_metadata_llm import _empty_metadata
+            metadata = _empty_metadata()
         
         # Update BibEntry with extracted metadata
-        updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
-        if updated_fields:
-            tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        try:
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            if updated_fields:
+                tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "长文本精读")
@@ -1112,17 +1122,27 @@ def run_quant_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_7step.md"
         
-        # Extract metadata from PDF front matter
-        tasks[task_id]["stage"] = "提取论文元数据..."
-        tasks[task_id]["logs"].append("提取论文元数据...")
-        front_matter = extract_front_matter(file_path)
-        metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
-        tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        # Extract metadata from front matter (tolerant — never fail the main task)
+        metadata = None
+        try:
+            tasks[task_id]["stage"] = "提取论文元数据..."
+            tasks[task_id]["logs"].append("提取论文元数据...")
+            front_matter = extract_front_matter(file_path)
+            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+            tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+        if not metadata:
+            from backend.services.pdf_metadata_llm import _empty_metadata
+            metadata = _empty_metadata()
         
         # Update BibEntry with extracted metadata
-        updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
-        if updated_fields:
-            tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        try:
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            if updated_fields:
+                tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "七步精读")
@@ -1248,17 +1268,27 @@ def run_qual_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_4step.md"
         
-        # Extract metadata from PDF front matter (previously missing for qual)
-        tasks[task_id]["stage"] = "提取论文元数据..."
-        tasks[task_id]["logs"].append("提取论文元数据...")
-        front_matter = extract_front_matter(file_path)
-        metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
-        tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        # Extract metadata from front matter (tolerant — never fail the main task)
+        metadata = None
+        try:
+            tasks[task_id]["stage"] = "提取论文元数据..."
+            tasks[task_id]["logs"].append("提取论文元数据...")
+            front_matter = extract_front_matter(file_path)
+            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+            tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+        if not metadata:
+            from backend.services.pdf_metadata_llm import _empty_metadata
+            metadata = _empty_metadata()
         
         # Update BibEntry with extracted metadata
-        updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
-        if updated_fields:
-            tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        try:
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            if updated_fields:
+                tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "四步精读")

@@ -76,6 +76,7 @@
   - 使用 `pdf_metadata_extract` 提取前三页文本 + `pdf_metadata_llm` 调用 DeepSeek flash 结构化提取
   - 提取字段：标题、作者、年份、期刊、DOI、卷、期、页码、摘要、关键词
   - 只补空字段不覆盖已有值，自动更新 `dedup_key` 和 `metadata_completeness`
+  - **MD 文件元数据提取兼容**（2026-05-14）：`extract_front_matter()` 自动判断文件类型，MD 文件读取头部文本填充到与 PDF 相同的 dict 结构；元数据提取失败时仅记录警告不中断精读主流程
 
 ### 2.5 对比分析与综述
 

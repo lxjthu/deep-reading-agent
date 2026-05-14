@@ -1,10 +1,14 @@
-"""Extract metadata-relevant text from the first 1-3 pages of a PDF."""
+"""Extract metadata-relevant text from the first 1-3 pages of a PDF or Markdown file."""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
 import pdfplumber
+
+
+def _is_markdown(file_path: str) -> bool:
+    return file_path.lower().endswith((".md", ".markdown"))
 
 
 DOI_PATTERN = re.compile(
@@ -55,20 +59,8 @@ def extract_page_header(page, max_lines: int = 8) -> str:
     return "\n".join(header_lines)
 
 
-def extract_front_matter(pdf_path: str, max_pages: int = 3) -> dict:
-    """
-    Extract metadata-relevant text from the first 1-3 pages of a PDF.
-
-    Returns:
-        dict with keys:
-        - page_1_full: Full text of page 1
-        - page_2_header: Header + first few lines of page 2
-        - page_3_header: Header + first few lines of page 3
-        - doi_candidates: List of DOIs found in front matter
-        - isbn_candidates: List of ISBNs found in front matter
-        - total_pages: Total number of pages in PDF
-    """
-    result = {
+def _empty_front_matter() -> dict:
+    return {
         "page_1_full": "",
         "page_2_header": "",
         "page_3_header": "",
@@ -76,6 +68,64 @@ def extract_front_matter(pdf_path: str, max_pages: int = 3) -> dict:
         "isbn_candidates": [],
         "total_pages": 0,
     }
+
+
+def extract_front_matter_md(md_path: str, max_lines: int = 150) -> dict:
+    """Extract metadata-relevant text from a Markdown file.
+
+    Reads the first ~max_lines and maps them into the same dict structure
+    that extract_front_matter() returns for PDFs, so downstream consumers
+    (extract_metadata_with_llm) work unchanged.
+    """
+    result = _empty_front_matter()
+
+    if not Path(md_path).exists():
+        return result
+
+    try:
+        with open(md_path, "r", encoding="utf-8") as f:
+            lines = []
+            for i, line in enumerate(f):
+                if i >= max_lines:
+                    break
+                lines.append(line.rstrip("\n"))
+    except Exception:
+        return result
+
+    full_text = "\n".join(lines)
+    result["page_1_full"] = full_text
+
+    chunk_size = max(max_lines // 3, 10)
+    if len(lines) > chunk_size:
+        result["page_2_header"] = "\n".join(lines[chunk_size : chunk_size * 2])
+    if len(lines) > chunk_size * 2:
+        result["page_3_header"] = "\n".join(lines[chunk_size * 2 : chunk_size * 3])
+
+    result["doi_candidates"] = extract_dois(full_text)
+    result["isbn_candidates"] = extract_isbns(full_text)
+    result["total_pages"] = 1
+
+    return result
+
+
+def extract_front_matter(pdf_path: str, max_pages: int = 3) -> dict:
+    """
+    Extract metadata-relevant text from the first 1-3 pages of a PDF
+    or the first ~150 lines of a Markdown file.
+
+    Returns:
+        dict with keys:
+        - page_1_full: Full text of page 1 (or MD head)
+        - page_2_header: Header + first few lines of page 2
+        - page_3_header: Header + first few lines of page 3
+        - doi_candidates: List of DOIs found in front matter
+        - isbn_candidates: List of ISBNs found in front matter
+        - total_pages: Total number of pages in PDF
+    """
+    if _is_markdown(pdf_path):
+        return extract_front_matter_md(pdf_path)
+
+    result = _empty_front_matter()
 
     if not Path(pdf_path).exists():
         return result

@@ -248,7 +248,9 @@
 
 | 函数 | 作用 | 什么时候优先看 |
 |---|---|---|
-| `extract_front_matter(pdf_path)` | 从 PDF 前 1-3 页提取文本和 DOI/ISBN | 元数据提取失败 |
+| `extract_front_matter(pdf_path)` | 从 PDF 前 1-3 页或 MD 头部 150 行提取文本和 DOI/ISBN | 元数据提取失败 |
+| `extract_front_matter_md(md_path)` | 从 MD 文件头部提取文本（被 extract_front_matter 自动调用） | MD 文件元数据问题 |
+| `_is_markdown(file_path)` | 判断文件是否为 Markdown | 文件类型判断 |
 | `extract_dois(text)` | 从文本中正则提取 DOI | DOI 提取不全或误提取 |
 | `extract_isbns(text)` | 从文本中正则提取 ISBN | ISBN 提取问题 |
 | `extract_page_header(page)` | 提取页面页眉区域 | 页眉提取不准确 |
