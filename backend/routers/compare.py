@@ -183,6 +183,7 @@ async def build_compare_response(
         for dim_key, set_name in rows:
             if dim_key not in long_dim_set_map:
                 long_dim_set_map[dim_key] = set_name
+                long_dim_set_map[f"long.{dim_key}"] = set_name
 
     for bib_id, items in bib_entries_items.items():
         bib = bib_entries[bib_id]
