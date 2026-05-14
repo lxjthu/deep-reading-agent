@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useCompareData } from '../hooks/useCompareData'
 import { PaperSelector } from './compare/PaperSelector'
-import { DimNavigation } from './compare/DimNavigation'
+import { DimNavigation, getShortLabel } from './compare/DimNavigation'
+import type { StepGroup } from './compare/DimNavigation'
 import { AccordionPanel } from './compare/AccordionPanel'
 import { SynthesisModal } from './compare/SynthesisModal'
 import './compare/compare.css'
@@ -65,10 +66,37 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
   const [selectedDimIds, setSelectedDimIds] = useState<Set<string>>(new Set())
   const [dimStates, setDimStates] = useState<Record<string, 'collapsed' | 'preview' | 'full'>>({})
   const [showSynthesis, setShowSynthesis] = useState(false)
+  const [expandedStep, setExpandedStep] = useState<string | null>(null)
 
   const availableDims = useMemo(() => {
     if (mode === 'long') return getAvailableDims(papers, selectedPaperIds)
     return getAvailableDimsFromSteps(papers, selectedPaperIds)
+  }, [mode, papers, selectedPaperIds])
+
+  const stepGroups = useMemo<StepGroup[]>(() => {
+    if (mode === 'long') return []
+    const stepMap = new Map<string, StepGroup>()
+    papers
+      .filter((p) => selectedPaperIds.has(p.id))
+      .forEach((p) => {
+        Object.entries(p.steps || {}).forEach(([key, step]) => {
+          if (!stepMap.has(key)) {
+            stepMap.set(key, {
+              stepKey: key,
+              stepLabel: step.label || key,
+              shortLabel: getShortLabel(key),
+              dims: [],
+            })
+          }
+          const group = stepMap.get(key)!
+          ;(step.subQuestions || []).forEach((sq) => {
+            if (!group.dims.some((d) => d.id === sq.id)) {
+              group.dims.push({ id: sq.id, label: sq.label })
+            }
+          })
+        })
+      })
+    return Array.from(stepMap.values())
   }, [mode, papers, selectedPaperIds])
 
   const selectedPapers = useMemo(
@@ -76,10 +104,14 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
     [papers, selectedPaperIds],
   )
 
-  const visibleDims = useMemo(
-    () => (activePill === 'all' ? availableDims : availableDims.filter((d) => d.id === activePill)),
-    [activePill, availableDims],
-  )
+  const visibleDims = useMemo(() => {
+    if (activePill === 'all') return availableDims
+    if (mode !== 'long' && expandedStep) {
+      const group = stepGroups.find((g) => g.stepKey === expandedStep)
+      return (group?.dims || []).filter((d) => d.id === activePill)
+    }
+    return availableDims.filter((d) => d.id === activePill)
+  }, [activePill, availableDims, mode, expandedStep, stepGroups])
 
   const cleanedDimStates = useMemo(() => {
     const dimIdSet = new Set(availableDims.map((d) => d.id))
@@ -190,7 +222,15 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
       <PaperSelector papers={papers} selectedIds={selectedPaperIds} onToggle={togglePaper} />
 
       {selectedPaperIds.size > 0 && (
-        <DimNavigation dims={availableDims} activeId={activePill} onSelect={selectPill} />
+        <DimNavigation
+          dims={availableDims}
+          steps={stepGroups}
+          mode={mode}
+          activeId={activePill}
+          onSelect={selectPill}
+          expandedStep={expandedStep}
+          onExpandStep={setExpandedStep}
+        />
       )}
 
       {selectedPaperIds.size > 0 && (
