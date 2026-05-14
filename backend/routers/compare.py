@@ -18,7 +18,7 @@ from starlette.responses import StreamingResponse
 
 from auth.dependencies import current_user
 from db import PROJECT_ROOT, get_db
-from db.models import Artifact, BibEntry, Job, JobBibEntry, ReadingItem, User
+from db.models import Artifact, BibEntry, DimensionItem, Job, JobBibEntry, ReadingItem, User
 from db.utils import compute_dedup_key
 from backend.utils.api_key import validate_deepseek_key
 
@@ -160,13 +160,31 @@ def bib_entry_to_paper_data(bib_entry: BibEntry) -> dict:
     }
 
 
-def build_compare_response(
+async def build_compare_response(
     mode: str,
     bib_entries_items: dict[str, list[ReadingItem]],
     bib_entries: dict[str, BibEntry],
+    user_id: int | None = None,
+    db: AsyncSession | None = None,
 ) -> dict:
     mode_labels = {"long": "长文本精读", "quant": "七步精读", "qual": "四步精读"}
     papers = []
+
+    long_group_map: dict[str, str | None] = {}
+    if mode == "long" and db is not None and user_id is not None:
+        from db.models import DimensionSet
+        dim_items = (
+            await db.execute(
+                select(DimensionItem.dim_key, DimensionItem.group_name)
+                .join(DimensionSet, DimensionItem.set_id == DimensionSet.id)
+                .where(DimensionSet.owner_user_id == user_id)
+            )
+        ).all()
+        seen: set[str] = set()
+        for row in dim_items:
+            if row[0] not in seen:
+                long_group_map[row[0]] = row[1]
+                seen.add(row[0])
 
     for bib_id, items in bib_entries_items.items():
         bib = bib_entries[bib_id]
@@ -186,11 +204,15 @@ def build_compare_response(
                 if item.item_key in seen:
                     continue
                 seen.add(item.item_key)
-                dimensions.append({
+                dim_dict = {
                     "id": item.item_key,
                     "label": item.item_label,
                     "content": item.content or "",
-                })
+                }
+                gn = long_group_map.get(item.item_key)
+                if gn is not None:
+                    dim_dict["group_name"] = gn
+                dimensions.append(dim_dict)
             paper["dimensions"] = dimensions
         else:
             steps: dict[str, dict] = {}
@@ -279,7 +301,7 @@ async def get_reading_data(
     ).scalars().all()
     bib_entries = {b.id: b for b in bib_rows}
 
-    return build_compare_response(mode, bib_entries_items, bib_entries)
+    return await build_compare_response(mode, bib_entries_items, bib_entries, user.id, db)
 
 
 async def resolve_compare_members(

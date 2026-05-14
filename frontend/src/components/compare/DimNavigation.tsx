@@ -13,7 +13,6 @@ interface StepGroup {
 interface DimNavigationProps {
   dims: DimItem[]
   steps?: StepGroup[]
-  mode: 'long' | 'quant' | 'qual'
   activeId: string
   onSelect: (id: string) => void
 }
@@ -29,10 +28,10 @@ function getShortLabel(stepKey: string): string {
   return `${map[m[1]] || m[1]} ${rest}`
 }
 
-export function DimNavigation({ dims, steps, mode, activeId, onSelect }: DimNavigationProps) {
+export function DimNavigation({ dims, steps, activeId, onSelect }: DimNavigationProps) {
   if (!dims.length && (!steps || !steps.length)) return null
 
-  if (mode !== 'long' && steps && steps.length) {
+  if (steps && steps.length) {
     return (
       <nav className="dim-nav">
         <button

@@ -10,6 +10,7 @@ import './compare/compare.css'
 interface DimItem {
   id: string
   label: string
+  group_name?: string
 }
 
 interface Paper {
@@ -17,7 +18,7 @@ interface Paper {
   title: string
   authors: string[]
   year: number | null
-  dimensions?: Array<{ id: string; label: string; content: string }>
+  dimensions?: Array<{ id: string; label: string; content: string; group_name?: string }>
   steps?: Record<string, { label: string; subQuestions: Array<{ id: string; label: string; content: string }> }>
 }
 
@@ -38,7 +39,7 @@ function getAvailableDims(papers: Paper[], selectedIds: Set<string>): DimItem[] 
     .filter((p) => selectedIds.has(p.id))
     .forEach((p) => {
       ;(p.dimensions || []).forEach((d) => {
-        if (!map.has(d.id)) map.set(d.id, { id: d.id, label: d.label })
+        if (!map.has(d.id)) map.set(d.id, { id: d.id, label: d.label, group_name: d.group_name })
       })
     })
   return Array.from(map.values())
@@ -73,7 +74,36 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
   }, [mode, papers, selectedPaperIds])
 
   const stepGroups = useMemo<StepGroup[]>(() => {
-    if (mode === 'long') return []
+    if (mode === 'long') {
+      const groupMap = new Map<string, StepGroup>()
+      const ungrouped: DimItem[] = []
+      availableDims.forEach((d) => {
+        if (d.group_name) {
+          if (!groupMap.has(d.group_name)) {
+            groupMap.set(d.group_name, {
+              stepKey: d.group_name,
+              stepLabel: d.group_name,
+              shortLabel: d.group_name,
+              dims: [],
+            })
+          }
+          groupMap.get(d.group_name)!.dims.push(d)
+        } else {
+          ungrouped.push(d)
+        }
+      })
+      const groups = Array.from(groupMap.values())
+      if (ungrouped.length) {
+        groups.push({
+          stepKey: '__ungrouped__',
+          stepLabel: '其他',
+          shortLabel: '其他',
+          dims: ungrouped,
+        })
+      }
+      return groups
+    }
+
     const stepMap = new Map<string, StepGroup>()
     papers
       .filter((p) => selectedPaperIds.has(p.id))
@@ -96,7 +126,7 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
         })
       })
     return Array.from(stepMap.values())
-  }, [mode, papers, selectedPaperIds])
+  }, [mode, papers, selectedPaperIds, availableDims])
 
   const selectedPapers = useMemo(
     () => papers.filter((p) => selectedPaperIds.has(p.id)),
@@ -105,12 +135,10 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
 
   const visibleDims = useMemo(() => {
     if (activePill === 'all') return availableDims
-    if (mode !== 'long' && stepGroups.length) {
-      const group = stepGroups.find((g) => g.stepKey === activePill)
-      if (group) return group.dims
-    }
+    const group = stepGroups.find((g) => g.stepKey === activePill)
+    if (group) return group.dims
     return availableDims.filter((d) => d.id === activePill)
-  }, [activePill, availableDims, mode, stepGroups])
+  }, [activePill, availableDims, stepGroups])
 
   const cleanedDimStates = useMemo(() => {
     const dimIdSet = new Set(availableDims.map((d) => d.id))
@@ -224,7 +252,6 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
         <DimNavigation
           dims={availableDims}
           steps={stepGroups}
-          mode={mode}
           activeId={activePill}
           onSelect={selectPill}
         />
