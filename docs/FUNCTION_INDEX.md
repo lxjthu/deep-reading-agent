@@ -740,6 +740,7 @@ Key functions:
 | 历史记录预览报未认证 | `download.ts.openPreviewWithAuth(...)`、`history.py.preview_file(...)` |
 | 精读后文献库元数据未更新 | `reading.py._try_update_bib_metadata(...)`、`pdf_metadata_extract.py.extract_front_matter(...)`、`pdf_metadata_llm.py.extract_metadata_with_llm(...)` |
 | 提示词管理显示空或保存失败 | `prompt_service.py.ensure_builtin_prompt_templates(...)`、`get_prompt_payload(...)`、`prompts.py.get_prompt_item(...)` |
+| 模板市场 AI 生成白屏 | `TemplateMarket.tsx` 的 hooks 声明位置（须在所有 early return 之前） |
 
 ## 5. 维护建议
 

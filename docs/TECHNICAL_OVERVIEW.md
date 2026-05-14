@@ -1779,6 +1779,7 @@ v2 页面核心架构（与 v1 对比）：
 
 - **CSS 全局选择器污染**（2026-05-14）：`compare.css` 中的 `*, *::before, *::after { margin: 0; padding: 0; }` 全局 reset 和 `:root` CSS 变量声明在 Vite 打包后对整个应用生效，清零了 Tailwind 的排版样式（标题、段落、按钮间距全部消失），导致所有页面排版崩溃。修复方案：所有样式用 `.compare-root` 顶层 class 包裹限定作用域，keyframes 加 `compare-` 前缀避免冲突。**以后新增独立 CSS 文件必须遵守此规则**（已写入 AGENTS.md）。
 - **iframe 全屏布局遗留**（2026-05-14）：原 `CompareTab` 使用 iframe 时，App.tsx 对比 Tab 用 `h-screen overflow-hidden` 锁定视口（iframe 内部自行滚动）。迁移为 React 组件后未移除此约束，导致对比页内容超出一屏无法下拉。修复：移除 `isCompareTab` 的特殊布局分支，统一使用 `min-h-screen` 正常滚动。**教训：从 iframe 迁移为 React 组件时，必须同步清理父容器的溢出控制**。
+- **React Hooks 位置违规导致白屏**（2026-05-14）：`TemplateMarket.tsx` 中 `useState(exampleTab)` 和 `useState(copied)` 放在了两个 early return（detail 面板、AI 面板）之后。当用户点击「AI 生成专属模板」时 `panel === 'ai'` 触发第 482 行提前返回，后面的 hooks 不会被调用，违反 React「所有 hooks 必须在 early return 之前」的规则，导致 React 崩溃渲染白屏。修复：将这两个 `useState` 移到组件顶部与其他 hooks 并列。**教训：React hooks 声明顺序必须与渲染路径无关，新增 hooks 时务必放在所有 early return 之前**。
 
 ### 8.15 DeepSeek API 全局超时治理
 

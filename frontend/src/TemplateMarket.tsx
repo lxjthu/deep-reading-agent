@@ -97,6 +97,9 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
   const aiFileRef = useRef<HTMLInputElement>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
 
+  const [exampleTab, setExampleTab] = useState<'md' | 'json' | 'prompt'>('md')
+  const [copied, setCopied] = useState(false)
+
   const loadTemplates = async () => {
     try {
       const url =
@@ -697,9 +700,6 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
 6. 模板名称以"框架"结尾
 
 请直接输出 Markdown 内容，不要输出其他解释。`
-
-  const [exampleTab, setExampleTab] = useState<'md' | 'json' | 'prompt'>('md')
-  const [copied, setCopied] = useState(false)
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {
