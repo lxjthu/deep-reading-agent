@@ -1742,7 +1742,7 @@ v2 页面核心架构（与 v1 对比）：
 - **None 年份穿透**：`dict.get('year', 'n.d.')` 当值为 None 时返回 None 而非默认值，输出 `佚名 (None). 标题`。用 `_safe_year()` 统一处理
 - **二次引用膨胀**：`build_gbt7714_references()` 将所有 BibReference 都列入二次引用目录。改用 DeepSeek 识别正文实际引用的文献（temperature=0.1, max_tokens=500），复用 system prompt + metadata_block 前缀保持缓存命中
 - **维度内容截断**：原 `CONTENT_CHAR_LIMIT = 3000` 截断维度文本，DeepSeek 支持百万上下文无此必要，已移除
-- **OpenAI client 超时**：默认 timeout 不够，统一设为 300s（4 处 `OpenAI()` 调用）
+- **OpenAI client 超时**：`compare.py`（5处）和 `conversation_engine.py`（1处）统一设 `timeout=300s`；其余服务（`deepseek_refs.py`、`pdf_metadata_llm.py`、`ai_template_generator.py`、`metadata_extractor.py`）设 `connect=30s, read=120s, write=30s, pool=30s`，`deepseek_refs.py` 的重试循环额外捕获 `APITimeoutError`/`ConnectTimeout` 以触发重试而非直接失败
 
 当前结果：
 
@@ -1779,6 +1779,29 @@ v2 页面核心架构（与 v1 对比）：
 
 - **CSS 全局选择器污染**（2026-05-14）：`compare.css` 中的 `*, *::before, *::after { margin: 0; padding: 0; }` 全局 reset 和 `:root` CSS 变量声明在 Vite 打包后对整个应用生效，清零了 Tailwind 的排版样式（标题、段落、按钮间距全部消失），导致所有页面排版崩溃。修复方案：所有样式用 `.compare-root` 顶层 class 包裹限定作用域，keyframes 加 `compare-` 前缀避免冲突。**以后新增独立 CSS 文件必须遵守此规则**（已写入 AGENTS.md）。
 - **iframe 全屏布局遗留**（2026-05-14）：原 `CompareTab` 使用 iframe 时，App.tsx 对比 Tab 用 `h-screen overflow-hidden` 锁定视口（iframe 内部自行滚动）。迁移为 React 组件后未移除此约束，导致对比页内容超出一屏无法下拉。修复：移除 `isCompareTab` 的特殊布局分支，统一使用 `min-h-screen` 正常滚动。**教训：从 iframe 迁移为 React 组件时，必须同步清理父容器的溢出控制**。
+
+### 8.15 DeepSeek API 全局超时治理
+
+改动目标：
+
+- 修复长文本精读后自动提取参考文献时，`OpenAI()` 客户端默认 connect 超时 5s，走代理 SSL 握手超时直接失败的问题
+- 统一所有调用 DeepSeek API 的入口的超时配置
+
+落点文件：
+
+- `backend/services/deepseek_refs.py` — 添加 `httpx.Timeout(connect=30, read=120, write=30, pool=30)`，重试循环捕获 `APITimeoutError`/`ConnectTimeout`
+- `backend/services/pdf_metadata_llm.py` — 添加同等超时配置
+- `backend/services/ai_template_generator.py` — 添加同等超时配置
+- `backend/routers/metadata_extractor.py` — 添加同等超时配置
+
+已验证无需改动的文件：
+
+- `backend/routers/compare.py`（5 处）— 已有 `timeout=300`
+- `new_architecture/conversation_engine.py`（1 处）— 已有 `timeout=300`
+
+踩坑记录：
+
+- **默认超时过短**（2026-05-14）：`OpenAI()` 不传 `timeout` 时 httpx 默认 connect 5s，走 HTTP 代理做 TLS 握手时容易超时。`deepseek_refs.py` 的重试循环只处理空响应，不捕获超时异常，导致超时直接穿透到 `_try_extract_references` 被外层 `except Exception` 吞掉并静默失败。**教训：所有 OpenAI 客户端必须显式设置超时，重试循环必须捕获超时异常**。
 
 ## 9. 改代码时的推荐查找路径
 

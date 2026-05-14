@@ -1,6 +1,7 @@
 import json
 from typing import Optional
 
+import httpx
 from openai import OpenAI
 
 from backend.utils.api_key import validate_deepseek_key
@@ -81,7 +82,11 @@ def generate_template_from_paper(
         dim_count=dim_count,
     )
 
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.deepseek.com",
+        timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
+    )
 
     response = client.chat.completions.create(
         model=MODEL,
