@@ -66,7 +66,6 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
   const [selectedDimIds, setSelectedDimIds] = useState<Set<string>>(new Set())
   const [dimStates, setDimStates] = useState<Record<string, 'collapsed' | 'preview' | 'full'>>({})
   const [showSynthesis, setShowSynthesis] = useState(false)
-  const [expandedStep, setExpandedStep] = useState<string | null>(null)
 
   const availableDims = useMemo(() => {
     if (mode === 'long') return getAvailableDims(papers, selectedPaperIds)
@@ -106,12 +105,12 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
 
   const visibleDims = useMemo(() => {
     if (activePill === 'all') return availableDims
-    if (mode !== 'long' && expandedStep) {
-      const group = stepGroups.find((g) => g.stepKey === expandedStep)
-      return (group?.dims || []).filter((d) => d.id === activePill)
+    if (mode !== 'long' && stepGroups.length) {
+      const group = stepGroups.find((g) => g.stepKey === activePill)
+      if (group) return group.dims
     }
     return availableDims.filter((d) => d.id === activePill)
-  }, [activePill, availableDims, mode, expandedStep, stepGroups])
+  }, [activePill, availableDims, mode, stepGroups])
 
   const cleanedDimStates = useMemo(() => {
     const dimIdSet = new Set(availableDims.map((d) => d.id))
@@ -228,8 +227,6 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
           mode={mode}
           activeId={activePill}
           onSelect={selectPill}
-          expandedStep={expandedStep}
-          onExpandStep={setExpandedStep}
         />
       )}
 
