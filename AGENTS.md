@@ -28,9 +28,11 @@ frontend/ (React 19 + Vite + Tailwind + Zustand)
   src/RootApp.tsx       — 路由守卫、登录注册
   src/App.tsx           — 工作台壳（Tab导航、FilterTab/LongTab/QuantTab/QualTab/HistoryTab/PromptsTab）
   src/LibraryTab.tsx    — 文献库页面
+  src/components/CompareView.tsx — 对比综述主组件（替代 iframe）
+  src/components/compare/ — 对比子组件（AnswerCard/AccordionPanel/PaperSelector/DimNavigation/SynthesisModal）
   src/store/auth.ts     — Zustand 登录态
   src/lib/api-fetch.ts  — 全局鉴权 fetch（自动 refresh token）
-  public/compare_*.html — 对比综述旧页面（iframe 承载）
+  public/compare_*.html — 对比综述 demo 页面（独立 demo 参考，不再嵌入主应用）
 
 backend/ (FastAPI + SQLAlchemy 2.0 async + SQLite)
   main.py               — FastAPI 入口、路由注册、启动初始化
@@ -99,6 +101,14 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 
 **⚠️ 编辑大文件时（尤其 FastAPI router），替换完务必检查路由注册是否完整**：用 `python -c "from routers.xxx import router; [print(r.path) for r in router.routes]"` 验证所有端点都在。曾有替换 `apply_match` 时误将 `match_online` 路由定义连带删掉的事故。
 
+**⚠️ 新增独立 CSS 文件时，严禁使用全局选择器**：
+- 禁止 `*, *::before, *::after { margin: 0; ... }` 等 CSS reset（会清零整个应用的 Tailwind 排版）
+- 禁止 `:root { --var: ... }` 声明（会污染全局 CSS 变量）
+- 禁止不带作用域的 `.btn`、`.action-bar` 等通用类名（会与其他页面冲突）
+- **必须**用一个顶层 class（如 `.compare-root`）包裹所有样式，写成 `.compare-root .btn { ... }`
+- 所有 keyframes 也加前缀（如 `compare-spin`）避免冲突
+- 历史事故：`compare.css` 的全局 reset 导致整个前端排版崩溃（2026-05-14）
+
 ## 改代码优先看的文件
 
 | 改什么 | 先看 |
@@ -108,7 +118,7 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 | 题录筛选 | `routers/filter.py` `App.tsx FilterTab` |
 | 精读 | `routers/reading.py` `conversation_engine.py` `App.tsx *Tab` |
 | 批量精读 | `routers/reading.py`（`start_batch_reading` / `get_batch_status`） `App.tsx`（`useBatchReadingTracker`） |
-| 对比综述 | `routers/compare.py` `public/compare_*.html` |
+| 对比综述 | `CompareView.tsx` `compare/` 子组件 `compare.css` `routers/compare.py` |
 | AI综述 | `routers/compare.py`（synthesize_dimensions/synthesize_long_dimensions） |
 | 文献库 | `routers/library.py` `LibraryTab.tsx` |
 | 提示词 | `prompt_registry.py` `prompt_service.py` `routers/prompts.py` |

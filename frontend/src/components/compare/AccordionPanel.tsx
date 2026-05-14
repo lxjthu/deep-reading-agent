@@ -59,7 +59,7 @@ export function AccordionPanel({
       <div
         className="accordion-header"
         onClick={(e) => {
-          if ((e.target as HTMLElement).type === 'checkbox') return
+          if ((e.target as HTMLInputElement).type === 'checkbox') return
           onToggleExpand(dimId)
         }}
       >

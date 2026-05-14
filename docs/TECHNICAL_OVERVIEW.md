@@ -79,11 +79,10 @@
 
 ### 2.5 对比分析与综述
 
-- 长文本对比
-- 七步对比
-- 四步对比
+- 长文本对比、七步对比、四步对比
 - 支持单问题、多问题、跨步骤综述
 - 对比优先读取结构化精读结果
+- **v2.0 React 组件已替代 iframe**（2026-05-14）：三个对比 Tab 均使用 `CompareView` React 组件，从生产 API 加载数据，不再通过 iframe 承载旧 HTML
 - **AI 文献综述**（2026-05-10 新增）
   - 独立的 `/synthesis`（七步/四步）和 `/synthesis_long`（长文本）端点
   - 按维度串行生成综述，五层写作结构（梳理总结→源流比较→学术对话→缺漏分析→新起点）
@@ -1128,22 +1127,36 @@ export_20260506_username.dra
 - `downloadWithAuth(...)`
 - `openPreviewWithAuth(...)`
 
-## 6.7 对比页承载
+## 6.7 对比页承载（v2.0 React 组件）
 
-工作台内的对比页是通过 `iframe` 承载旧页面：
+三个对比 Tab 已从 iframe 迁移为 React 组件：
 
-- [compare_long.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_long.html)
-- [compare_7step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_7step.html)
-- [compare_4step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_4step.html)
+- `frontend/src/components/CompareView.tsx` — 对比综述主组件（替代 iframe）
+- `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
+- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开）
+- `frontend/src/components/compare/PaperSelector.tsx` — 文献选择卡片
+- `frontend/src/components/compare/DimNavigation.tsx` — 维度/步骤导航胶囊
+- `frontend/src/components/compare/SynthesisModal.tsx` — AI 综述弹窗
+- `frontend/src/components/compare/compare.css` — 对比页独立样式
+- `frontend/src/hooks/useCompareData.ts` — 对比数据加载 Hook
+- `frontend/src/hooks/useSynthesisStream.ts` — AI 综述 SSE 流式 Hook
 
-独立 demo 入口：
+旧 demo HTML 页面保留作参考：
 
-- [compare_index.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_index.html) — 通过 `backend/compare_demo_server.py`（端口 8001）访问
+- `frontend/public/compare_long.html`
+- `frontend/public/compare_7step.html`
+- `frontend/public/compare_4step.html`
+- `frontend/public/compare_index.html` — 通过 `backend/compare_demo_server.py`（端口 8001）访问
 
-在 `App.tsx` 中的职责：
+后端新增端点：
 
-- 负责给这三个页面提供全屏容器
-- 保证对比页不被普通页布局挤压
+- `GET /api/compare/reading-data` — 聚合用户精读数据（返回与 demo JSON 同构的数据）
+- `POST /api/compare/synthesis-stream` — AI 综述 SSE 流式端点
+
+在 `App.tsx` 中的集成：
+
+- 三个对比 Tab 直接渲染 `<CompareView mode="long|quant|qual" apiKey={...} />`
+- 对比页全屏布局，不受普通 Tab 布局挤压
 
 ### 6.7.1 `compare_7step.html`
 
@@ -1674,9 +1687,11 @@ v2 页面核心架构（与 v1 对比）：
 
 当前状态：
 
-- 三个 demo 页面功能完整，可直接通过 `python backend/compare_demo_server.py` 启动体验
-- 对比 v1 的正式页面（iframe 承载）尚未替换，v2 页面仅在 demo 服务中可用
-- 下一步：将 v2 设计正式集成到主应用中，替换 iframe 承载方案
+- 三个 demo 页面功能完整，可通过 `python backend/compare_demo_server.py` 启动体验
+- **v2.0 React 组件已正式集成到主应用**（2026-05-14），替换了 iframe 承载方案
+- 三个对比 Tab 均使用 `CompareView` 组件，从生产 API 加载真实精读数据
+- AI 综述通过 `SynthesisModal` 组件调用 SSE 流式端点
+- 旧 demo HTML 文件保留作为独立 demo 和交互参考
 
 ### 8.13 AI 文献综述模块
 
@@ -1738,6 +1753,33 @@ v2 页面核心架构（与 v1 对比）：
 - 产物文件名格式 `综述-YYYYMMDD-作者姓.md`
 - 旧的「对比分析」按钮和 `/analyze`、`/analyze_long` 端点完全不受影响
 
+### 8.14 对比综述 Demo → 生产集成（React 组件替换 iframe）
+
+改动目标：
+
+- 将三个对比 Tab 从 iframe 承载 `compare_*.html` 迁移为 React 组件 `CompareView`
+- 从生产 API 加载真实精读数据，不再依赖 demo JSON
+- AI 综述通过 `SynthesisModal` 调用 SSE 流式端点
+
+落点文件：
+
+- `frontend/src/components/CompareView.tsx` — 对比综述主组件（新建）
+- `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
+- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开）
+- `frontend/src/components/compare/PaperSelector.tsx` — 文献选择卡片
+- `frontend/src/components/compare/DimNavigation.tsx` — 维度/步骤导航胶囊
+- `frontend/src/components/compare/SynthesisModal.tsx` — AI 综述弹窗
+- `frontend/src/components/compare/compare.css` — 对比页独立样式（限定 `.compare-root` 作用域）
+- `frontend/src/hooks/useCompareData.ts` — 对比数据加载 Hook
+- `frontend/src/hooks/useSynthesisStream.ts` — AI 综述 SSE 流式 Hook
+- `frontend/src/App.tsx` — 替换 CompareTab iframe 为 CompareView 组件
+- `backend/routers/compare.py` — 新增 `GET /reading-data` 和 `POST /synthesis-stream`
+
+踩坑记录：
+
+- **CSS 全局选择器污染**（2026-05-14）：`compare.css` 中的 `*, *::before, *::after { margin: 0; padding: 0; }` 全局 reset 和 `:root` CSS 变量声明在 Vite 打包后对整个应用生效，清零了 Tailwind 的排版样式（标题、段落、按钮间距全部消失），导致所有页面排版崩溃。修复方案：所有样式用 `.compare-root` 顶层 class 包裹限定作用域，keyframes 加 `compare-` 前缀避免冲突。**以后新增独立 CSS 文件必须遵守此规则**（已写入 AGENTS.md）。
+- **iframe 全屏布局遗留**（2026-05-14）：原 `CompareTab` 使用 iframe 时，App.tsx 对比 Tab 用 `h-screen overflow-hidden` 锁定视口（iframe 内部自行滚动）。迁移为 React 组件后未移除此约束，导致对比页内容超出一屏无法下拉。修复：移除 `isCompareTab` 的特殊布局分支，统一使用 `min-h-screen` 正常滚动。**教训：从 iframe 迁移为 React 组件时，必须同步清理父容器的溢出控制**。
+
 ## 9. 改代码时的推荐查找路径
 
 ## 9.1 要改注册/登录/权限
@@ -1777,12 +1819,14 @@ v2 页面核心架构（与 v1 对比）：
 
 先看：
 
-- `backend/routers/compare.py` — 生产 API
-- `frontend/public/compare_long.html` — 长文本对比页
-- `frontend/public/compare_7step.html` — 七步对比页
-- `frontend/public/compare_4step.html` — 四步对比页
+- `frontend/src/components/CompareView.tsx` — 对比综述主组件
+- `frontend/src/components/compare/*.tsx` — 子组件（AnswerCard, AccordionPanel, PaperSelector, DimNavigation, SynthesisModal）
+- `frontend/src/components/compare/compare.css` — 对比页样式
+- `frontend/src/hooks/useCompareData.ts` — 数据加载 Hook
+- `frontend/src/hooks/useSynthesisStream.ts` — AI 综述 SSE Hook
+- `backend/routers/compare.py` — 生产 API（含 `/reading-data` 和 `/synthesis-stream`）
 - `docs/compare-design-spec.md` — v2 设计规范
-- `backend/compare_demo_server.py` — 独立 demo 后端（端口 8001）
+- `docs/COMPARE_DEMO_REFERENCE.md` — Demo 前后端技术参考
 
 ## 9.6 要改文献库
 
@@ -1878,7 +1922,7 @@ v2 页面核心架构（与 v1 对比）：
 9. `frontend/src/RootApp.tsx`
 10. `frontend/src/App.tsx`
 11. `frontend/src/LibraryTab.tsx`
-12. `frontend/public/compare_*.html`
+12. `frontend/src/components/CompareView.tsx` + `compare/` 子组件
 
 ## 12. 维护建议
 
@@ -1906,8 +1950,8 @@ v2 页面核心架构（与 v1 对比）：
 
 优先决定：
 
-- 是放在 React 主工作台内
-- 还是像 compare 一样暂时挂旧页面
+- 是放在 React 主工作台内（如 CompareView）
+- 还是独立 HTML 页面（如 demo 页面）
 
 同时同步更新：
 

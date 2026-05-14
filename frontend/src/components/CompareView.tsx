@@ -148,33 +148,40 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
 
   if (loading) {
     return (
+      <div className="compare-root">
       <div className="page-wrapper">
         <div className="loading-state">
           <div className="spinner" />
           <span>加载中...</span>
         </div>
       </div>
+    </div>
     )
   }
 
   if (error) {
     return (
+    <div className="compare-root">
       <div className="page-wrapper">
         <div className="error-state">加载失败: {error}</div>
       </div>
+    </div>
     )
   }
 
   if (!papers.length) {
     return (
+    <div className="compare-root">
       <div className="page-wrapper">
         <div className="empty-state">暂无论文数据，请先完成精读</div>
       </div>
+    </div>
     )
   }
 
   return (
-    <div className="page-wrapper">
+    <div className="compare-root">
+      <div className="page-wrapper">
       <header className="page-header">
         <h1 className="page-title">{title}</h1>
         <p className="page-subtitle">{subtitle}</p>
@@ -231,6 +238,7 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
         selectedDimIds={Array.from(selectedDimIds)}
         apiKey={apiKey}
       />
+      </div>
     </div>
   )
 }

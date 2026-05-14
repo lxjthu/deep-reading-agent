@@ -6,6 +6,7 @@ import ReferenceTraceTab from './ReferenceTraceTab'
 import TemplateMarket from './TemplateMarket'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import { useAuthStore } from './store/auth'
+import { CompareView } from './components/CompareView'
 
 // Tab definitions
 const TABS = [
@@ -220,15 +221,10 @@ function App() {
     }
   }
 
-  const isCompareTab =
-    activeTab === 'compare-long' || activeTab === 'compare-7step' || activeTab === 'compare-4step'
-
-  const shellInnerClass = isCompareTab
-    ? 'flex h-full w-full min-h-0 flex-1'
-    : 'mx-auto min-w-0 w-full max-w-[1800px] flex-1 px-3 py-4 sm:px-4 sm:py-5 lg:px-6 lg:py-6 xl:px-8'
+  const shellInnerClass = 'mx-auto min-w-0 w-full max-w-[1800px] flex-1 px-3 py-4 sm:px-4 sm:py-5 lg:px-6 lg:py-6 xl:px-8'
 
   return (
-    <div className={`${isCompareTab ? 'h-screen overflow-hidden' : 'min-h-screen'} flex flex-col bg-white text-gray-900`}>
+    <div className="min-h-screen flex flex-col bg-white text-gray-900">
       {/* Header */}
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex w-full max-w-[1800px] items-start justify-between gap-3 px-3 py-3 sm:px-4 sm:py-4 lg:px-6 xl:px-8">
@@ -463,15 +459,15 @@ function App() {
       </nav>
 
       {/* Main Content */}
-      <main className={isCompareTab ? 'flex flex-1 min-h-0 overflow-hidden' : 'flex flex-1 min-h-0'}>
+      <main className="flex flex-1 min-h-0">
         <div className={shellInnerClass}>
           {activeTab === 'filter' && <FilterTab apiKey={apiKey} />}
           {activeTab === 'long' && <LongTab apiKey={apiKey} />}
           {activeTab === 'quant' && <QuantTab apiKey={apiKey} />}
           {activeTab === 'qual' && <QualTab apiKey={apiKey} />}
-          {activeTab === 'compare-long' && <CompareTab title="长文本精读对比分析" src="/compare_long.html" />}
-          {activeTab === 'compare-7step' && <CompareTab title="七步法对比分析" src="/compare_7step.html" />}
-          {activeTab === 'compare-4step' && <CompareTab title="四步法对比分析" src="/compare_4step.html" />}
+          {activeTab === 'compare-long' && <CompareView mode="long" apiKey={apiKey || null} />}
+          {activeTab === 'compare-7step' && <CompareView mode="quant" apiKey={apiKey || null} />}
+          {activeTab === 'compare-4step' && <CompareView mode="qual" apiKey={apiKey || null} />}
           {activeTab === 'library' && <LibraryTab apiKey={apiKey} />}
           {activeTab === 'references' && <ReferenceTraceTab apiKey={apiKey} />}
           {activeTab === 'prompts' && <PromptsTab apiKey={apiKey} />}
@@ -2982,22 +2978,4 @@ function HistoryTab() {
   )
 }
 
-// Tab: 对比分析
-function CompareTab({ title, src }: { title: string; src: string }) {
-  return (
-    <div className="flex flex-1 min-h-0 flex-col bg-gray-100">
-      <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-3 shadow-sm sm:px-6 sm:py-4">
-        <h3 className="text-base font-semibold text-gray-900">{title}</h3>
-        <p className="mt-1 text-sm text-gray-500">当前标签直接进入对应对比页面，内容区域按整个工作区展开。</p>
-      </div>
 
-      <div className="flex flex-1 min-h-0 bg-white p-1 sm:p-2">
-        <iframe
-          src={src}
-          className="block flex-1 min-h-0 w-full rounded-xl border border-gray-200 bg-white"
-          title={title}
-        />
-      </div>
-    </div>
-  )
-}

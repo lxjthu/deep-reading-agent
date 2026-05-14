@@ -600,7 +600,7 @@ Key functions/endpoints:
 | `QualTab` | 四步精读页面 | 四步上传、启动、日志、结果预览 |
 | `PromptsTab` | 提示词管理页面 | 系统默认 / 用户覆盖编辑 |
 | `HistoryTab` | 历史记录页面 | 历史预览、下载、删除 |
-| `CompareTab` | iframe 对比页容器 | 对比页铺满布局 |
+| `CompareView` | React 对比综述主组件 | 替代 iframe，文献选择+维度导航+折叠面板+AI综述 |
 
 ## 3.5 `frontend/src/LibraryTab.tsx`
 
