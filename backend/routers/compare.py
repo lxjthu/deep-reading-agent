@@ -18,7 +18,7 @@ from starlette.responses import StreamingResponse
 
 from auth.dependencies import current_user
 from db import PROJECT_ROOT, get_db
-from db.models import Artifact, BibEntry, DimensionItem, Job, JobBibEntry, ReadingItem, User
+from db.models import Artifact, BibEntry, Job, JobBibEntry, ReadingItem, User
 from db.utils import compute_dedup_key
 from backend.utils.api_key import validate_deepseek_key
 
@@ -172,18 +172,52 @@ async def build_compare_response(
 
     long_dim_set_map: dict[str, str] = {}
     if mode == "long" and db is not None and user_id is not None:
-        from db.models import DimensionSet
-        rows = (
-            await db.execute(
-                select(DimensionItem.dim_key, DimensionSet.name)
-                .join(DimensionSet, DimensionItem.set_id == DimensionSet.id)
-                .where(DimensionSet.owner_user_id == user_id)
-            )
-        ).all()
-        for dim_key, set_name in rows:
-            if dim_key not in long_dim_set_map:
-                long_dim_set_map[dim_key] = set_name
-                long_dim_set_map[f"long.{dim_key}"] = set_name
+        from db.models import DimensionSet, Job
+        all_items = [
+            item
+            for items in bib_entries_items.values()
+            for item in items
+        ]
+        job_ids = list({item.job_id for item in all_items})
+        if job_ids:
+            jobs = (
+                await db.execute(
+                    select(Job.id, Job.params_json).where(Job.id.in_(job_ids))
+                )
+            ).all()
+            dim_set_ids: set[int] = set()
+            for _, params_json in jobs:
+                try:
+                    params = json.loads(params_json or "{}")
+                    ds_id = params.get("dimension_set_id")
+                    if ds_id is not None:
+                        dim_set_ids.add(int(ds_id))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            dim_set_names: dict[int, str] = {}
+            if dim_set_ids:
+                ds_rows = (
+                    await db.execute(
+                        select(DimensionSet.id, DimensionSet.name).where(DimensionSet.id.in_(dim_set_ids))
+                    )
+                ).all()
+                for ds_id, ds_name in ds_rows:
+                    dim_set_names[ds_id] = ds_name
+            for job_id, params_json in jobs:
+                try:
+                    params = json.loads(params_json or "{}")
+                    ds_id = params.get("dimension_set_id")
+                    if ds_id is None:
+                        continue
+                    set_name = dim_set_names.get(int(ds_id))
+                    if not set_name:
+                        continue
+                    job_items = [it for it in bib_entries_items.values() for it in it if it.job_id == job_id]
+                    for it in job_items:
+                        if it.item_key not in long_dim_set_map:
+                            long_dim_set_map[it.item_key] = set_name
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
     for bib_id, items in bib_entries_items.items():
         bib = bib_entries[bib_id]
