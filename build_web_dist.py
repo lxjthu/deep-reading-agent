@@ -157,15 +157,7 @@ echo   Deep Reading Agent - 学术论文深度精读系统
 echo ============================================
 echo.
 
-echo 正在启动 Deep Reading Agent ...
-echo 启动后将自动打开浏览器访问 http://localhost:8000
-echo.
-
-start "" DeepReadingAgent\\DeepReadingAgent.exe
-
-echo Deep Reading Agent 已启动！
-echo 按任意键可关闭此窗口（服务仍在后台运行）
-pause >nul
+DeepReadingAgent\\DeepReadingAgent.exe
 """
     bat_path = DIST_DIR / "启动DeepReadingAgent.bat"
     bat_path.parent.mkdir(parents=True, exist_ok=True)

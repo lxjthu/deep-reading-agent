@@ -13,8 +13,7 @@ from typing import Dict, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
-# Load .env from project root (parent of backend/)
-env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+env_path = os.environ.get('DEEP_READING_ENV', os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 load_dotenv(env_path)
 
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
@@ -32,9 +31,10 @@ from prompt_service import ensure_builtin_prompt_templates
 from template_seed import ensure_dimension_templates
 from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions
 
-# Create upload directory
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deep_reading_results")
+_UPLOAD_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
+_RESULTS_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deep_reading_results")
+UPLOAD_DIR = os.environ.get('UPLOAD_DIR', _UPLOAD_DIR_DEFAULT)
+RESULTS_DIR = os.environ.get('RESULTS_DIR', _RESULTS_DIR_DEFAULT)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
