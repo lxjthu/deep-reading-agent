@@ -207,6 +207,7 @@ async def build_compare_response(
                     "id": item.item_key,
                     "label": item.item_label,
                     "content": item.content or "",
+                    "reading_item_id": item.id,
                 }
                 ds_name = long_dim_set_map.get(item.item_label)
                 if ds_name is not None:
@@ -223,6 +224,7 @@ async def build_compare_response(
                     "id": item.item_key,
                     "label": item.item_label,
                     "content": item.content or "",
+                    "reading_item_id": item.id,
                 })
             paper["steps"] = steps
 
