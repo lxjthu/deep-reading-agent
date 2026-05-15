@@ -1,786 +1,928 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>四步法对比分析</title>
-  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-  <script src="/auth-client.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      height: 100%;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f5f5;
-      padding: 12px 16px;
-      line-height: 1.6;
-    }
-    .container {
-      width: 100%;
-      max-width: none;
-      margin: 0;
-      min-height: 100%;
-    }
-    h1 { color: #1a1a2e; margin-bottom: 8px; }
-    .subtitle { color: #666; margin-bottom: 24px; }
-    
-    /* Navigation */
-    .nav-tabs { display: none; }
-    .nav-tab {
-      padding: 8px 16px;
-      border-radius: 6px;
-      text-decoration: none;
-      color: #6b7280;
-      background: white;
-      border: 1px solid #e5e7eb;
-      font-size: 14px;
-      transition: all 0.2s;
-    }
-    .nav-tab:hover { background: #f9fafb; }
-    .nav-tab.active {
-      background: #059669;
-      color: white;
-      border-color: #059669;
-    }
-    
-    /* Controls */
-    .controls {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .controls-row {
-      display: flex;
-      gap: 16px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-    }
-    .controls-row:last-child { margin-bottom: 0; }
-    label { font-weight: 600; color: #374151; font-size: 14px; }
-    select {
-      padding: 8px 12px;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      font-size: 14px;
-      background: white;
-      cursor: pointer;
-    }
-    select:focus { outline: none; border-color: #059669; }
-    
-    /* Paper selection */
-    .paper-list {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .paper-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .paper-checkbox {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      background: #f3f4f6;
-      border-radius: 20px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-    }
-    .paper-checkbox:hover { background: #e5e7eb; }
-    .paper-checkbox input { cursor: pointer; }
-    .paper-checkbox.checked { background: #d1fae5; color: #065f46; }
-    .btn-delete {
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      padding: 4px;
-      border-radius: 4px;
-      opacity: 0.5;
-      transition: opacity 0.2s;
-    }
-    .btn-delete:hover { opacity: 1; background: #fee2e2; }
-    
-    /* AI Synthesis button */
-    .btn-synthesis {
-      background: linear-gradient(135deg, #059669, #047857);
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      margin-left: auto;
-    }
-    .btn-synthesis:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(5,150,105,0.3); }
-    .btn-synthesis:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-    
-    /* Table */
-    .table-container {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      overflow-x: auto;
-    }
-    table { width: 100%; border-collapse: collapse; }
-    th, td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid #e5e7eb;
-      vertical-align: top;
-    }
-    th {
-      background: #f9fafb;
-      font-weight: 600;
-      color: #374151;
-      font-size: 13px;
-      position: sticky;
-      top: 0;
-    }
-    .paper-title { font-weight: 600; color: #1a1a2e; font-size: 13px; }
-    .paper-header { color: #6b7280; font-size: 11px; margin-top: 2px; }
-    .cell-content {
-      max-height: 120px;
-      overflow: hidden;
-      cursor: pointer;
-      font-size: 13px;
-      line-height: 1.6;
-      color: #374151;
-      transition: max-height 0.3s;
-      position: relative;
-    }
-    .cell-content::after {
-      content: '';
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 30px;
-      background: linear-gradient(transparent, white);
-      pointer-events: none;
-    }
-    .cell-content.expanded {
-      max-height: none;
-      overflow: visible;
-    }
-    .cell-content.expanded::after { display: none; }
-    .cell-empty { color: #9ca3af; font-style: italic; font-size: 13px; }
-    .table-scroll {
-      min-height: 420px;
-      max-height: calc(100vh - 220px);
-      overflow-y: auto;
-    }
-    
-    /* Loading */
-    .loading { display: flex; align-items: center; gap: 8px; color: #6b7280; }
-    .spinner {
-      width: 16px; height: 16px;
-      border: 2px solid #e5e7eb;
-      border-top-color: #059669;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    
-    /* Empty state */
-    .empty {
-      text-align: center;
-      padding: 60px 20px;
-      color: #6b7280;
-    }
-    .empty-icon { font-size: 48px; margin-bottom: 12px; }
-    
-    /* Modal */
-    .modal-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 100;
-      justify-content: center;
-      align-items: center;
-    }
-    .modal-overlay.active { display: flex; }
-    .modal {
-      background: white;
-      border-radius: 12px;
-      width: 90%;
-      max-width: 900px;
-      max-height: 80vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-    .modal-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .modal-header h2 { font-size: 18px; color: #1a1a2e; }
-    .modal-close {
-      background: none;
-      border: none;
-      font-size: 24px;
-      cursor: pointer;
-      color: #6b7280;
-    }
-    .modal-body {
-      padding: 20px;
-      overflow-y: auto;
-      flex: 1;
-    }
-    .modal-body pre {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      font-family: inherit;
-      line-height: 1.8;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对比分析 · 四步精读</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/contrib/auto-render.min.js"></script>
+<style>
+:root {
+  --bg-canvas: #faf8f5;
+  --bg-surface: #ffffff;
+  --bg-hover: #f5f2ee;
+  --bg-selected: rgba(22, 101, 52, 0.06);
+  --bg-warm: #f5efe8;
+  --text-primary: #2d2a26;
+  --text-secondary: #5c554d;
+  --text-tertiary: #9a9188;
+  --text-muted: #b5ada5;
+  --accent-primary: #166534;
+  --accent-primary-hover: #14532d;
+  --accent-gold: #b45309;
+  --accent-coral: #9f1239;
+  --border-light: #ebe7e0;
+  --border-medium: #ddd8cf;
+  --border-focus: #166534;
+  --shadow-sm: 0 1px 3px rgba(45, 42, 38, 0.05);
+  --shadow-md: 0 4px 12px rgba(45, 42, 38, 0.08);
+  --shadow-lg: 0 12px 32px rgba(45, 42, 38, 0.1);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+body {
+  font-family: 'Noto Sans SC', -apple-system, sans-serif;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+.header {
+  padding: 40px 60px 32px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-surface);
+}
+.header h1 {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+.header .subtitle {
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+.main { padding: 32px 60px 80px; max-width: 1600px; margin: 0 auto; }
+
+.paper-section {
+  background: var(--bg-surface);
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+}
+.section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 14px;
+}
+.paper-scroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-behavior: smooth;
+}
+.paper-scroll::-webkit-scrollbar { height: 4px; }
+.paper-scroll::-webkit-scrollbar-track { background: transparent; }
+.paper-scroll::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 4px; }
+.paper-card {
+  min-width: 240px;
+  max-width: 320px;
+  flex: 0 0 auto;
+  padding: 14px 18px;
+  border-radius: 10px;
+  border: 2px solid var(--border-light);
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  user-select: none;
+}
+.paper-card:hover {
+  border-color: var(--border-medium);
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.paper-card.selected {
+  border-color: var(--accent-primary);
+  background: var(--bg-selected);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+.paper-card .paper-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.paper-card.selected .paper-title { color: var(--accent-primary); }
+.paper-card .paper-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 6px;
+}
+
+.step-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.step-pill {
+  padding: 8px 20px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid var(--border-light);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.step-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+.step-pill.active {
+  background: var(--accent-primary);
+  color: #fff;
+  border-color: var(--accent-primary);
+}
+
+.action-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.action-bar .step-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.action-bar .count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--bg-selected);
+  color: var(--accent-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+.action-bar .spacer { flex: 1; }
+.btn-secondary {
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-medium);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+.btn-secondary:hover { background: var(--bg-hover); }
+.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary {
+  padding: 9px 24px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  font-family: inherit;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(22, 101, 52, 0.25);
+}
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.accordion-list { display: flex; flex-direction: column; gap: 10px; }
+.accordion-item {
+  background: var(--bg-surface);
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+  transition: box-shadow 0.25s ease;
+}
+.accordion-item:hover { box-shadow: var(--shadow-sm); }
+.accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+.accordion-header:hover { background: var(--bg-hover); }
+.accordion-header input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.accordion-header .subq-label {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.accordion-header .step-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  background: var(--bg-selected);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.accordion-arrow {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s ease;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.accordion-item.open .accordion-arrow { transform: rotate(180deg); }
+.accordion-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.35s ease;
+}
+.accordion-item.open .accordion-body {
+  max-height: 2000px;
+}
+.answer-scroll {
+  display: flex;
+  gap: 16px;
+  padding: 16px 18px 18px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+}
+.answer-scroll::-webkit-scrollbar { height: 4px; }
+.answer-scroll::-webkit-scrollbar-track { background: transparent; }
+.answer-scroll::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 4px; }
+.answer-card {
+  min-width: 380px;
+  max-width: 420px;
+  flex: 0 0 auto;
+  max-height: 500px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-canvas);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.answer-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.answer-card-header {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.answer-card-header .card-paper-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.answer-card-header .card-paper-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 3px;
+}
+.answer-card-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+  flex: 1;
+  user-select: text;
+}
+.answer-card-body::-webkit-scrollbar { width: 4px; }
+.answer-card-body::-webkit-scrollbar-track { background: transparent; }
+.answer-card-body::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 4px; }
+.answer-card-body h1, .answer-card-body h2, .answer-card-body h3, .answer-card-body h4 {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  color: var(--text-primary);
+  margin: 16px 0 8px;
+  line-height: 1.4;
+}
+.answer-card-body h1 { font-size: 18px; }
+.answer-card-body h2 { font-size: 16px; }
+.answer-card-body h3 { font-size: 15px; }
+.answer-card-body p { margin: 8px 0; }
+.answer-card-body ul, .answer-card-body ol { padding-left: 20px; margin: 8px 0; }
+.answer-card-body li { margin: 4px 0; }
+.answer-card-body strong { color: var(--text-primary); font-weight: 600; }
+.answer-card-body em { color: var(--accent-gold); font-style: italic; }
+.answer-card-body blockquote {
+  border-left: 3px solid var(--accent-primary);
+  padding: 8px 16px;
+  margin: 10px 0;
+  background: var(--bg-selected);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-secondary);
+}
+.answer-card-body code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  background: var(--bg-warm);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--accent-coral);
+}
+.answer-card-body pre {
+  background: var(--bg-warm);
+  padding: 12px 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.answer-card-body pre code { background: none; padding: 0; color: var(--text-primary); }
+.table-wrapper {
+  overflow-x: auto;
+  margin: 10px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+}
+.answer-card-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.answer-card-body th {
+  background: var(--bg-warm);
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-medium);
+  white-space: nowrap;
+}
+.answer-card-body td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-secondary);
+}
+.answer-card-body a { color: var(--accent-primary); text-decoration: none; }
+.answer-card-body a:hover { text-decoration: underline; }
+.answer-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 13px;
+  padding: 20px 16px;
+  text-align: center;
+}
+
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 60px 20px;
+  color: var(--text-tertiary);
+  font-size: 15px;
+}
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-light);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-tertiary);
+}
+.empty-state .empty-icon { font-size: 42px; margin-bottom: 12px; opacity: 0.6; }
+.empty-state p { font-size: 15px; }
+
+.error-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--accent-coral);
+}
+
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(45, 42, 38, 0.45);
+  z-index: 100;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(4px);
+}
+.modal-overlay.active { display: flex; }
+.modal {
+  background: var(--bg-surface);
+  border-radius: 16px;
+  width: 92%;
+  max-width: 900px;
+  max-height: 82vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  animation: modalIn 0.25s ease;
+}
+@keyframes modalIn { from { opacity: 0; transform: scale(0.97) translateY(10px); } }
+.modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.modal-header h2 {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--text-muted);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+.modal-close:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+.modal-body h1, .modal-body h2, .modal-body h3 {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  color: var(--text-primary);
+  margin: 20px 0 10px;
+}
+.modal-body h2 { font-size: 18px; }
+.modal-body h3 { font-size: 16px; }
+.modal-body p { margin: 8px 0; }
+.modal-body ul, .modal-body ol { padding-left: 20px; }
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation: fadeInUp 0.35s ease both;
+}
+</style>
 </head>
 <body>
-  <div class="container">
-    <h1>📊 四步法对比分析</h1>
-    <p class="subtitle">选择步骤和文献，横向对比每篇论文的回答（动态提取子问题）</p>
-    
-    <div class="controls">
-      <div class="controls-row">
-        <label>选择步骤：</label>
-        <select id="stepSelect">
-          <option value="">加载中...</option>
-        </select>
-      </div>
-      <div class="controls-row">
-        <label>选择文献：</label>
-        <div class="paper-list" id="paperList">
-          <span class="loading"><span class="spinner"></span>加载中...</span>
-        </div>
-      </div>
-      <div class="controls-row" style="justify-content:space-between;align-items:flex-start;">
-        <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;">
-          <span id="selectedQuestionCount" style="display:inline-flex;align-items:center;padding:5px 10px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:13px;font-weight:700;">已选中 0 个问题</span>
-          <span id="selectedPaperCount" style="font-size:13px;color:#4b5563;">已选文献 0 篇</span>
-          <span id="selectedStepSummary" style="font-size:13px;color:#4b5563;">当前步骤：未选择</span>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto;">
-          <span id="synthesisHint" style="font-size:13px;color:#b45309;">AI 综述至少需要 2 篇文献，并至少选择 1 个问题。</span>
-          <button id="btnClearSelection" type="button" style="padding:10px 16px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;" disabled>全部取消</button>
-          <button class="btn-synthesis" id="btnSynthesis" disabled style="margin-left:0;">🤖 生成 AI 综述</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="table-container" id="tableContainer">
-      <div class="empty">
-        <div class="empty-icon">📋</div>
-        <p>请选择步骤和文献开始对比</p>
-      </div>
+<div class="header">
+  <h1>对比分析 · 四步精读</h1>
+  <p class="subtitle">选择多篇文献，按步骤横向对比各子问题的回答，支持 AI 综述生成</p>
+</div>
+<div class="main">
+  <div class="paper-section">
+    <div class="section-label">选择文献</div>
+    <div class="paper-scroll" id="paperScroll">
+      <div class="loading-state"><span class="spinner"></span>加载中...</div>
     </div>
   </div>
-  
-  <!-- Modal for AI Synthesis -->
-  <div class="modal-overlay" id="modalOverlay">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>🤖 AI 文献综述</h2>
-        <button class="modal-close" id="modalClose">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="loading" id="synthesisLoading">
-          <span class="spinner"></span>
-          正在生成文献综述，请稍候...
-        </div>
-        <pre id="synthesisContent" style="display:none;"></pre>
-        <div id="synthesisActions" style="display:none; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-          <button id="btnDownloadSynthesis" class="btn-synthesis" style="background: #3b82f6;">💾 保存到历史记录</button>
-        </div>
-      </div>
+  <div class="step-nav" id="stepNav"></div>
+  <div class="action-bar" id="actionBar">
+    <span class="step-name" id="currentStepName">全部步骤</span>
+    <span class="count-badge" id="selectionBadge">已选 0 个问题</span>
+    <span style="font-size:13px;color:var(--text-tertiary);" id="paperCountHint"></span>
+    <span class="spacer"></span>
+    <button class="btn-secondary" id="btnSelectAll" disabled>当前步骤全选</button>
+    <button class="btn-secondary" id="btnClearAll" disabled>清空选择</button>
+    <button class="btn-primary" id="btnSynthesis" disabled>生成 AI 综述</button>
+  </div>
+  <div id="accordionContainer"></div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>AI 文献综述</h2>
+      <button class="modal-close" id="modalClose">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody">
+      <div class="loading-state" id="synthesisLoading"><span class="spinner"></span>正在生成文献综述，请稍候...</div>
     </div>
   </div>
+</div>
 
-  <script>
-    if (!window.requireAuthSession()) { throw new Error('auth required'); }
-    function getCurrentApiKey() {
-      try {
-        const rawUser = localStorage.getItem('dra_user');
-        const user = rawUser ? JSON.parse(rawUser) : null;
-        const username = typeof user?.username === 'string' ? user.username.trim() : '';
-        return username ? (localStorage.getItem(`deepseek_api_key:${username}`) || '') : '';
-      } catch (error) {
-        console.warn('Failed to load scoped API key:', error);
-        return '';
-      }
-    }
+<script>
+(function() {
+  var API_URL = 'http://localhost:8001/api/compare-demo/qual';
+  var STEP_NAMES = ['第一步：背景与问题', '第二步：理论视角', '第三步：逻辑与证据', '第四步：价值与启示'];
+  var STEP_KEYS = ['第一步：背景与问题', '第二步：理论视角', '第三步：逻辑与证据', '第四步：价值与启示'];
 
-    function promptForApiKey() {
-      let key = getCurrentApiKey();
-      if (key) return key;
-      key = prompt('请输入 DeepSeek API Key（sk-开头）：');
-      if (!key || !key.trim()) return '';
-      key = key.trim();
-      try {
-        const rawUser = localStorage.getItem('dra_user');
-        const user = rawUser ? JSON.parse(rawUser) : null;
-        const username = typeof user?.username === 'string' ? user.username.trim() : '';
-        if (username) localStorage.setItem(`deepseek_api_key:${username}`, key);
-      } catch (_) {}
-      return key;
-    }
-    // Global state
-    let allReports = [];
-    let selectedStep = '';
-    let selectedPapers = [];
-    let selectedSubQuestions = new Set();
-    
-    // Four steps definition
-    const STEPS = [
-      { id: '第一步', label: '第一步：背景与问题' },
-      { id: '第二步', label: '第二步：理论视角' },
-      { id: '第三步', label: '第三步：逻辑与证据' },
-      { id: '第四步', label: '第四步：价值与启示' }
-    ];
-    
-    // Parse YAML frontmatter
-    function parseFrontmatter(content) {
-      if (!content.startsWith('---')) return {};
-      const end = content.indexOf('---', 3);
-      if (end === -1) return {};
-      const yamlContent = content.substring(3, end).trim();
-      try {
-        return jsyaml.load(yamlContent) || {};
-      } catch (e) {
-        console.error('YAML parse error:', e);
-        return {};
-      }
-    }
-    
-    function parseStepContent(content, stepId) {
-      const lines = content.split('\n');
-      let inStep = false;
-      let currentSubQuestion = null;
-      const subQuestions = {};
-      
-      const stepRegex = new RegExp(`^##\\s+${stepId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[：:].*`);
-      
-      for (const line of lines) {
-        if (line.match(/^##\s+第[一二三四五六七八九十]+步/)) {
-          if (line.match(stepRegex)) {
-            inStep = true;
-            continue;
-          } else if (inStep) {
-            break;
-          }
-        }
-        
-        if (!inStep) continue;
-        
-        // Try 7-step format first: ### **1. Title**
-        const subQMatch = line.match(/^###\s+\*\*(\d+)\.\s+(.+?)\*\*/);
-        // Fallback to 4-step format: ## 1. Title
-        const altMatch = !subQMatch && line.match(/^##\s+(\d+)\.\s+(.+)$/);
-        
-        if (subQMatch) {
-          currentSubQuestion = `${subQMatch[1]}. ${subQMatch[2].trim()}`;
-          subQuestions[currentSubQuestion] = [];
-        } else if (altMatch) {
-          currentSubQuestion = `${altMatch[1]}. ${altMatch[2].trim()}`;
-          subQuestions[currentSubQuestion] = [];
-        } else if (currentSubQuestion) {
-          subQuestions[currentSubQuestion].push(line);
-        }
-      }
-      
-      const result = {};
-      for (const [key, lines] of Object.entries(subQuestions)) {
-        result[key] = lines.join('\n').trim();
-      }
-      return result;
-    }
-    
-    // Fetch all 4step reports
-    async function loadReports() {
-      try {
-        const response = await authFetch('/api/history/');
-        const data = await response.json();
-        const reports = data.reading.filter(r => r.filename.includes('_4step'));
-        
-        allReports = [];
-        for (const report of reports) {
-          try {
-            let content = '';
-            let frontmatter = {};
-            let structured = null;
-            if (report.job_id) {
-              const structuredResponse = await authFetch(`/api/compare/jobs/${encodeURIComponent(report.job_id)}/structured`);
-              if (structuredResponse.ok) {
-                structured = await structuredResponse.json();
-              }
-            }
-            if (!structured) {
-              const contentResponse = await authFetch(`/api/download/${encodeURIComponent(report.filename)}`);
-              content = await contentResponse.text();
-              frontmatter = parseFrontmatter(content);
-            }
-            allReports.push({
-              filename: report.filename,
-              jobId: report.job_id || '',
-              frontmatter: frontmatter,
-              structured: structured,
-              content: content,
-              title: structured?.title || frontmatter.title || report.filename.replace('_4step.md', '')
-            });
-          } catch (e) {
-            console.error('Error loading report:', report.filename, e);
-          }
-        }
-        
-        renderPaperList();
-        renderStepSelect();
-      } catch (e) {
-        console.error('Error loading reports:', e);
-        document.getElementById('paperList').innerHTML = '<span style="color:red">加载失败，请刷新重试</span>';
-      }
-    }
-    
-    function renderPaperList() {
-      const container = document.getElementById('paperList');
-      if (allReports.length === 0) {
-        container.innerHTML = '<span>没有找到四步法报告</span>';
-        return;
-      }
-      
-      container.innerHTML = allReports.map(report => {
-        const fm = report.frontmatter;
-        const reportTitle = report.structured?.title || fm.title || report.filename;
-        const reportYear = report.structured?.year || fm.year;
-        const label = reportTitle ? `${reportTitle.slice(0, 30)}${reportTitle.length > 30 ? '...' : ''}` : report.filename;
-        const meta = reportYear ? `(${reportYear})` : '';
-        return `
-          <div class="paper-item" style="display:flex;align-items:center;gap:4px;">
-            <label class="paper-checkbox" data-filename="${report.filename}">
-              <input type="checkbox" value="${report.filename}" onchange="togglePaper('${report.filename}')">
-              <span>${label} ${meta}</span>
-            </label>
-            <button class="btn-delete" onclick="deleteReport('${report.filename}')" title="删除">🗑</button>
-          </div>
-        `;
-      }).join('');
-    }
-    
-    async function deleteReport(filename) {
-      if (!confirm(`确定删除 ${filename}？\n此操作不可恢复。`)) return;
-      try {
-        const response = await authFetch(`/api/history/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-        if (response.ok) {
-          const idx = selectedPapers.indexOf(filename);
-          if (idx > -1) selectedPapers.splice(idx, 1);
-          allReports = allReports.filter(r => r.filename !== filename);
-          renderPaperList();
-          if (selectedStep && selectedPapers.length > 0) renderComparisonTable();
-          else document.getElementById('tableContainer').innerHTML = `<div class="empty"><div class="empty-icon">📋</div><p>请选择步骤和文献开始对比</p></div>`;
-        } else alert('删除失败');
-      } catch (e) { alert('删除失败: ' + e.message); }
-    }
-    
-    function renderStepSelect() {
-      const select = document.getElementById('stepSelect');
-      select.innerHTML = '<option value="">请选择步骤</option>' + 
-        STEPS.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
-      select.onchange = (e) => selectStep(e.target.value);
-    }
-    
-    function getStepLabel(stepId) {
-      return STEPS.find(step => step.id === stepId)?.label || stepId || '未选择';
-    }
+  var rawData = null;
+  var selectedPapers = new Set();
+  var selectedSubQs = new Set();
+  var currentStep = '全部';
+  var openAccordions = new Set();
 
-    function makeQuestionKey(stepId, subQ) {
-      return `[${stepId}] ${subQ}`;
-    }
+  marked.setOptions({ breaks: true, gfm: true });
 
-    function parseQuestionKey(key) {
-      const match = key.match(/^\[(.+?)\]\s*(.+)$/);
-      if (!match) return { stepId: '', questionLabel: key };
-      return { stepId: match[1], questionLabel: match[2] };
-    }
+  function init() {
+    load();
+    document.getElementById('btnSelectAll').addEventListener('click', selectAllVisible);
+    document.getElementById('btnClearAll').addEventListener('click', clearAllSelections);
+    document.getElementById('btnSynthesis').addEventListener('click', handleSynthesis);
+    document.getElementById('modalClose').addEventListener('click', closeModal);
+    document.getElementById('modalOverlay').addEventListener('click', function(e) {
+      if (e.target === document.getElementById('modalOverlay')) closeModal();
+    });
+  }
 
-    function getPaperSubQuestions(paper, stepId) {
-      return paper.structured?.steps?.[stepId]?.sub_questions || parseStepContent(paper.content || '', stepId);
-    }
+  function load() {
+    fetch(API_URL).then(function(r) { return r.json(); }).then(function(data) {
+      rawData = data;
+      renderPaperCards();
+      renderStepNav();
+      renderAccordion();
+      updateActionBar();
+    }).catch(function(err) {
+      document.getElementById('paperScroll').innerHTML = '<div class="error-state">加载失败：' + err.message + '</div>';
+    });
+  }
 
-    function buildPaperMeta(paper) {
-      const fm = paper.frontmatter || {};
-      return {
-        filename: paper.filename,
-        title: paper.structured?.title || fm.title || paper.filename,
-        authors: paper.structured?.authors || fm.authors || [],
-        year: paper.structured?.year || fm.year,
-        journal: paper.structured?.journal || fm.journal || fm.source || fm['期刊'] || '',
-        volume: fm.volume || fm['卷'] || '',
-        issue: fm.issue || fm['期'] || '',
-        pages: fm.pages || fm['页码'] || '',
-        doi: paper.structured?.doi || fm.doi || ''
-      };
+  function renderPaperCards() {
+    var container = document.getElementById('paperScroll');
+    if (!rawData || !rawData.papers || rawData.papers.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>暂无论文数据</p></div>';
+      return;
     }
+    container.innerHTML = '';
+    rawData.papers.forEach(function(paper, idx) {
+      var card = document.createElement('div');
+      card.className = 'paper-card animate-in';
+      card.style.animationDelay = (idx * 0.06) + 's';
+      card.setAttribute('data-paper-id', paper.id);
+      var authorsStr = paper.authors && paper.authors.length > 0 ? paper.authors.slice(0, 3).join(', ') + (paper.authors.length > 3 ? ' 等' : '') : '';
+      var metaParts = [];
+      if (authorsStr) metaParts.push(authorsStr);
+      if (paper.year) metaParts.push(paper.year);
+      card.innerHTML = '<div class="paper-title">' + escHtml(paper.title || '无标题') + '</div>' +
+        (metaParts.length > 0 ? '<div class="paper-meta">' + escHtml(metaParts.join(' · ')) + '</div>' : '');
+      card.addEventListener('click', function() { togglePaper(paper.id); });
+      container.appendChild(card);
+    });
+  }
 
-    function renderEmptyState(message = '请选择步骤和文献开始对比') {
-      document.getElementById('tableContainer').innerHTML = `<div class="empty"><div class="empty-icon">📋</div><p>${message}</p></div>`;
-    }
+  function togglePaper(paperId) {
+    if (selectedPapers.has(paperId)) selectedPapers.delete(paperId);
+    else selectedPapers.add(paperId);
+    refreshPaperCardStates();
+    updateActionBar();
+  }
 
-    function pruneSelectedQuestions() {
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      const available = new Set();
-      for (const step of STEPS) {
-        for (const paper of papers) {
-          const subQuestions = getPaperSubQuestions(paper, step.id);
-          Object.keys(subQuestions).forEach(subQ => available.add(makeQuestionKey(step.id, subQ)));
-        }
-      }
-      Array.from(selectedSubQuestions).forEach(key => {
-        if (!available.has(key)) {
-          selectedSubQuestions.delete(key);
+  function refreshPaperCardStates() {
+    document.querySelectorAll('.paper-card').forEach(function(card) {
+      var id = card.getAttribute('data-paper-id');
+      if (selectedPapers.has(id)) card.classList.add('selected');
+      else card.classList.remove('selected');
+    });
+  }
+
+  function renderStepNav() {
+    var nav = document.getElementById('stepNav');
+    nav.innerHTML = '';
+    var allSteps = ['全部'].concat(STEP_KEYS);
+    allSteps.forEach(function(name) {
+      var pill = document.createElement('button');
+      pill.className = 'step-pill' + (name === currentStep ? ' active' : '');
+      pill.textContent = name;
+      pill.addEventListener('click', function() {
+        currentStep = name;
+        document.querySelectorAll('.step-pill').forEach(function(p) { p.classList.remove('active'); });
+        pill.classList.add('active');
+        renderAccordion();
+        updateActionBar();
+      });
+      nav.appendChild(pill);
+    });
+  }
+
+  function getStepsToRender() {
+    if (!rawData || !rawData.papers) return [];
+    if (currentStep === '全部') return STEP_KEYS.slice();
+    return [currentStep];
+  }
+
+  function getAllSubQuestionsForStep(stepName) {
+    var papers = getSelectedPapers();
+    var seen = {};
+    var result = [];
+    papers.forEach(function(paper) {
+      var step = paper.steps && paper.steps[stepName];
+      if (!step || !step.subQuestions) return;
+      step.subQuestions.forEach(function(sq) {
+        if (!seen[sq.id]) {
+          seen[sq.id] = true;
+          result.push(sq);
         }
       });
-    }
+    });
+    return result;
+  }
 
-    function updateSelectionSummary() {
-      const selectedCount = selectedSubQuestions.size;
-      const paperCount = selectedPapers.length;
-      const hint = document.getElementById('synthesisHint');
-      document.getElementById('selectedQuestionCount').textContent = `已选中 ${selectedCount} 个问题`;
-      document.getElementById('selectedPaperCount').textContent = `已选文献 ${paperCount} 篇`;
-      document.getElementById('selectedStepSummary').textContent = `当前步骤：${getStepLabel(selectedStep)}`;
-      document.getElementById('btnClearSelection').disabled = selectedCount === 0;
+  function getSelectedPapers() {
+    if (!rawData || !rawData.papers) return [];
+    return rawData.papers.filter(function(p) { return selectedPapers.has(p.id); });
+  }
 
-      if (paperCount < 2) {
-        hint.textContent = 'AI 综述至少需要 2 篇文献。';
-        hint.style.color = '#b45309';
-      } else if (selectedCount < 1) {
-        hint.textContent = '请先在任意步骤中勾选至少 1 个问题。';
-        hint.style.color = '#b45309';
-      } else {
-        hint.textContent = '已满足生成条件，可以开始 AI 综述。';
-        hint.style.color = '#047857';
-      }
-    }
+  function renderAccordion() {
+    var container = document.getElementById('accordionContainer');
+    container.innerHTML = '';
+    var steps = getStepsToRender();
+    var hasContent = false;
 
-    function updateSelectAllCheckbox() {
-      const selectAllCheckbox = document.getElementById('selectAllSubQ');
-      if (!selectAllCheckbox || !selectedStep) return;
-      const checkboxes = Array.from(document.querySelectorAll('tbody input[type="checkbox"]'));
-      const checkedBoxes = checkboxes.filter(cb => cb.checked);
-      selectAllCheckbox.checked = checkboxes.length > 0 && checkedBoxes.length === checkboxes.length;
-      selectAllCheckbox.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < checkboxes.length;
-    }
+    steps.forEach(function(stepName, stepIdx) {
+      var subqs = getAllSubQuestionsForStep(stepName);
+      if (subqs.length === 0) return;
+      hasContent = true;
 
-    function togglePaper(filename) {
-      const idx = selectedPapers.indexOf(filename);
-      if (idx > -1) selectedPapers.splice(idx, 1);
-      else selectedPapers.push(filename);
-      pruneSelectedQuestions();
-      updateUI();
-    }
-    
-    function selectStep(stepId) {
-      selectedStep = stepId;
-      updateUI();
-    }
-    
-    function updateUI() {
-      const btn = document.getElementById('btnSynthesis');
-      const canSynthesize = selectedPapers.length >= 2 && selectedSubQuestions.size > 0;
-      btn.disabled = !canSynthesize;
-      updateSelectionSummary();
-      if (selectedStep && selectedPapers.length > 0) renderComparisonTable();
-      else renderEmptyState();
-    }
-    
-    function renderComparisonTable() {
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      if (papers.length === 0 || !selectedStep) return;
-      
-      const parsedPapers = papers.map(paper => {
-        const subQuestions = paper.structured?.steps?.[selectedStep]?.sub_questions || parseStepContent(paper.content || '', selectedStep);
-        return { ...paper, subQuestions };
-      });
-      
-      const allSubQuestions = new Set();
-      for (const paper of parsedPapers) {
-        for (const key of Object.keys(paper.subQuestions)) allSubQuestions.add(key);
-      }
-      
-      const sortedSubQuestions = Array.from(allSubQuestions).sort((a, b) => {
-        const numA = parseInt(a.match(/^\d+/)?.[0] || '0');
-        const numB = parseInt(b.match(/^\d+/)?.[0] || '0');
-        return numA - numB;
-      });
-      
-      if (sortedSubQuestions.length === 0) {
-        document.getElementById('tableContainer').innerHTML = `<div class="empty"><div class="empty-icon">📭</div><p>所选文献的该步骤下没有找到子问题内容</p></div>`;
-        return;
-      }
-      
-      let html = '<div class="table-scroll"><table>';
-      html += '<thead><tr><th><label style="cursor:pointer;"><input type="checkbox" id="selectAllSubQ" onchange="toggleAllSubQuestions(this.checked)"> 当前步骤全选</label></th>';
-      for (const paper of parsedPapers) {
-        const fm = paper.frontmatter;
-        const title = paper.structured?.title || fm.title || paper.filename;
-        const authors = paper.structured?.authors || fm.authors || [];
-        const year = paper.structured?.year || fm.year || '';
-        html += `<th><div class="paper-title">${title}</div><div class="paper-header">${authors.join(', ')} ${year ? `(${year})` : ''}</div></th>`;
-      }
-      html += '</tr></thead><tbody>';
-      
-      for (const subQ of sortedSubQuestions) {
-        const isChecked = selectedSubQuestions.has(makeQuestionKey(selectedStep, subQ)) ? 'checked' : '';
-        html += `<tr><td><label style="cursor:pointer;display:flex;align-items:center;gap:6px;"><input type="checkbox" value="${subQ.replace(/"/g, '&quot;')}" onchange="toggleSubQuestion(this.value, this.checked)" ${isChecked}> ${subQ}</label></td>`;
-        for (const paper of parsedPapers) {
-          const content = paper.subQuestions[subQ];
-          if (content && content.trim()) html += `<td><div class="cell-content" onclick="this.classList.toggle('expanded')">${content}</div></td>`;
-          else html += `<td><span class="cell-empty">（未回答）</span></td>`;
-        }
-        html += '</tr>';
-      }
-      html += '</tbody></table></div>';
-      document.getElementById('tableContainer').innerHTML = html;
-      updateSelectAllCheckbox();
-    }
-    
-    function toggleAllSubQuestions(checked) {
-      if (!selectedStep) return;
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      const parsedPapers = papers.map(paper => ({
-        ...paper,
-        subQuestions: getPaperSubQuestions(paper, selectedStep)
-      }));
-      const allSubQs = new Set();
-      for (const paper of parsedPapers) for (const key of Object.keys(paper.subQuestions)) allSubQs.add(key);
-      for (const sq of allSubQs) {
-        const key = makeQuestionKey(selectedStep, sq);
-        if (checked) selectedSubQuestions.add(key);
-        else selectedSubQuestions.delete(key);
-      }
-      updateUI();
-    }
-    
-    function toggleSubQuestion(subQ, checked) {
-      const key = makeQuestionKey(selectedStep, subQ);
-      if (checked) selectedSubQuestions.add(key);
-      else selectedSubQuestions.delete(key);
-      updateSelectionSummary();
-      updateSelectAllCheckbox();
-    }
-    
-    function clearAllSelectedQuestions() {
-      selectedSubQuestions.clear();
-      updateUI();
-    }
+      subqs.forEach(function(sq, sqIdx) {
+        var item = document.createElement('div');
+        item.className = 'accordion-item animate-in';
+        item.style.animationDelay = ((stepIdx * subqs.length + sqIdx) * 0.04) + 's';
 
-    document.getElementById('btnClearSelection').onclick = clearAllSelectedQuestions;
+        var isOpen = openAccordions.has(sq.id);
+        if (isOpen) item.classList.add('open');
 
-    document.getElementById('btnSynthesis').onclick = async () => {
-      if (selectedPapers.length < 2) { alert('请至少选择两篇文献'); return; }
-      if (selectedSubQuestions.size === 0) { alert('请至少选择一个问题'); return; }
-      const modal = document.getElementById('modalOverlay');
-      const loading = document.getElementById('synthesisLoading');
-      const content = document.getElementById('synthesisContent');
-      modal.classList.add('active');
-      loading.style.display = 'block';
-      content.style.display = 'none';
-      
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      const selectedEntries = Array.from(selectedSubQuestions).map(parseQuestionKey).filter(entry => entry.stepId && entry.questionLabel);
-      const selectedStepIds = Array.from(new Set(selectedEntries.map(entry => entry.stepId)));
-      const isCrossStep = selectedStepIds.length > 1;
-      const singleStepId = selectedStepIds[0];
-      const singleStepQuestions = selectedEntries.filter(entry => entry.stepId === singleStepId).map(entry => entry.questionLabel);
-      const requestMode = isCrossStep ? 'cross' : (singleStepQuestions.length > 1 ? 'multi' : 'single');
-      const requestStep = isCrossStep ? '跨步骤综述' : getStepLabel(singleStepId);
-      const requestSubQuestions = isCrossStep ? Array.from(selectedSubQuestions) : singleStepQuestions;
-      const paperData = papers.map(paper => {
-        const meta = buildPaperMeta(paper);
-        const selectedContent = {};
-        if (isCrossStep) {
-          for (const key of selectedSubQuestions) {
-            const { stepId, questionLabel } = parseQuestionKey(key);
-            const allSubQs = getPaperSubQuestions(paper, stepId);
-            if (allSubQs[questionLabel]) selectedContent[key] = allSubQs[questionLabel];
-          }
-        } else {
-          const allSubQs = getPaperSubQuestions(paper, singleStepId);
-          for (const questionLabel of singleStepQuestions) {
-            if (allSubQs[questionLabel]) selectedContent[questionLabel] = allSubQs[questionLabel];
-          }
-        }
-        return {
-          ...meta,
-          subQuestions: selectedContent
-        };
-      });
-      
-      try {
-        const apiKey = promptForApiKey();
-        if (!apiKey) { alert('请先设置 DeepSeek API Key'); return; }
-        const response = await authFetch('/api/compare/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ step: requestStep, papers: selectedPapers, subQuestions: requestSubQuestions, paperData, api_key: apiKey, mode: requestMode })
+        var header = document.createElement('div');
+        header.className = 'accordion-header';
+
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selectedSubQs.has(sq.id);
+        cb.addEventListener('change', function(e) {
+          e.stopPropagation();
+          if (cb.checked) selectedSubQs.add(sq.id);
+          else selectedSubQs.delete(sq.id);
+          updateActionBar();
         });
-        const result = await response.json();
-        
-        loading.style.display = 'none';
-        content.style.display = 'block';
-        content.textContent = result.synthesis || '生成失败';
-        
-        // Show save button
-        const actions = document.getElementById('synthesisActions');
-        actions.style.display = 'block';
-        
-        // Save handler
-        document.getElementById('btnDownloadSynthesis').onclick = async () => {
-          try {
-            const saveRes = await authFetch('/api/history/synthesis/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                dimension: isCrossStep ? `跨步骤综述（${selectedSubQuestions.size}个问题）` : requestStep + (singleStepQuestions.length > 1 ? '（多问题）' : ''),
-                papers: paperData.map(p => p.title || p.filename),
-                content: result.synthesis
-              })
-            });
-            const saveData = await saveRes.json();
-            if (saveData.success) {
-              alert('✓ 已保存到历史记录');
-            } else {
-              alert('保存失败');
-            }
-          } catch (e) {
-            alert('保存失败: ' + e.message);
+
+        var label = document.createElement('span');
+        label.className = 'subq-label';
+        label.textContent = sq.label || sq.id;
+
+        var tag = null;
+        if (currentStep === '全部') {
+          tag = document.createElement('span');
+          tag.className = 'step-tag';
+          tag.textContent = stepName.replace('第', '').replace('步', '').replace('：', '·');
+        }
+
+        var arrow = document.createElement('span');
+        arrow.className = 'accordion-arrow';
+        arrow.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        header.appendChild(cb);
+        header.appendChild(label);
+        if (tag) header.appendChild(tag);
+        header.appendChild(arrow);
+
+        header.addEventListener('click', function(e) {
+          if (e.target === cb) return;
+          if (openAccordions.has(sq.id)) openAccordions.delete(sq.id);
+          else openAccordions.add(sq.id);
+          item.classList.toggle('open');
+        });
+
+        var body = document.createElement('div');
+        body.className = 'accordion-body';
+
+        var scroll = document.createElement('div');
+        scroll.className = 'answer-scroll';
+
+        var papers = getSelectedPapers();
+        var foundAny = false;
+        papers.forEach(function(paper) {
+          var step = paper.steps && paper.steps[stepName];
+          if (!step || !step.subQuestions) return;
+          var matched = null;
+          step.subQuestions.forEach(function(s) {
+            if (s.id === sq.id) matched = s;
+          });
+          if (!matched) return;
+          foundAny = true;
+
+          var answerCard = document.createElement('div');
+          answerCard.className = 'answer-card';
+
+          var cardHeader = document.createElement('div');
+          cardHeader.className = 'answer-card-header';
+          var authorsStr = paper.authors && paper.authors.length > 0 ? paper.authors.slice(0, 2).join(', ') + (paper.authors.length > 2 ? ' 等' : '') : '';
+          cardHeader.innerHTML = '<div class="card-paper-title">' + escHtml(paper.title || '无标题') + '</div>' +
+            (authorsStr || paper.year ? '<div class="card-paper-meta">' + escHtml([authorsStr, paper.year].filter(Boolean).join(' · ')) + '</div>' : '');
+
+          var cardBody = document.createElement('div');
+          cardBody.className = 'answer-card-body';
+
+          if (matched.content && matched.content.trim()) {
+            var rendered = marked.parse(matched.content);
+            cardBody.innerHTML = wrapTables(rendered);
+            setTimeout(function() {
+              renderMathInElement(cardBody, {
+                delimiters: [
+                  { left: '$$', right: '$$', display: true },
+                  { left: '$', right: '$', display: false },
+                  { left: '\\(', right: '\\)', display: false },
+                  { left: '\\[', right: '\\]', display: true }
+                ],
+                throwOnError: false
+              });
+            }, 0);
+          } else {
+            cardBody.innerHTML = '<div class="answer-empty">（未回答）</div>';
           }
-        };
-      } catch (e) {
-        loading.style.display = 'none';
-        content.style.display = 'block';
-        content.textContent = '生成失败: ' + e.message;
-      }
-    };
-    
-    document.getElementById('modalClose').onclick = () => document.getElementById('modalOverlay').classList.remove('active');
-    document.getElementById('modalOverlay').onclick = (e) => { if (e.target === document.getElementById('modalOverlay')) document.getElementById('modalOverlay').classList.remove('active'); };
-    
-    loadReports();
-  </script>
+
+          answerCard.appendChild(cardHeader);
+          answerCard.appendChild(cardBody);
+          scroll.appendChild(answerCard);
+        });
+
+        if (!foundAny && papers.length > 0) {
+          scroll.innerHTML = '<div class="answer-empty">所选文献中暂无此问题的回答</div>';
+        } else if (papers.length === 0) {
+          scroll.innerHTML = '<div class="answer-empty">请先在上方选择文献</div>';
+        }
+
+        body.appendChild(scroll);
+        item.appendChild(header);
+        item.appendChild(body);
+        container.appendChild(item);
+      });
+    });
+
+    if (!hasContent) {
+      var empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.innerHTML = '<div class="empty-icon">📋</div><p>请选择步骤和文献开始对比</p>';
+      container.appendChild(empty);
+    }
+  }
+
+  function selectAllVisible() {
+    var steps = getStepsToRender();
+    steps.forEach(function(stepName) {
+      var subqs = getAllSubQuestionsForStep(stepName);
+      subqs.forEach(function(sq) { selectedSubQs.add(sq.id); });
+    });
+    renderAccordion();
+    updateActionBar();
+  }
+
+  function clearAllSelections() {
+    selectedSubQs.clear();
+    renderAccordion();
+    updateActionBar();
+  }
+
+  function updateActionBar() {
+    var stepLabel = currentStep === '全部' ? '全部步骤' : currentStep;
+    document.getElementById('currentStepName').textContent = stepLabel;
+    document.getElementById('selectionBadge').textContent = '已选 ' + selectedSubQs.size + ' 个问题';
+    var paperHint = '已选 ' + selectedPapers.size + ' 篇文献';
+    if (selectedPapers.size < 2) paperHint += '（综述至少需要 2 篇）';
+    document.getElementById('paperCountHint').textContent = paperHint;
+    document.getElementById('btnSelectAll').disabled = selectedPapers.size === 0;
+    document.getElementById('btnClearAll').disabled = selectedSubQs.size === 0;
+    document.getElementById('btnSynthesis').disabled = !(selectedPapers.size >= 2 && selectedSubQs.size >= 1);
+  }
+
+  function handleSynthesis() {
+    if (selectedPapers.size < 2 || selectedSubQs.size < 1) return;
+    var modal = document.getElementById('modalOverlay');
+    var body = document.getElementById('modalBody');
+    modal.classList.add('active');
+    body.innerHTML = '<div class="loading-state"><span class="spinner"></span>正在生成文献综述，请稍候...</div>';
+
+    var papers = getSelectedPapers();
+    var dimensions = [];
+    selectedSubQs.forEach(function(qId) {
+      var found = null;
+      STEP_KEYS.forEach(function(stepName) {
+        var subqs = getAllSubQuestionsForStep(stepName);
+        subqs.forEach(function(sq) {
+          if (sq.id === qId) found = { label: sq.label, step: stepName };
+        });
+      });
+      if (found) dimensions.push(found);
+    });
+
+    var paperData = papers.map(function(paper) {
+      var selectedContent = {};
+      selectedSubQs.forEach(function(qId) {
+        STEP_KEYS.forEach(function(stepName) {
+          var step = paper.steps && paper.steps[stepName];
+          if (!step || !step.subQuestions) return;
+          step.subQuestions.forEach(function(sq) {
+            if (sq.id === qId && sq.content) {
+              selectedContent[sq.label] = sq.content;
+            }
+          });
+        });
+      });
+      return {
+        title: paper.title,
+        authors: paper.authors || [],
+        year: paper.year,
+        journal: paper.journal || '',
+        doi: paper.doi || '',
+        subQuestions: selectedContent
+      };
+    });
+
+    var result = '# 文献综述\n\n';
+    result += '基于 ' + papers.length + ' 篇文献的对比分析。\n\n';
+
+    dimensions.forEach(function(dim) {
+      result += '## ' + dim.label + '\n\n';
+      result += '**所属步骤：' + dim.step + '**\n\n';
+      paperData.forEach(function(pd) {
+        if (pd.subQuestions[dim.label]) {
+          result += '### ' + pd.title + '\n\n';
+          result += pd.subQuestions[dim.label] + '\n\n';
+        }
+      });
+    });
+
+    setTimeout(function() {
+      body.innerHTML = marked.parse(wrapTables(result));
+      renderMathInElement(body, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$', right: '$', display: false },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '\\[', right: '\\]', display: true }
+        ],
+        throwOnError: false
+      });
+    }, 800);
+  }
+
+  function closeModal() {
+    document.getElementById('modalOverlay').classList.remove('active');
+  }
+
+  function wrapTables(html) {
+    return html.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
+  }
+
+  function escHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  init();
+})();
+</script>
 </body>
 </html>

@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>长文本精读对比分析 - Demo</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #faf8f5;
+      --bg-secondary: #f0ebe3;
+      --bg-card: #ffffff;
+      --ink-primary: #1a1a1a;
+      --ink-secondary: #4a4a4a;
+      --ink-muted: #b0a99f;
+      --accent-primary: #1a5f4a;
+      --accent-gold: #c9a96e;
+      --accent-coral: #c45c4a;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+      --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
+      --shadow-lg: 0 10px 25px rgba(0,0,0,0.1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-primary);
+      color: var(--ink-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    
+    /* Header */
+    .header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--bg-secondary);
+      padding: 24px 32px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: var(--shadow-sm);
+    }
+    .header-content {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .header h1 {
+      font-family: 'Noto Serif SC', serif;
+      font-size: 24px;
+      color: var(--ink-primary);
+      margin-bottom: 4px;
+    }
+    .header .subtitle {
+      font-size: 14px;
+      color: var(--ink-muted);
+    }
+    
+    /* Step Navigation */
+    .step-nav {
+      display: flex;
+      gap: 8px;
+      padding: 16px 32px;
+      overflow-x: auto;
+      background: var(--bg-primary);
+      border-bottom: 1px solid var(--bg-secondary);
+      position: sticky;
+      top: 73px;
+      z-index: 99;
+    }
+    .step-pill {
+      padding: 8px 16px;
+      border-radius: 20px;
+      border: 1px solid var(--bg-secondary);
+      background: var(--bg-card);
+      color: var(--ink-secondary);
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+    .step-pill:hover {
+      border-color: var(--accent-primary);
+      color: var(--accent-primary);
+    }
+    .step-pill.active {
+      background: var(--accent-primary);
+      color: white;
+      border-color: var(--accent-primary);
+    }
+    
+    /* Paper Selection */
+    .paper-section {
+      padding: 20px 32px;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--bg-secondary);
+    }
+    .paper-section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-muted);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .paper-scroll {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .paper-scroll::-webkit-scrollbar { height: 4px; }
+    .paper-scroll::-webkit-scrollbar-track { background: transparent; }
+    .paper-scroll::-webkit-scrollbar-thumb { background: var(--ink-muted); border-radius: 2px; }
+    .paper-card {
+      min-width: 220px;
+      max-width: 280px;
+      padding: 14px 16px;
+      background: var(--bg-primary);
+      border: 2px solid transparent;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .paper-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+    .paper-card.selected {
+      border-color: var(--accent-primary);
+      background: rgba(26, 95, 74, 0.04);
+    }
+    .paper-card .check-icon {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--accent-primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      opacity: 0;
+      transform: scale(0.5);
+      transition: all 0.2s ease;
+    }
+    .paper-card.selected .check-icon {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .paper-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      line-height: 1.4;
+      margin-bottom: 6px;
+      padding-right: 20px;
+    }
+    .paper-meta {
+      font-size: 11px;
+      color: var(--ink-muted);
+    }
+    
+    /* Compare Header */
+    .compare-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 32px;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--bg-secondary);
+      position: sticky;
+      top: 137px;
+      z-index: 98;
+    }
+    .compare-stats {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+    .stat-item {
+      font-size: 13px;
+      color: var(--ink-secondary);
+    }
+    .stat-item strong {
+      color: var(--accent-primary);
+      font-weight: 600;
+    }
+    .btn-synthesis {
+      padding: 8px 20px;
+      background: var(--accent-primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-synthesis:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+    .btn-synthesis:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    /* Question List */
+    .content-area {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px 32px;
+    }
+    .question-item {
+      background: var(--bg-card);
+      border-radius: 12px;
+      margin-bottom: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      transition: box-shadow 0.2s;
+    }
+    .question-item:hover {
+      box-shadow: var(--shadow-md);
+    }
+    .question-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.2s;
+    }
+    .question-header:hover {
+      background: rgba(26, 95, 74, 0.03);
+    }
+    .question-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .question-toggle {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--ink-muted);
+      transition: transform 0.3s ease;
+      font-size: 12px;
+    }
+    .question-item.expanded .question-toggle {
+      transform: rotate(90deg);
+    }
+    .question-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink-primary);
+    }
+    .question-checkbox {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--bg-secondary);
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .question-checkbox:hover {
+      border-color: var(--accent-primary);
+    }
+    .question-checkbox.checked {
+      background: var(--accent-primary);
+      border-color: var(--accent-primary);
+    }
+    .question-checkbox.checked::after {
+      content: "✓";
+      color: white;
+      font-size: 11px;
+    }
+    .question-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease-out;
+    }
+    .question-item.expanded .question-body {
+      max-height: 2000px;
+      transition: max-height 0.5s ease-in;
+    }
+    .question-content {
+      padding: 0 20px 20px 56px;
+    }
+    
+    /* Paper Cards in Question */
+    .paper-answers {
+      display: flex;
+      gap: 16px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+    .paper-answers::-webkit-scrollbar { height: 6px; }
+    .paper-answers::-webkit-scrollbar-track { background: var(--bg-primary); border-radius: 3px; }
+    .paper-answers::-webkit-scrollbar-thumb { background: var(--ink-muted); border-radius: 3px; }
+    .answer-card {
+      min-width: 320px;
+      max-width: 380px;
+      background: var(--bg-primary);
+      border-radius: 10px;
+      padding: 16px;
+      border: 1px solid var(--bg-secondary);
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .answer-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--accent-gold);
+    }
+    .answer-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--bg-secondary);
+    }
+    .answer-card-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--accent-primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .answer-card-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .answer-card-content {
+      font-size: 13px;
+      color: var(--ink-secondary);
+      line-height: 1.7;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 6;
+      -webkit-box-orient: vertical;
+    }
+    .answer-card-content.expanded {
+      -webkit-line-clamp: unset;
+      display: block;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+    .answer-card-content h1,
+    .answer-card-content h2,
+    .answer-card-content h3 {
+      font-size: 14px;
+      margin: 8px 0 4px;
+      color: var(--ink-primary);
+    }
+    .answer-card-content p { margin: 4px 0; }
+    .answer-card-content ul, .answer-card-content ol {
+      margin: 4px 0;
+      padding-left: 16px;
+    }
+    .answer-card-content blockquote {
+      margin: 8px 0;
+      padding: 8px 12px;
+      border-left: 3px solid var(--accent-gold);
+      background: rgba(201, 169, 110, 0.08);
+      border-radius: 0 4px 4px 0;
+    }
+    .answer-card-content code {
+      background: #f4f4f4;
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+    .answer-card-content pre {
+      background: #f8f8f8;
+      padding: 8px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .answer-card-content table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin: 8px 0;
+    }
+    .answer-card-content th,
+    .answer-card-content td {
+      border: 1px solid var(--bg-secondary);
+      padding: 6px 8px;
+      text-align: left;
+    }
+    .answer-card-content th {
+      background: var(--bg-secondary);
+      font-weight: 600;
+    }
+    .expand-hint {
+      text-align: center;
+      padding: 8px;
+      font-size: 11px;
+      color: var(--ink-muted);
+      cursor: pointer;
+      margin-top: 8px;
+      border-top: 1px dashed var(--bg-secondary);
+    }
+    .expand-hint:hover { color: var(--accent-primary); }
+    
+    /* Loading */
+    .loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px;
+      gap: 16px;
+    }
+    .loading-spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--bg-secondary);
+      border-top-color: var(--accent-primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      color: var(--ink-muted);
+      font-size: 14px;
+    }
+    
+    /* Error */
+    .error-state {
+      text-align: center;
+      padding: 80px;
+      color: var(--accent-coral);
+    }
+    .error-state button {
+      margin-top: 16px;
+      padding: 8px 20px;
+      background: var(--accent-coral);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      .header, .paper-section, .compare-header, .content-area {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+      .answer-card {
+        min-width: 280px;
+        max-width: 320px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="loading">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">加载Demo数据中...</div>
+    </div>
+  </div>
+
+  <script>
+    // API Configuration
+    const API_BASE = 'http://localhost:8001';
+    
+    // State
+    let demoData = null;
+    let selectedPapers = new Set();
+    let selectedQuestions = new Set();
+    let expandedQuestions = new Set();
+    let expandedCards = new Set();
+    let currentDimension = null;
+    
+    // Fetch data
+    async function loadData() {
+      try {
+        const response = await fetch(`${API_BASE}/api/compare-demo/long`);
+        if (!response.ok) throw new Error('Failed to load demo data');
+        demoData = await response.json();
+        initApp();
+      } catch (error) {
+        document.getElementById('app').innerHTML = `
+          <div class="error-state">
+            <h3>加载失败</h3>
+            <p>${error.message}</p>
+            <p style="font-size: 12px; margin-top: 8px;">请确保后端服务已启动: python backend/compare_demo_server.py</p>
+            <button onclick="loadData()">重试</button>
+          </div>
+        `;
+      }
+    }
+    
+    function initApp() {
+      // Select all papers by default
+      demoData.papers.forEach(p => selectedPapers.add(p.id));
+      
+      renderApp();
+      renderMath();
+    }
+    
+    function getDimensions() {
+      if (!demoData.papers.length) return [];
+      return demoData.papers[0].dimensions.map(d => ({ id: d.id, label: d.label }));
+    }
+    
+    function getQuestionsForDimension(dimId) {
+      const questions = [];
+      demoData.papers.forEach(paper => {
+        const dim = paper.dimensions.find(d => d.id === dimId);
+        if (dim) {
+          questions.push({
+            paperId: paper.id,
+            paperTitle: paper.title,
+            content: dim.content
+          });
+        }
+      });
+      return questions;
+    }
+    
+    function renderApp() {
+      const dimensions = getDimensions();
+      if (!currentDimension && dimensions.length) {
+        currentDimension = dimensions[0].id;
+      }
+      
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="header">
+          <div class="header-content">
+            <h1>长文本精读对比分析</h1>
+            <div class="subtitle">基于结构化数据的文献对比与综述生成</div>
+          </div>
+        </div>
+        
+        <div class="step-nav">
+          ${dimensions.map((dim, idx) => `
+            <div class="step-pill ${dim.id === currentDimension ? 'active' : ''}" 
+                 onclick="switchDimension('${dim.id}')">
+              ${String(idx + 1).padStart(2, '0')} ${dim.label}
+            </div>
+          `).join('')}
+        </div>
+        
+        <div class="paper-section">
+          <div class="paper-section-title">文献选择</div>
+          <div class="paper-scroll">
+            ${demoData.papers.map(paper => `
+              <div class="paper-card ${selectedPapers.has(paper.id) ? 'selected' : ''}" 
+                   onclick="togglePaper('${paper.id}')">
+                <div class="check-icon">✓</div>
+                <div class="paper-title">${paper.title}</div>
+                <div class="paper-meta">
+                  ${paper.authors?.join(', ') || '未知作者'} 
+                  ${paper.year ? `· ${paper.year}` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        
+        <div class="compare-header">
+          <div class="compare-stats">
+            <div class="stat-item">
+              已选 <strong>${selectedPapers.size}</strong> 篇文献
+            </div>
+            <div class="stat-item">
+              已选 <strong>${selectedQuestions.size}</strong> 个问题
+            </div>
+          </div>
+          <button class="btn-synthesis" 
+                  ${selectedPapers.size < 2 || selectedQuestions.size < 1 ? 'disabled' : ''}
+                  onclick="generateSynthesis()">
+            生成 AI 综述
+          </button>
+        </div>
+        
+        <div class="content-area">
+          ${renderQuestions()}
+        </div>
+      `;
+      
+      // Re-render math after DOM update
+      setTimeout(renderMath, 100);
+    }
+    
+    function renderQuestions() {
+      const dimensions = getDimensions();
+      const currentDim = dimensions.find(d => d.id === currentDimension);
+      if (!currentDim) return '<div style="padding: 40px; text-align: center; color: var(--ink-muted);">请选择维度</div>';
+      
+      const selectedPaperList = demoData.papers.filter(p => selectedPapers.has(p.id));
+      
+      return `
+        <div class="dimension-section">
+          ${selectedPaperList.map(paper => {
+            const dim = paper.dimensions.find(d => d.id === currentDimension);
+            if (!dim) return '';
+            const questionId = `${currentDimension}_${paper.id}`;
+            const isExpanded = expandedQuestions.has(questionId);
+            const isSelected = selectedQuestions.has(questionId);
+            const cardKey = `${questionId}_card`;
+            const isCardExpanded = expandedCards.has(cardKey);
+            
+            return `
+              <div class="question-item ${isExpanded ? 'expanded' : ''}" data-qid="${questionId}">
+                <div class="question-header" onclick="toggleQuestion('${questionId}')">
+                  <div class="question-title-wrap">
+                    <div class="question-toggle">▶</div>
+                    <div class="question-label">${paper.title}</div>
+                  </div>
+                  <div class="question-checkbox ${isSelected ? 'checked' : ''}" 
+                       onclick="event.stopPropagation(); toggleQuestionSelect('${questionId}')"></div>
+                </div>
+                <div class="question-body">
+                  <div class="question-content">
+                    <div class="paper-answers">
+                      <div class="answer-card" onclick="toggleCard('${cardKey}')">
+                        <div class="answer-card-header">
+                          <div class="answer-card-avatar">${paper.title.charAt(0)}</div>
+                          <div class="answer-card-title">${paper.title}</div>
+                        </div>
+                        <div class="answer-card-content ${isCardExpanded ? 'expanded' : ''} markdown-body" 
+                             data-content="${encodeURIComponent(dim.content)}">
+                          ${marked.parse(dim.content)}
+                        </div>
+                        ${!isCardExpanded ? '<div class="expand-hint">点击展开完整内容</div>' : ''}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+    
+    function switchDimension(dimId) {
+      currentDimension = dimId;
+      expandedQuestions.clear();
+      renderApp();
+    }
+    
+    function togglePaper(paperId) {
+      if (selectedPapers.has(paperId)) {
+        if (selectedPapers.size > 1) selectedPapers.delete(paperId);
+      } else {
+        selectedPapers.add(paperId);
+      }
+      renderApp();
+    }
+    
+    function toggleQuestion(qid) {
+      if (expandedQuestions.has(qid)) {
+        expandedQuestions.delete(qid);
+      } else {
+        expandedQuestions.add(qid);
+      }
+      const el = document.querySelector(`[data-qid="${qid}"]`);
+      if (el) el.classList.toggle('expanded');
+      setTimeout(renderMath, 300);
+    }
+    
+    function toggleQuestionSelect(qid) {
+      if (selectedQuestions.has(qid)) {
+        selectedQuestions.delete(qid);
+      } else {
+        selectedQuestions.add(qid);
+      }
+      renderApp();
+    }
+    
+    function toggleCard(cardKey) {
+      if (expandedCards.has(cardKey)) {
+        expandedCards.delete(cardKey);
+      } else {
+        expandedCards.add(cardKey);
+      }
+      renderApp();
+    }
+    
+    function generateSynthesis() {
+      alert('AI综述生成功能在此Demo中暂不实现\n\n已选文献: ' + selectedPapers.size + '篇\n已选问题: ' + selectedQuestions.size + '个');
+    }
+    
+    function renderMath() {
+      if (window.renderMathInElement) {
+        renderMathInElement(document.body, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+          ],
+          throwOnError: false
+        });
+      }
+    }
+    
+    // Initialize
+    loadData();
+  </script>
+</body>
+</html>

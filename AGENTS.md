@@ -28,9 +28,11 @@ frontend/ (React 19 + Vite + Tailwind + Zustand)
   src/RootApp.tsx       — 路由守卫、登录注册
   src/App.tsx           — 工作台壳（Tab导航、FilterTab/LongTab/QuantTab/QualTab/HistoryTab/PromptsTab）
   src/LibraryTab.tsx    — 文献库页面
+  src/components/CompareView.tsx — 对比综述主组件（替代 iframe）
+  src/components/compare/ — 对比子组件（AnswerCard/AccordionPanel/PaperSelector/DimNavigation/SynthesisModal）
   src/store/auth.ts     — Zustand 登录态
   src/lib/api-fetch.ts  — 全局鉴权 fetch（自动 refresh token）
-  public/compare_*.html — 对比综述旧页面（iframe 承载）
+  public/compare_*.html — 对比综述 demo 页面（独立 demo 参考，不再嵌入主应用）
 
 backend/ (FastAPI + SQLAlchemy 2.0 async + SQLite)
   main.py               — FastAPI 入口、路由注册、启动初始化
@@ -55,7 +57,9 @@ new_architecture/
 上传 PDF/MD → files 表 → BibEntry 匹配/创建
 筛选题录 → Job(filter) → BibEntry + BibFilterLink → Artifact(filter_excel)
 精读     → Job(reading_*) → ReadingItem + Artifact(reading_final) → 自动提取参考文献
+批量精读 → POST /batch/start → 多个 Job(reading_*, 共享 batch_id) → GET /batch/{batch_id}/status 轮询进度
 对比综述 → 从 ReadingItem 聚合 → Job(compare) → Artifact(compare_md/synthesis_md)
+AI综述  → /synthesis 或 /synthesis_long → 串行逐维度 deepseek-v4-flash → Artifact(synthesis_md) + GB/T 7714 参考文献
 文献库   → BibEntry 聚合展示（关联筛选评分、精读结果、时间线产物）
 ```
 
@@ -70,7 +74,7 @@ new_architecture/
 - **任务类型**：filter / reading_long / reading_quant / reading_qual / compare / synthesis / reference。
 - **产物类型**：filter_excel / reading_final / compare_md / synthesis_md / references_excel 等。
 - **角色**：admin / vip / normal，normal 用户数据 24h 过期自动清理。
-- **LLM**：精读用 deepseek-reasoner，分类/筛选/对比用 deepseek-chat，参考文献用 deepseek-v4-flash。
+- **LLM**：精读用 deepseek-reasoner，分类/筛选/对比/AI综述用 deepseek-v4-flash，参考文献用 deepseek-v4-flash。
 - **文本上限**：150k 字符（超出中间截断）。
 - **PDF 提取**：PaddleOCR 优先（需远程 API），自动回退 pdfplumber。
 - **输出 Markdown**：含 YAML frontmatter，兼容 Obsidian Dataview。
@@ -97,6 +101,14 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 
 **⚠️ 编辑大文件时（尤其 FastAPI router），替换完务必检查路由注册是否完整**：用 `python -c "from routers.xxx import router; [print(r.path) for r in router.routes]"` 验证所有端点都在。曾有替换 `apply_match` 时误将 `match_online` 路由定义连带删掉的事故。
 
+**⚠️ 新增独立 CSS 文件时，严禁使用全局选择器**：
+- 禁止 `*, *::before, *::after { margin: 0; ... }` 等 CSS reset（会清零整个应用的 Tailwind 排版）
+- 禁止 `:root { --var: ... }` 声明（会污染全局 CSS 变量）
+- 禁止不带作用域的 `.btn`、`.action-bar` 等通用类名（会与其他页面冲突）
+- **必须**用一个顶层 class（如 `.compare-root`）包裹所有样式，写成 `.compare-root .btn { ... }`
+- 所有 keyframes 也加前缀（如 `compare-spin`）避免冲突
+- 历史事故：`compare.css` 的全局 reset 导致整个前端排版崩溃（2026-05-14）
+
 ## 改代码优先看的文件
 
 | 改什么 | 先看 |
@@ -105,7 +117,9 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 | 上传/文件绑定 | `routers/upload.py` `db/utils.py` |
 | 题录筛选 | `routers/filter.py` `App.tsx FilterTab` |
 | 精读 | `routers/reading.py` `conversation_engine.py` `App.tsx *Tab` |
-| 对比综述 | `routers/compare.py` `public/compare_*.html` |
+| 批量精读 | `routers/reading.py`（`start_batch_reading` / `get_batch_status`） `App.tsx`（`useBatchReadingTracker`） |
+| 对比综述 | `CompareView.tsx` `compare/` 子组件 `compare.css` `routers/compare.py` |
+| AI综述 | `routers/compare.py`（synthesize_dimensions/synthesize_long_dimensions） |
 | 文献库 | `routers/library.py` `LibraryTab.tsx` |
 | 提示词 | `prompt_registry.py` `prompt_service.py` `routers/prompts.py` |
 | 参考文献 | `services/deepseek_refs.py` `routers/references.py` |

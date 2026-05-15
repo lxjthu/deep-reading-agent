@@ -97,6 +97,9 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
   const aiFileRef = useRef<HTMLInputElement>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
 
+  const [exampleTab, setExampleTab] = useState<'md' | 'json' | 'prompt'>('md')
+  const [copied, setCopied] = useState(false)
+
   const loadTemplates = async () => {
     try {
       const url =
@@ -570,6 +573,141 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
     )
   }
 
+  const MD_EXAMPLE = `# 案例研究通用分析框架
+
+> 适用于单案例或多案例比较研究，覆盖研究设计、理论对话、因果推断等核心维度
+
+## 维度 1：研究问题与目标
+**描述：** 分析论文的核心研究问题及其理论/实践意义
+**默认问题：** 本文试图回答什么研究问题？这个问题为什么重要？
+\`\`\`
+请分析本文的核心研究问题与目标。要求：
+1. 准确识别研究问题的表述（直接引用或精准概括）
+2. 评估问题的理论或实践意义
+3. 判断问题是否清晰、可研究、有边界
+4. 直接给出你的判断结论
+\`\`\`
+
+## 维度 2：案例选择策略
+**描述：** 评估案例选择的方法论依据与合理性
+**默认问题：** 作者为什么选择这个/这些案例？选择策略是否合理？
+\`\`\`
+请分析本文的案例选择策略。要求：
+1. 识别案例选择的方式（典型、极端、最相似、最不同等）
+2. 评估选择逻辑与研究问题的匹配度
+3. 讨论案例代表性或理论推广的可能
+4. 直接给出你的判断结论
+\`\`\`
+
+## 维度 3：理论框架
+**描述：** 评估论文所用理论框架的适用性与分析深度
+**默认问题：** 本文使用了什么理论框架？该框架是否适合分析这个问题？
+\`\`\`
+请分析本文所采用的理论框架。要求：
+1. 识别核心理论及其关键概念
+2. 评估理论与研究问题的契合度
+3. 分析理论操作化的具体方式
+4. 直接给出你的判断结论
+\`\`\`
+
+## 维度 4：数据与证据
+**描述：** 评估论文的数据来源、收集方法和证据充分性
+**默认问题：** 作者使用了哪些数据？数据收集方法是否可靠？
+\`\`\`
+请分析本文的数据与证据基础。要求：
+1. 识别所有数据来源（访谈、文档、观察等）
+2. 评估数据收集方法的严谨性
+3. 判断证据链是否完整、足以支撑结论
+4. 直接给出你的判断结论
+\`\`\`
+
+## 维度 5：因果机制分析
+**描述：** 评估论文对因果关系的论证逻辑与机制揭示
+**默认问题：** 作者如何解释因果关系？论证是否具有说服力？
+\`\`\`
+请分析本文的因果机制论证。要求：
+1. 识别因果链的核心环节
+2. 评估过程追踪或模式匹配等方法的使用
+3. 检验竞争性解释是否被充分讨论
+4. 直接给出你的判断结论
+\`\`\`
+
+## 维度 6：研究发现与理论贡献
+**描述：** 评估研究发现的实质贡献与理论对话价值
+**默认问题：** 本文的核心发现是什么？对已有文献有何推进？
+\`\`\`
+请分析本文的研究发现与理论贡献。要求：
+1. 概括核心研究发现
+2. 评估对已有理论的修正或扩展
+3. 讨论结论的理论推广范围
+4. 直接给出你的判断结论
+\`\`\``
+
+  const JSON_EXAMPLE = JSON.stringify({
+    template_name: "社会网络分析框架",
+    description: "适用于社会网络分析研究，覆盖网络结构、节点属性、关系机制等维度",
+    dimensions: [
+      {
+        dim_name: "网络结构特征",
+        description: "分析论文所研究的网络整体结构特征",
+        default_question: "本文研究的网络具有什么结构特征？",
+        prompt_content: "请分析本文描述的网络结构特征。要求：\n1. 识别网络的规模、密度、中心化程度等指标\n2. 评估结构特征与理论预期的吻合度\n3. 讨论结构特征对网络功能的影响\n4. 直接给出你的判断结论",
+        group_name: "核心维度"
+      },
+      {
+        dim_name: "节点与关系属性",
+        description: "分析网络中节点特征与关系类型",
+        default_question: "网络中的节点和关系各有什么特征？",
+        prompt_content: "请分析网络中节点与关系的属性特征。要求：\n1. 识别关键节点及其属性特征\n2. 分析关系类型（强关系/弱关系等）\n3. 评估节点属性与网络位置的关联\n4. 直接给出你的判断结论",
+        group_name: "核心维度"
+      }
+    ]
+  }, null, 2)
+
+  const LLM_PROMPT = `请帮我生成一个学术论文分析维度模板。要求如下：
+
+## 输出格式
+
+严格按照以下 Markdown 格式输出，不要添加多余内容：
+
+\`\`\`markdown
+# 【模板名称】
+
+> 【一句话描述模板适用场景】
+
+## 维度 1：【维度名称】
+**描述：** 【该维度的简要说明】
+**默认问题：** 【该维度的默认提问】
+\`\`\`\`
+【该维度的分析提示词，要求包含 4 条编号指令】
+\`\`\`\`
+
+## 维度 2：【维度名称】
+...（重复以上格式）
+\`\`\`
+
+## 要求
+
+1. **研究领域**：【你的研究领域，例如"公共管理"、"社会学"等】
+2. **研究类型**：【研究类型，例如"案例研究"、"定量研究"、"混合方法"等】
+3. **维度数量**：【期望的维度数量，建议 8-16 个】
+4. **每个维度的 prompt_content 必须包含 4 条编号指令**，格式为：
+   1. 识别/提取关键信息
+   2. 评估/分析逻辑
+   3. 讨论/检验某个方面
+   4. 直接给出判断结论
+5. 维度应覆盖：研究设计、理论框架、方法论、数据证据、核心发现、理论贡献等方面
+6. 模板名称以"框架"结尾
+
+请直接输出 Markdown 内容，不要输出其他解释。`
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
   // ---- Document Import panel ----
   if (panel === 'import') {
     return (
@@ -598,8 +736,52 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
                 <button onClick={() => setImportFile(null)} className="text-xs text-red-500">移除</button>
               </div>
             )}
-            <div className="text-xs text-gray-500">
-              提示：可从其他大模型生成提示词后导出为 txt/md，再导入此处
+
+            <div className="rounded-xl border border-blue-200 bg-blue-50/30">
+              <div className="px-4 py-3 border-b border-blue-200">
+                <div className="text-sm font-semibold text-gray-800">模板格式参考与生成提示词</div>
+                <div className="text-xs text-gray-500 mt-0.5">复制模板示例或提示词到其他大模型生成后，保存为文件再导入</div>
+              </div>
+              <div className="flex border-b border-blue-200">
+                <button onClick={() => setExampleTab('md')}
+                  className={`px-4 py-2 text-sm ${exampleTab === 'md' ? 'text-blue-700 border-b-2 border-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
+                  Markdown 示例
+                </button>
+                <button onClick={() => setExampleTab('json')}
+                  className={`px-4 py-2 text-sm ${exampleTab === 'json' ? 'text-blue-700 border-b-2 border-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
+                  JSON 示例
+                </button>
+                <button onClick={() => setExampleTab('prompt')}
+                  className={`px-4 py-2 text-sm ${exampleTab === 'prompt' ? 'text-blue-700 border-b-2 border-blue-600 font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
+                  生成提示词
+                </button>
+              </div>
+              <div className="p-4">
+                <div className="relative">
+                  <pre className="max-h-80 overflow-auto rounded-lg bg-gray-900 p-4 text-xs text-gray-100 font-mono whitespace-pre-wrap break-all leading-relaxed">
+                    {exampleTab === 'md' ? MD_EXAMPLE : exampleTab === 'json' ? JSON_EXAMPLE : LLM_PROMPT}
+                  </pre>
+                  <button onClick={() => copyToClipboard(exampleTab === 'md' ? MD_EXAMPLE : exampleTab === 'json' ? JSON_EXAMPLE : LLM_PROMPT)}
+                    className="absolute top-2 right-2 rounded-md bg-white/90 px-2.5 py-1 text-xs font-medium text-gray-700 shadow hover:bg-white">
+                    {copied ? '已复制' : '复制'}
+                  </button>
+                </div>
+                {exampleTab === 'prompt' && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    使用方法：复制上方提示词 → 粘贴到任意大模型（DeepSeek/ChatGPT/Claude等） → 将生成的 Markdown 内容保存为 .md 文件 → 回到此处上传导入
+                  </div>
+                )}
+                {exampleTab === 'md' && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    格式说明：第一行 <code className="bg-gray-100 px-1 rounded"># 标题</code> 为模板名称，<code className="bg-gray-100 px-1 rounded">&gt; 描述</code> 为模板说明，每个 <code className="bg-gray-100 px-1 rounded">## 维度 N：</code> 开头一个维度，代码块内为分析提示词
+                  </div>
+                )}
+                {exampleTab === 'json' && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    格式说明：JSON 格式需要 <code className="bg-gray-100 px-1 rounded">template_name</code>、<code className="bg-gray-100 px-1 rounded">dimensions</code> 字段，每个维度需包含 <code className="bg-gray-100 px-1 rounded">dim_name</code>、<code className="bg-gray-100 px-1 rounded">prompt_content</code> 等字段
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

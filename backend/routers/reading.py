@@ -25,7 +25,9 @@ from auth.dependencies import current_user
 from db import AsyncSessionLocal, PROJECT_ROOT, get_db
 from db.models import Artifact, BibEntry, File, Job, JobBibEntry, ReadingItem, User
 from db.utils import compute_dedup_key, title_match_score
-from backend.routers.metadata_extractor import extract_metadata, build_frontmatter
+from backend.routers.metadata_extractor import build_frontmatter
+from services.pdf_metadata_extract import extract_front_matter
+from services.pdf_metadata_llm import extract_metadata_with_llm
 from prompt_service import get_effective_prompt_map
 from upload_storage import lookup_original_name, lookup_path_by_file_id
 from services.queue_manager import task_queue
@@ -215,6 +217,17 @@ class SimpleReadingRequest(BaseModel):
     file_id: str
     api_key: Optional[str] = None
     force_overwrite: bool = False
+
+
+class BatchReadingRequest(BaseModel):
+    file_ids: list[str]
+    mode: str  # long / quant / qual
+    analysis_dims: Optional[list[str]] = None
+    custom_question: Optional[str] = None
+    extraction_method: str = "full"
+    api_key: Optional[str] = None
+    force_overwrite: bool = False
+    dimension_set_id: Optional[int] = None
 
 
 def utcnow_naive() -> datetime:
@@ -523,6 +536,116 @@ async def finalize_reading_failure(task_id: str, bib_entry_id: str, error_messag
         await db.commit()
 
 
+async def _try_update_bib_metadata(
+    bib_entry_id: str,
+    file_path: str,
+    original_name: str,
+    api_key: Optional[str] = None,
+) -> list[str]:
+    """从PDF前三页提取元数据并更新BibEntry。只补空字段，标题如果是文件名则替换。
+    返回被更新的字段名列表。"""
+    try:
+        from pathlib import Path
+        from db.utils import compute_dedup_key
+
+        front_matter = extract_front_matter(file_path)
+        if not front_matter.get("page_1_full"):
+            return []
+
+        metadata = extract_metadata_with_llm(
+            front_matter,
+            original_name,
+            api_key=api_key,
+        )
+        if not metadata or metadata.get("confidence", 0) < 0.3:
+            return []
+
+        async with AsyncSessionLocal() as db:
+            bib_entry = await db.get(BibEntry, bib_entry_id)
+            if bib_entry is None:
+                return []
+
+            updated_fields = []
+
+            # Title: 如果当前标题是文件名，允许替换
+            current_title = (bib_entry.title or "").strip()
+            extracted_title = (metadata.get("title") or "").strip()
+            if extracted_title:
+                is_filename_like = current_title == original_name or current_title == os.path.splitext(original_name)[0]
+                if not current_title or is_filename_like:
+                    bib_entry.title = extracted_title
+                    updated_fields.append("title")
+
+            # Authors
+            current_authors = json.loads(bib_entry.authors_json) if bib_entry.authors_json else []
+            extracted_authors = metadata.get("authors", [])
+            if extracted_authors and not current_authors:
+                bib_entry.authors_json = json.dumps(extracted_authors, ensure_ascii=False)
+                updated_fields.append("authors")
+
+            # Year
+            if metadata.get("year") and bib_entry.year is None:
+                bib_entry.year = metadata["year"]
+                updated_fields.append("year")
+
+            # Journal
+            if metadata.get("journal") and not (bib_entry.journal or "").strip():
+                bib_entry.journal = metadata["journal"]
+                updated_fields.append("journal")
+
+            # DOI
+            if metadata.get("doi") and not (bib_entry.doi or "").strip():
+                bib_entry.doi = metadata["doi"]
+                updated_fields.append("doi")
+
+            # Abstract
+            if metadata.get("abstract") and not (bib_entry.abstract or "").strip():
+                bib_entry.abstract = metadata["abstract"]
+                updated_fields.append("abstract")
+
+            # Keywords
+            current_kw = json.loads(bib_entry.keywords_json) if bib_entry.keywords_json else []
+            extracted_kw = metadata.get("keywords", [])
+            if extracted_kw and not current_kw:
+                bib_entry.keywords_json = json.dumps(extracted_kw, ensure_ascii=False)
+                updated_fields.append("keywords")
+
+            # Volume / Issue / Pages
+            for field in ["volume", "issue", "pages"]:
+                if metadata.get(field) and not getattr(bib_entry, field, None):
+                    setattr(bib_entry, field, metadata[field])
+                    updated_fields.append(field)
+
+            # Recompute dedup_key
+            authors_list = json.loads(bib_entry.authors_json) if bib_entry.authors_json else []
+            bib_entry.dedup_key = compute_dedup_key(
+                bib_entry.doi, bib_entry.title, authors_list, bib_entry.year
+            )
+
+            # Recompute metadata_completeness
+            has_title = bool((bib_entry.title or "").strip())
+            has_authors = bool(authors_list)
+            has_year = bib_entry.year is not None
+            has_doi = bool((bib_entry.doi or "").strip())
+            has_journal = bool((bib_entry.journal or "").strip())
+            has_abstract = bool((bib_entry.abstract or "").strip())
+            if has_title and has_authors and has_year and has_doi and has_journal and has_abstract:
+                bib_entry.metadata_completeness = "full"
+            elif has_title and has_authors:
+                bib_entry.metadata_completeness = "partial"
+            else:
+                bib_entry.metadata_completeness = "minimal"
+
+            bib_entry.updated_at = utcnow_naive()
+            await db.commit()
+            return updated_fields
+
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("Metadata extraction/update failed for bib_entry %s: %s", bib_entry_id, e, exc_info=True)
+        return []
+
+
 async def build_task_status_from_db(task_id: str, user_id: int) -> dict | None:
     async with AsyncSessionLocal() as db:
         job = (
@@ -681,6 +804,53 @@ def _clean_for_excel(text):
     return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
 
 
+def _is_empty_result(content: str, min_chars: int = 50) -> bool:
+    if not content or not content.strip():
+        return True
+    stripped = content.strip()
+    if stripped.startswith("[分析出错"):
+        return True
+    if len(stripped) < min_chars and not any(c in stripped for c in "。；：？！\n"):
+        return True
+    return False
+
+
+def _check_and_retry_empty_dimensions(
+    results: dict[str, str],
+    task_id: str,
+    retry_fn,
+    max_retries: int = 2,
+) -> dict[str, str]:
+    for attempt in range(1, max_retries + 1):
+        empty_keys = [k for k, v in results.items() if _is_empty_result(v)]
+        if not empty_keys:
+            break
+        tasks[task_id]["logs"].append(
+            f"[后检查] 第 {attempt} 次重试：{len(empty_keys)} 个维度需要重新分析"
+        )
+        for key in empty_keys:
+            if tasks[task_id].get("status") == "cancelled":
+                return results
+            try:
+                tasks[task_id]["stage"] = f"重试维度: {key} ({attempt}/{max_retries})"
+                new_content = retry_fn(key)
+                if new_content and not _is_empty_result(new_content):
+                    results[key] = new_content
+                    tasks[task_id]["logs"].append(f"✓ [重试] {key} 完成")
+                else:
+                    tasks[task_id]["logs"].append(f"⚠ [重试] {key} 仍为空")
+            except Exception as e:
+                tasks[task_id]["logs"].append(f"⚠ [重试] {key} 失败: {str(e)[:80]}")
+    still_empty = [k for k, v in results.items() if _is_empty_result(v)]
+    if still_empty:
+        tasks[task_id]["logs"].append(
+            f"⚠ [后检查] {len(still_empty)} 个维度重试后仍为空: {', '.join(still_empty[:5])}"
+        )
+    else:
+        tasks[task_id]["logs"].append("✓ [后检查] 所有维度检查通过")
+    return results
+
+
 def run_long_context_task(
     task_id: str,
     user_id: int,
@@ -834,6 +1004,26 @@ def run_long_context_task(
                 tasks[task_id]["logs"].append(f"⚠ 自定义问题 出错: {str(e)[:80]}")
                 results["自定义问题"] = f"[分析出错: {str(e)[:200]}]"
         
+        # Post-check: retry empty dimensions
+        _LONG_DIM_MAP = {
+            "研究问题": "overview", "理论框架": "theory", "识别策略": "methodology",
+            "数据来源": "data_source", "变量度量": "variable_measurement",
+            "识别假设": "identification_assumptions", "统计结果": "results",
+            "机制分析": "mechanism", "稳健性检验": "robustness",
+            "外部有效性": "external_validity", "贡献与局限": "contributions_limitations",
+            "写作质量": "writing_quality",
+        }
+        def _retry_long(key):
+            mapped = _LONG_DIM_MAP.get(key)
+            if mapped:
+                return engine.analyze_dimension(mapped)
+            if custom_dim_map and key in custom_dim_map:
+                return engine.analyze_dimension(key, dim_meta=custom_dim_map[key])
+            if key == "自定义问题":
+                return engine.analyze_dimension("custom", custom_question)
+            return engine.analyze_dimension("overview")
+        results = _check_and_retry_empty_dimensions(results, task_id, _retry_long)
+        
         # 4. Generate report
         tasks[task_id]["progress"] = 95
         tasks[task_id]["stage"] = "生成报告..."
@@ -843,11 +1033,27 @@ def run_long_context_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_long_context.md"
         
-        # Extract metadata
-        tasks[task_id]["stage"] = "提取论文元数据..."
-        tasks[task_id]["logs"].append("提取论文元数据...")
-        metadata = extract_metadata(paper_text, api_key)
-        tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        # Extract metadata from front matter (tolerant — never fail the main task)
+        metadata = None
+        try:
+            tasks[task_id]["stage"] = "提取论文元数据..."
+            tasks[task_id]["logs"].append("提取论文元数据...")
+            front_matter = extract_front_matter(file_path)
+            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+            tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+        if not metadata:
+            from backend.services.pdf_metadata_llm import _empty_metadata
+            metadata = _empty_metadata()
+        
+        # Update BibEntry with extracted metadata
+        try:
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            if updated_fields:
+                tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "长文本精读")
@@ -974,6 +1180,12 @@ def run_quant_task(
                 tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(e)[:80]}")
                 results[step_name] = f"[分析出错: {str(e)[:200]}]"
         
+        # Post-check: retry empty steps
+        def _retry_quant(step_name_inner):
+            pk = QUANT_PROMPT_KEYS[step_name_inner]
+            return engine.ask(normalize_reading_prompt(prompt_overrides.get(pk, "")))
+        results = _check_and_retry_empty_dimensions(results, task_id, _retry_quant)
+        
         # Generate report
         tasks[task_id]["progress"] = 95
         tasks[task_id]["stage"] = "生成七步精读报告..."
@@ -983,11 +1195,27 @@ def run_quant_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_7step.md"
         
-        # Extract metadata
-        tasks[task_id]["stage"] = "提取论文元数据..."
-        tasks[task_id]["logs"].append("提取论文元数据...")
-        metadata = extract_metadata(paper_text, api_key)
-        tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        # Extract metadata from front matter (tolerant — never fail the main task)
+        metadata = None
+        try:
+            tasks[task_id]["stage"] = "提取论文元数据..."
+            tasks[task_id]["logs"].append("提取论文元数据...")
+            front_matter = extract_front_matter(file_path)
+            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+            tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+        if not metadata:
+            from backend.services.pdf_metadata_llm import _empty_metadata
+            metadata = _empty_metadata()
+        
+        # Update BibEntry with extracted metadata
+        try:
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            if updated_fields:
+                tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "七步精读")
@@ -1104,6 +1332,12 @@ def run_qual_task(
                 tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(e)[:80]}")
                 results[step_name] = f"[分析出错: {str(e)[:200]}]"
         
+        # Post-check: retry empty steps
+        def _retry_qual(step_name_inner):
+            pk = QUAL_PROMPT_KEYS[step_name_inner]
+            return engine.ask(normalize_reading_prompt(prompt_overrides.get(pk, "")))
+        results = _check_and_retry_empty_dimensions(results, task_id, _retry_qual)
+        
         # Generate report
         tasks[task_id]["progress"] = 95
         tasks[task_id]["stage"] = "生成四步精读报告..."
@@ -1113,7 +1347,33 @@ def run_qual_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_4step.md"
         
+        # Extract metadata from front matter (tolerant — never fail the main task)
+        metadata = None
+        try:
+            tasks[task_id]["stage"] = "提取论文元数据..."
+            tasks[task_id]["logs"].append("提取论文元数据...")
+            front_matter = extract_front_matter(file_path)
+            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+            tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+        if not metadata:
+            from backend.services.pdf_metadata_llm import _empty_metadata
+            metadata = _empty_metadata()
+        
+        # Update BibEntry with extracted metadata
+        try:
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            if updated_fields:
+                tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+        except Exception as exc:
+            tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
+        
+        # Build frontmatter
+        frontmatter = build_frontmatter(metadata, "四步精读")
+        
         with open(report_path, "w", encoding="utf-8") as f:
+            f.write(frontmatter)
             f.write("# 四步精读报告\n\n")
             for step_name, answer in results.items():
                 f.write(f"## {step_name}\n\n{answer}\n\n---\n\n")
@@ -1303,6 +1563,155 @@ async def start_qual(
     thread.start()
     
     return {"task_id": task_id, "status": "queued"}
+
+
+@router.post("/batch/start")
+async def start_batch_reading(
+    request: BatchReadingRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.file_ids:
+        raise HTTPException(status_code=400, detail="file_ids 不能为空。")
+    if request.mode not in ("long", "quant", "qual"):
+        raise HTTPException(status_code=400, detail="mode 必须是 long/quant/qual 之一。")
+    if len(request.file_ids) > 50:
+        raise HTTPException(status_code=400, detail="单次批量最多 50 个文件。")
+
+    batch_id = str(uuid.uuid4())
+    job_type_map = {"long": "reading_long", "quant": "reading_quant", "qual": "reading_qual"}
+    job_type = job_type_map[request.mode]
+    prompt_type_map = {"long": "long", "quant": "quant", "qual": "qual"}
+    prompt_type = prompt_type_map[request.mode]
+
+    prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type=prompt_type)
+
+    batch_tasks = []
+    for file_id in request.file_ids:
+        try:
+            file_record = await get_file_record(db, user, file_id)
+            ensure_readable_file_type(file_record)
+            file_path = get_file_path(file_id)
+            if not file_path:
+                batch_tasks.append({"file_id": file_id, "file_name": file_record.original_name, "task_id": None, "status": "skipped", "error": "文件路径未找到"})
+                continue
+            bib_entry = await get_or_create_bib_entry(db, user, file_record)
+            if request.force_overwrite and bib_entry.reading_status in ("reading", "read"):
+                await cleanup_old_reading_data(db, bib_entry)
+
+            params: dict = {}
+            if request.mode == "long":
+                params = {
+                    "analysis_dims": request.analysis_dims or [],
+                    "custom_question": request.custom_question,
+                    "extraction_method": request.extraction_method,
+                }
+
+            task_id = await create_reading_job(db, user, file_record, bib_entry, job_type, params)
+            await db.flush()
+            job_obj = (await db.execute(select(Job).where(Job.id == task_id))).scalar_one()
+            job_obj.batch_id = batch_id
+
+            await db.commit()
+
+            tasks[task_id] = init_task_payload(task_id, request.mode, user.id, file_id, bib_entry.id)
+            task_queue.enqueue(task_id, user.id, request.mode)
+
+            if request.mode == "long":
+                thread = threading.Thread(
+                    target=run_long_context_task,
+                    args=(task_id, user.id, bib_entry.id, file_path, request.analysis_dims or [], request.custom_question, request.extraction_method, prompt_overrides, request.api_key, request.dimension_set_id),
+                    daemon=True,
+                )
+            elif request.mode == "quant":
+                thread = threading.Thread(
+                    target=run_quant_task,
+                    args=(task_id, user.id, bib_entry.id, file_path, prompt_overrides, request.api_key),
+                    daemon=True,
+                )
+            else:
+                thread = threading.Thread(
+                    target=run_qual_task,
+                    args=(task_id, user.id, bib_entry.id, file_path, prompt_overrides, request.api_key),
+                    daemon=True,
+                )
+            thread.start()
+
+            batch_tasks.append({"file_id": file_id, "file_name": file_record.original_name, "task_id": task_id, "status": "queued"})
+        except Exception as exc:
+            batch_tasks.append({"file_id": file_id, "file_name": file_id, "task_id": None, "status": "error", "error": str(exc)[:200]})
+
+    return {"batch_id": batch_id, "tasks": batch_tasks}
+
+
+@router.get("/batch/{batch_id}/status")
+async def get_batch_status(
+    batch_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    jobs = (
+        await db.execute(
+            select(Job).where(Job.batch_id == batch_id, Job.owner_user_id == user.id)
+        )
+    ).scalars().all()
+
+    if not jobs:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    task_summaries = []
+    completed = 0
+    failed = 0
+    running = 0
+    queued = 0
+
+    for job in jobs:
+        status_str = job.status
+        if status_str == "success":
+            completed += 1
+        elif status_str in ("failed", "canceled"):
+            failed += 1
+        elif status_str == "running":
+            running += 1
+        else:
+            queued += 1
+
+        file_name = ""
+        if job.input_file_id:
+            file_rec = (await db.execute(select(File).where(File.id == job.input_file_id))).scalar_one_or_none()
+            file_name = file_rec.original_name if file_rec else ""
+
+        in_memory = tasks.get(job.id, {})
+        progress = in_memory.get("progress", job.progress or 0)
+        stage = in_memory.get("stage", job.current_stage or "")
+        download_url = ""
+        if status_str == "success":
+            artifact = (
+                await db.execute(
+                    select(Artifact).where(Artifact.job_id == job.id, Artifact.artifact_type == "reading_final").limit(1)
+                )
+            ).scalar_one_or_none()
+            if artifact:
+                download_url = artifact.storage_path
+
+        task_summaries.append({
+            "task_id": job.id,
+            "file_name": file_name,
+            "status": status_str if status_str != "success" else "completed",
+            "progress": progress,
+            "stage": stage,
+            "download_url": download_url,
+        })
+
+    return {
+        "batch_id": batch_id,
+        "total": len(jobs),
+        "completed": completed,
+        "failed": failed,
+        "running": running,
+        "queued": queued,
+        "tasks": task_summaries,
+    }
 
 
 @router.get("/task/{task_id}/status")

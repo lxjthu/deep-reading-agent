@@ -65,16 +65,32 @@
 - 长文本精读
 - 七步精读
 - 四步精读
+- **批量文件夹精读**（2026-05-11 新增）
+  - 三个精读 Tab 各有「上传文件夹」按钮，通过 `webkitdirectory` 属性选择文件夹
+  - 前端过滤 `.pdf/.md/.markdown`，展示文件预览列表，用户确认后逐个上传再调用 `POST /api/reading/batch/start`
+  - 后端为每个文件创建独立 Job（共享 `batch_id`），复用单篇精读的完整逻辑
+  - 前端通过 `GET /api/reading/batch/{batch_id}/status` 轮询整体进度，内联展示每篇状态
 - 结果保存为 Markdown
 - 同时拆成结构化结果写入数据库
+- **精读完成后自动从前三页提取元数据并写入 `BibEntry`**（2026-05-10 修复）
+  - 使用 `pdf_metadata_extract` 提取前三页文本 + `pdf_metadata_llm` 调用 DeepSeek flash 结构化提取
+  - 提取字段：标题、作者、年份、期刊、DOI、卷、期、页码、摘要、关键词
+  - 只补空字段不覆盖已有值，自动更新 `dedup_key` 和 `metadata_completeness`
+  - **MD 文件元数据提取兼容**（2026-05-14）：`extract_front_matter()` 自动判断文件类型，MD 文件读取头部文本填充到与 PDF 相同的 dict 结构；元数据提取失败时仅记录警告不中断精读主流程
 
 ### 2.5 对比分析与综述
 
-- 长文本对比
-- 七步对比
-- 四步对比
+- 长文本对比、七步对比、四步对比
 - 支持单问题、多问题、跨步骤综述
 - 对比优先读取结构化精读结果
+- **v2.0 React 组件已替代 iframe**（2026-05-14）：三个对比 Tab 均使用 `CompareView` React 组件，从生产 API 加载数据，不再通过 iframe 承载旧 HTML
+- **AI 文献综述**（2026-05-10 新增）
+  - 独立的 `/synthesis`（七步/四步）和 `/synthesis_long`（长文本）端点
+  - 按维度串行生成综述，五层写作结构（梳理总结→源流比较→学术对话→缺漏分析→新起点）
+  - 利用已提取的参考文献（BibReference）支持二次引用
+  - 正文使用中文间注法引用标注，文末生成 GB/T 7714 参考文献目录
+  - 使用 `deepseek-v4-flash` 模型（经测试 reasoner 仅慢不优，flash 性价比更高）
+  - 产物保存为 `synthesis_md` Artifact
 
 ### 2.6 我的文献库
 
@@ -488,6 +504,7 @@
 职责：
 
 - 长文本 / 七步 / 四步精读
+- **批量文件夹精读**（2026-05-11 新增）
 - **精读过程中自动提取参考文献**（场景一实现）
 
 关键函数：
@@ -496,14 +513,25 @@
 - `start_quant(...)`
 - `start_qual(...)`
   - 分别启动三类精读任务
+- `start_batch_reading(...)`
+  - 批量精读入口，接收 `file_ids` + `mode`，循环创建 Job 并设 `batch_id`
+- `get_batch_status(...)`
+  - 按 `batch_id` 聚合查询所有 job 状态，返回整体进度和每篇明细
 - `run_long_task(...)`
 - `run_quant_task(...)`
 - `run_qual_task(...)`
   - 后台线程执行分析
   - 精读完成后自动调用 `_try_extract_references()` 提取参考文献
+  - **精读完成后自动调用 `_try_update_bib_metadata()` 从前三页提取元数据并更新 `BibEntry`**
+  - **精读维度收集完成后自动调用 `_check_and_retry_empty_dimensions()` 检查空维度并重试（2026-05-14 新增）**
 - `_try_extract_references(...)`
   - 调用 `services/deepseek_refs.py` 提取参考文献
   - 调用 `routers/references.py` 的 `write_trace_outputs()` 生成产物
+  - 失败时不阻塞主精读流程
+- `_try_update_bib_metadata(...)`
+  - 调用 `services/pdf_metadata_extract.py` 提取前三页文本
+  - 调用 `services/pdf_metadata_llm.py` 调用 DeepSeek flash 提取结构化元数据
+  - 只补空字段，自动更新 `dedup_key` 和 `metadata_completeness`
   - 失败时不阻塞主精读流程
 - `persist_reading_items(...)`
   - 将结构化结果写入 `reading_items`
@@ -511,9 +539,10 @@
 关键数据流：
 
 - 文件 -> `BibEntry`
-- 创建 `Job(reading_*)`
+- 创建 `Job(reading_*)`（批量时共享 `batch_id`）
 - 绑定 `JobBibEntry(target)`
 - 调用 `ConversationEngine`
+- **后检查空维度并自动重试（`_check_and_retry_empty_dimensions`）**
 - 保存 Markdown 产物
 - 保存 `ReadingItem`
 - **自动提取参考文献并生成 Excel/MD/JSON 产物**
@@ -551,14 +580,41 @@
 - `get_structured_reading(...)`
   - 对外提供结构化读取接口
 - `analyze_comparison(...)`
-  - 七步/四步对比综述
+  - 七步/四步对比综述（`deepseek-v4-flash`）
 - `analyze_long_comparison(...)`
-  - 长文本对比综述
+  - 长文本对比综述（`deepseek-v4-flash`）
+- `gather_bib_references(...)`
+  - 从 BibReference 收集已提取的参考文献（二次引用数据源）
+- `build_paper_metadata_block(...)`
+  - 构建文献元数据+二次引用信息块（prompt 缓存优化）
+- `build_synthesis_dimension_prompt(...)`
+  - 单维度综述 prompt 构建（含 `_match_dimension_content` 匹配逻辑）
+- `_safe_year(...)`
+  - year 值安全转换：None → "年份不详"
+- `_collect_flat_secondary_refs(...)`
+  - 将 bib_refs 展平为编号列表供 DeepSeek 识别
+- `_build_secondary_ref_check_prompt(...)`
+  - 构建让 DeepSeek 识别正文中实际引用的二次文献的 prompt
+- `_parse_cited_ref_ids(...)`
+  - 解析 DeepSeek 返回的引用编号（S1, S3 等）
+- `_filter_bib_refs_by_indices(...)`
+  - 按编号过滤 bib_refs，只保留正文引用过的二次文献
+- `build_gbt7714_references(...)`
+  - 生成 GB/T 7714 格式参考文献目录（主要+二次引用，条目间空行）
+- `persist_synthesis_result(...)`
+  - 保存 synthesis_md 产物（文件名格式 `综述-YYYYMMDD-作者姓.md`）
+- `synthesize_dimensions(...)`
+  - `POST /synthesis`，七步/四步 AI 综述端点（SSE 流式返回）
+- `synthesize_long_dimensions(...)`
+  - `POST /synthesis_long`，长文本 AI 综述端点（SSE 流式返回）
 
 当前注意点：
 
-- 综述提示词目前仍主要由这里拼装
-- 未来计划迁到 `synthesis` 提示词类型
+- 旧的 `/analyze` 和 `/analyze_long` 端点保持不变，供对比分析使用
+- AI 综述使用独立的 `/synthesis` 和 `/synthesis_long` 端点，SSE `StreamingResponse` 逐维度推送
+- 二次引用过滤由 DeepSeek 识别（不用正则），复用 system prompt + metadata_block 缓存命中
+- 综述提示词目前仍主要由这里拼装，未来可迁到 prompt_registry
+- 维度内容不再截断（DeepSeek 支持百万上下文），OpenAI client timeout 300s
 
 ## 5.9 文献库：`backend/routers/library.py`
 
@@ -1074,18 +1130,36 @@ export_20260506_username.dra
 - `downloadWithAuth(...)`
 - `openPreviewWithAuth(...)`
 
-## 6.7 对比页承载
+## 6.7 对比页承载（v2.0 React 组件）
 
-工作台内的对比页是通过 `iframe` 承载旧页面：
+三个对比 Tab 已从 iframe 迁移为 React 组件：
 
-- [compare_long.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_long.html)
-- [compare_7step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_7step.html)
-- [compare_4step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_4step.html)
+- `frontend/src/components/CompareView.tsx` — 对比综述主组件（替代 iframe）
+- `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
+- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开）
+- `frontend/src/components/compare/PaperSelector.tsx` — 文献选择卡片
+- `frontend/src/components/compare/DimNavigation.tsx` — 维度/步骤导航胶囊
+- `frontend/src/components/compare/SynthesisModal.tsx` — AI 综述弹窗
+- `frontend/src/components/compare/compare.css` — 对比页独立样式
+- `frontend/src/hooks/useCompareData.ts` — 对比数据加载 Hook
+- `frontend/src/hooks/useSynthesisStream.ts` — AI 综述 SSE 流式 Hook
 
-在 `App.tsx` 中的职责：
+旧 demo HTML 页面保留作参考：
 
-- 负责给这三个页面提供全屏容器
-- 保证对比页不被普通页布局挤压
+- `frontend/public/compare_long.html`
+- `frontend/public/compare_7step.html`
+- `frontend/public/compare_4step.html`
+- `frontend/public/compare_index.html` — 通过 `backend/compare_demo_server.py`（端口 8001）访问
+
+后端新增端点：
+
+- `GET /api/compare/reading-data` — 聚合用户精读数据（返回与 demo JSON 同构的数据）
+- `POST /api/compare/synthesis-stream` — AI 综述 SSE 流式端点
+
+在 `App.tsx` 中的集成：
+
+- 三个对比 Tab 直接渲染 `<CompareView mode="long|quant|qual" apiKey={...} />`
+- 对比页全屏布局，不受普通 Tab 布局挤压
 
 ### 6.7.1 `compare_7step.html`
 
@@ -1257,6 +1331,21 @@ export_20260506_username.dra
 - 后端优先从 `ReadingItem` 组装数据
 - `/api/compare/analyze*` 生成 `Job(compare)` 和 `Artifact(compare_md)`
 - 用户保存到历史时，再由 `/api/history/synthesis/` 额外生成 `Job(synthesis)` 和 `Artifact(synthesis_md)`
+
+### 7.5.1 AI 文献综述（新，2026-05-10）
+
+- 前端「AI 综述」按钮改为调用独立端点
+  - 七步/四步：`POST /api/compare/synthesis`（dimensions 为 `[{label, step}]`）
+  - 长文本：`POST /api/compare/synthesis_long`（dimensions 为 `["维度1", "维度2"]`）
+- 数据流：
+  1. `resolve_compare_members()` — 复用现有函数解析文献
+  2. `ensure_paper_data()` — 复用，优先读结构化精读结果
+  3. `gather_bib_references()` — 新增，从 BibReference 收集二次引用
+  4. 串行逐维度调用 `deepseek-v4-flash`，每维度独立 prompt
+  5. `build_gbt7714_references()` — 新增，生成 GB/T 7714 参考文献目录
+  6. `persist_synthesis_result()` — 新增，保存为 `synthesis_md` Artifact
+- 前端三个 compare_*.html 均已改为调用新端点
+- 旧的 `/analyze` 和 `/analyze_long` 端点不受影响，仍供「对比分析」按钮使用
 
 ## 7.6 文献库与历史
 
@@ -1524,6 +1613,232 @@ Bug 修复：
 - LongTab 精读结果按 group_name 分组渲染维度
 - 自定义维度集不再被强制追加系统默认维度
 
+### 8.12 对比综述页面 v2.0 Redesign Demo
+
+改动目标：
+
+- 对三个对比页面（长文本/四步/七步）进行视觉和交互的彻底重构，打造学术优雅、现代精致的文献对比工作台
+- 设计独立于主应用的 demo 后端服务，使用静态 JSON 数据驱动，不依赖生产数据库
+- 建立完整的设计规范文档（色彩/字体/布局/组件/动画/Markdown 渲染），供后续正式实现参考
+
+设计规范文档：
+
+- `docs/compare-design-spec.md` — v2.0 完整设计方案，包含：
+  - 色彩系统（温暖米白底色 + 深墨绿强调色）
+  - 字体系统（衬线标题 + 无衬线正文 + 等宽代码）
+  - 间距/圆角/阴影系统
+  - 组件规范（标题区、文献选择区、步骤导航、操作栏、维度折叠面板、论文回答卡片）
+  - Markdown + KaTeX 渲染规范（含表格样式）
+  - 动画微交互规范
+  - 编码规范（UTF-8 强制要求）
+
+独立 demo 后端：
+
+- `backend/compare_demo_server.py` — 端口 8001，FastAPI 应用
+  - `GET /api/compare-demo/long` → 读取 `docs/compare-long-demo-data.json`
+  - `GET /api/compare-demo/qual` → 读取 `docs/compare-qual-demo-data.json`
+  - `GET /api/compare-demo/quant` → 读取 `docs/compare-quant-demo-data.json`
+  - 同时静态服务三个 HTML 页面和入口页
+  - 启动命令：`python backend/compare_demo_server.py`
+
+Demo 数据文件：
+
+- `docs/compare-long-demo-data.json` — 长文本精读，3 篇文献（土地整治、AI企业生产率、电子支付），每篇含 10 个分析维度
+- `docs/compare-qual-demo-data.json` — 四步精读，2 篇文献（土地整治、生态颜值），4 个步骤共 20+ 子问题
+- `docs/compare-quant-demo-data.json` — 七步精读，3 篇文献（土地整治、生态产品、灌溉公地），7 个步骤共 27+ 子问题
+
+落点文件：
+
+- `backend/compare_demo_server.py` — 独立 demo 后端（~80 行）
+- `frontend/public/compare_long.html` — 长文本对比 v2（维度式，~350 行）
+- `frontend/public/compare_4step.html` — 四步对比 v2（步骤式，~900 行）
+- `frontend/public/compare_7step.html` — 七步对比 v2（步骤式，~750 行）
+- `frontend/public/compare_index.html` — demo 入口导航页（~100 行）
+- `docs/compare-design-spec.md` — v2.0 设计规范
+- `docs/compare-long-demo-data.json` / `compare-qual-demo-data.json` / `compare-quant-demo-data.json`
+
+v2 页面核心架构（与 v1 对比）：
+
+| 维度 | v1（旧 compare） | v2（redesign demo） |
+|------|-------------------|---------------------|
+| 数据来源 | 生产 API（需登录+API Key） | 静态 JSON 文件（独立服务） |
+| 配色 | 基础白色/蓝色 | 温暖米白 + 深墨绿学术配色 |
+| 字体 | 系统默认 | Noto Serif SC 标题 + Noto Sans SC 正文 |
+| 布局 | 步骤切换重载整个列表 | 固定导航 + 纵向维度列表 + 横向卡片滚动 |
+| 折叠 | 无 | 手风琴折叠面板（350ms 动画） |
+| 文献选择 | 简单列表 | 卡片式选择（绿色边框+脉冲动画） |
+| 步骤导航 | 下拉菜单 | 胶囊标签横向滚动 |
+| 卡片设计 | 基础表格 | 精致卡片（悬停抬升、阴影层次） |
+| 公式 | 无 | KaTeX 完整支持 |
+| 表格 | 基础 | 学术优雅风格（横向滚动包装） |
+| 动画 | 无 | fadeInUp 进场 + 选中脉冲 + 展开过渡 |
+
+三种数据结构的页面适配：
+
+1. **长文本（long）**：`papers[].dimensions[]` — 扁平维度列表，无步骤分组。导航标签 = 所有维度的 label 集合
+2. **四步（qual）**：`papers[].steps[stepName].subQuestions[]` — 4 步分组，每步含多个子问题。导航标签 = 4 个步骤名
+3. **七步（quant）**：`papers[].steps[stepName].subQuestions[]` — 7 步分组，每步含多个子问题。导航标签 = 7 个步骤名（缩短显示）
+
+交互逻辑：
+
+- 文献选择：卡片点击 toggle，≥2 篇才能触发 AI 综述
+- 步骤/维度导航：胶囊标签切换，"全部"显示所有
+- 折叠面板：点击展开/收起，默认全部折叠
+- 复选框：子问题级别的选择，跨步骤持久化
+- 全选/清空：作用于当前可见的子问题集合
+- AI 综述按钮：≥2 文献 + ≥1 子问题选中时可用
+
+当前状态：
+
+- 三个 demo 页面功能完整，可通过 `python backend/compare_demo_server.py` 启动体验
+- **v2.0 React 组件已正式集成到主应用**（2026-05-14），替换了 iframe 承载方案
+- 三个对比 Tab 均使用 `CompareView` 组件，从生产 API 加载真实精读数据
+- AI 综述通过 `SynthesisModal` 组件调用 SSE 流式端点
+- 旧 demo HTML 文件保留作为独立 demo 和交互参考
+
+### 8.13 AI 文献综述模块
+
+改动目标：
+
+- 新增独立的 AI 文献综述端点，使用 deepseek-v4-flash 按维度串行生成高质量综述
+- 支持二次引用（利用已提取的 BibReference 数据）和 GB/T 7714 参考文献目录
+- 前端改造现有「AI 综述」按钮调用新端点，不破坏旧对比功能
+- SSE 流式返回，每维度生成后立即推送，避免多维度长耗时超时
+- 二次引用过滤改用 DeepSeek 识别正文实际引用的文献，避免参考文献目录膨胀
+
+落点文件：
+
+- `backend/routers/compare.py`（新增约 500 行：请求模型、辅助函数、SSE 端点、二次引用过滤）
+- `frontend/public/compare_7step.html`（btnSynthesis 改调 `/api/compare/synthesis`，SSE 流式读取）
+- `frontend/public/compare_4step.html`（btnSynthesis 改调 `/api/compare/synthesis`，SSE 流式读取）
+- `frontend/public/compare_long.html`（btnSynthesis 改调 `/api/compare/synthesis_long`，SSE 流式读取）
+- `frontend/vite.config.ts`（Vite proxy timeout 从 60s 调至 600s）
+
+新增/修改函数：
+
+- `SynthesisDimensionRequest` / `SynthesisLongRequest` — 请求体模型
+- `gather_bib_references()` — 从 BibReference 收集二次引用数据（含 volume/issue/pages/doi）
+- `format_cite_tag()` — 引用标注格式化（中文间注法，None 年份兜底"年份不详"）
+- `_safe_year()` — year 值安全转换：None → "年份不详"
+- `build_paper_metadata_block()` — 文献元数据+二次引用信息块
+- `build_synthesis_dimension_prompt()` — 单维度综述 prompt（无字符截断）
+- `_match_dimension_content()` — 维度内容匹配（精确→去前缀→模糊→兜底）
+- `_collect_flat_secondary_refs()` — 将 bib_refs 展平为编号列表
+- `_build_secondary_ref_check_prompt()` — 构建让 DeepSeek 识别二次引用的 prompt
+- `_parse_cited_ref_ids()` — 解析 DeepSeek 返回的引用编号
+- `_filter_bib_refs_by_indices()` — 按编号过滤 bib_refs
+- `build_gbt7714_references()` — GB/T 7714 参考文献目录（主要+二次，条目间空行）
+- `persist_synthesis_result()` — 保存 synthesis_md 产物（文件名 `综述-YYYYMMDD-作者姓.md`）
+- `POST /synthesis` — 七步/四步 AI 综述端点（SSE StreamingResponse）
+- `POST /synthesis_long` — 长文本 AI 综述端点（SSE StreamingResponse）
+
+设计文档：
+
+- `docs/superpowers/specs/2026-05-10-ai-synthesis-design.md`
+- `docs/superpowers/plans/2026-05-10-ai-synthesis.md`
+- `docs/superpowers/plans/2026-05-11-synthesis-secondary-ref-filter.md`
+
+踩坑记录：
+
+- **模型选择**：最初计划用 `deepseek-reasoner`（thinking 模式），但实测与 `deepseek-v4-flash` 相比耗时接近（25s vs 28s）、质量差异不大，而 reasoner 额外消耗 thinking tokens 且多维度串行时易超时。最终改用 `deepseek-v4-flash`
+- **"Failed to fetch"**：Vite proxy timeout 默认 60s，reasoner 多维度串行调用容易超时。改用 flash 后单维度 ~25s，但仍可能 10+ 维度超时，最终改为 SSE 流式返回 + proxy timeout 600s
+- **None 年份穿透**：`dict.get('year', 'n.d.')` 当值为 None 时返回 None 而非默认值，输出 `佚名 (None). 标题`。用 `_safe_year()` 统一处理
+- **二次引用膨胀**：`build_gbt7714_references()` 将所有 BibReference 都列入二次引用目录。改用 DeepSeek 识别正文实际引用的文献（temperature=0.1, max_tokens=500），复用 system prompt + metadata_block 前缀保持缓存命中
+- **维度内容截断**：原 `CONTENT_CHAR_LIMIT = 3000` 截断维度文本，DeepSeek 支持百万上下文无此必要，已移除
+- **OpenAI client 超时**：`compare.py`（5处）和 `conversation_engine.py`（1处）统一设 `timeout=300s`；其余服务（`deepseek_refs.py`、`pdf_metadata_llm.py`、`ai_template_generator.py`、`metadata_extractor.py`）设 `connect=30s, read=120s, write=30s, pool=30s`，`deepseek_refs.py` 的重试循环额外捕获 `APITimeoutError`/`ConnectTimeout` 以触发重试而非直接失败
+
+当前结果：
+
+- 三个 compare 页面的「AI 综述」按钮调用新端点，SSE 逐维度流式显示
+- 综述输出按维度分节，含 GB/T 7714 参考文献目录和二次引用（仅正文引用过的）
+- 二次引用过滤由 DeepSeek 识别，非正则匹配
+- None 年份统一显示为"年份不详"
+- 产物文件名格式 `综述-YYYYMMDD-作者姓.md`
+- 旧的「对比分析」按钮和 `/analyze`、`/analyze_long` 端点完全不受影响
+
+### 8.14 精读后检查与自动重试
+
+改动目标：
+
+- 三种精读模式（长文本/七步/四步）完成后，在生成报告和元数据提取之前，自动检查每个维度/步骤的结果是否为空
+- 空结果判定：空字符串、`[分析出错...]` 错误占位、少于 50 字符且无中文标点的疑似无意义内容
+- 对空维度最多重试 2 次，复用已有的 `ConversationEngine` 实例重新调用 DeepSeek
+- 重试失败不阻塞主流程，通过任务日志告知用户哪些维度重试失败
+
+落点文件：
+
+- `backend/routers/reading.py`（新增 `_is_empty_result`、`_check_and_retry_empty_dimensions` 辅助函数，三个 `run_*_task` 函数各插入后检查调用）
+
+新增函数：
+
+- `_is_empty_result(content, min_chars=50)` — 检测结果是否为空或错误占位
+- `_check_and_retry_empty_dimensions(results, task_id, retry_fn, max_retries=2)` — 通用后检查+重试函数
+
+插入位置：
+
+- `run_long_context_task`：自定义问题处理之后、生成报告之前；支持内置维度、自定义维度集、自定义问题三种重试路径
+- `run_quant_task`：七步循环之后、生成报告之前；通过 `QUANT_PROMPT_KEYS` 找回 prompt_key
+- `run_qual_task`：四步循环之后、生成报告之前；通过 `QUAL_PROMPT_KEYS` 找回 prompt_key
+
+当前结果：
+
+- 精读完成后自动检测空维度并重试，最多 2 次
+- 重试过程通过 `tasks[task_id]` 日志实时推送，用户可在前端看到「后检查」和「重试」日志
+- 所有维度检查通过时日志显示「✓ [后检查] 所有维度检查通过」
+- 重试失败不阻塞，任务仍正常完成
+
+### 8.15 对比综述 Demo → 生产集成（React 组件替换 iframe）
+
+改动目标：
+
+- 将三个对比 Tab 从 iframe 承载 `compare_*.html` 迁移为 React 组件 `CompareView`
+- 从生产 API 加载真实精读数据，不再依赖 demo JSON
+- AI 综述通过 `SynthesisModal` 调用 SSE 流式端点
+
+落点文件：
+
+- `frontend/src/components/CompareView.tsx` — 对比综述主组件（新建）
+- `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
+- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开）
+- `frontend/src/components/compare/PaperSelector.tsx` — 文献选择卡片
+- `frontend/src/components/compare/DimNavigation.tsx` — 维度/步骤导航胶囊
+- `frontend/src/components/compare/SynthesisModal.tsx` — AI 综述弹窗
+- `frontend/src/components/compare/compare.css` — 对比页独立样式（限定 `.compare-root` 作用域）
+- `frontend/src/hooks/useCompareData.ts` — 对比数据加载 Hook
+- `frontend/src/hooks/useSynthesisStream.ts` — AI 综述 SSE 流式 Hook
+- `frontend/src/App.tsx` — 替换 CompareTab iframe 为 CompareView 组件
+- `backend/routers/compare.py` — 新增 `GET /reading-data` 和 `POST /synthesis-stream`
+
+踩坑记录：
+
+- **CSS 全局选择器污染**（2026-05-14）：`compare.css` 中的 `*, *::before, *::after { margin: 0; padding: 0; }` 全局 reset 和 `:root` CSS 变量声明在 Vite 打包后对整个应用生效，清零了 Tailwind 的排版样式（标题、段落、按钮间距全部消失），导致所有页面排版崩溃。修复方案：所有样式用 `.compare-root` 顶层 class 包裹限定作用域，keyframes 加 `compare-` 前缀避免冲突。**以后新增独立 CSS 文件必须遵守此规则**（已写入 AGENTS.md）。
+- **iframe 全屏布局遗留**（2026-05-14）：原 `CompareTab` 使用 iframe 时，App.tsx 对比 Tab 用 `h-screen overflow-hidden` 锁定视口（iframe 内部自行滚动）。迁移为 React 组件后未移除此约束，导致对比页内容超出一屏无法下拉。修复：移除 `isCompareTab` 的特殊布局分支，统一使用 `min-h-screen` 正常滚动。**教训：从 iframe 迁移为 React 组件时，必须同步清理父容器的溢出控制**。
+- **React Hooks 位置违规导致白屏**（2026-05-14）：`TemplateMarket.tsx` 中 `useState(exampleTab)` 和 `useState(copied)` 放在了两个 early return（detail 面板、AI 面板）之后。当用户点击「AI 生成专属模板」时 `panel === 'ai'` 触发第 482 行提前返回，后面的 hooks 不会被调用，违反 React「所有 hooks 必须在 early return 之前」的规则，导致 React 崩溃渲染白屏。修复：将这两个 `useState` 移到组件顶部与其他 hooks 并列。**教训：React hooks 声明顺序必须与渲染路径无关，新增 hooks 时务必放在所有 early return 之前**。
+- **长文本对比维度集合名称匹配**（2026-05-14）：对比页胶囊需按维度集合名称分组显示（如「Ostrom制度分析框架」「地理学综述类论文理论建构与批判分析框架」），但 `ReadingItem.item_key`（`long.行动情境的边界界定`）和 `DimensionItem.dim_key`（`action_arena_boundary`）是两套完全不同的 key 体系，通过 key 无法直接 join。**正确匹配方式**：用 `ReadingItem.item_label`（中文维度名，如「行动情境的边界界定」）与 `DimensionItem.dim_name` 匹配，再通过 `set_id` 关联 `DimensionSet.name` 获取集合名称。注意同一个 `dim_name` 可能出现在多个维度集中，取首次出现即可（同一用户不会在不同集合中重复定义同名维度）。**教训**：系统中存在三套维度标识体系（`item_key`/`dim_key`/中文名），跨表关联时务必先确认实际数据格式，不能假设 key 可直接对应。
+
+### 8.16 DeepSeek API 全局超时治理
+
+改动目标：
+
+- 修复长文本精读后自动提取参考文献时，`OpenAI()` 客户端默认 connect 超时 5s，走代理 SSL 握手超时直接失败的问题
+- 统一所有调用 DeepSeek API 的入口的超时配置
+
+落点文件：
+
+- `backend/services/deepseek_refs.py` — 添加 `httpx.Timeout(connect=30, read=120, write=30, pool=30)`，重试循环捕获 `APITimeoutError`/`ConnectTimeout`
+- `backend/services/pdf_metadata_llm.py` — 添加同等超时配置
+- `backend/services/ai_template_generator.py` — 添加同等超时配置
+- `backend/routers/metadata_extractor.py` — 添加同等超时配置
+
+已验证无需改动的文件：
+
+- `backend/routers/compare.py`（5 处）— 已有 `timeout=300`
+- `new_architecture/conversation_engine.py`（1 处）— 已有 `timeout=300`
+
+踩坑记录：
+
+- **默认超时过短**（2026-05-14）：`OpenAI()` 不传 `timeout` 时 httpx 默认 connect 5s，走 HTTP 代理做 TLS 握手时容易超时。`deepseek_refs.py` 的重试循环只处理空响应，不捕获超时异常，导致超时直接穿透到 `_try_extract_references` 被外层 `except Exception` 吞掉并静默失败。**教训：所有 OpenAI 客户端必须显式设置超时，重试循环必须捕获超时异常**。
+
 ## 9. 改代码时的推荐查找路径
 
 ## 9.1 要改注册/登录/权限
@@ -1563,10 +1878,14 @@ Bug 修复：
 
 先看：
 
-- `backend/routers/compare.py`
-- `frontend/public/compare_long.html`
-- `frontend/public/compare_7step.html`
-- `frontend/public/compare_4step.html`
+- `frontend/src/components/CompareView.tsx` — 对比综述主组件
+- `frontend/src/components/compare/*.tsx` — 子组件（AnswerCard, AccordionPanel, PaperSelector, DimNavigation, SynthesisModal）
+- `frontend/src/components/compare/compare.css` — 对比页样式
+- `frontend/src/hooks/useCompareData.ts` — 数据加载 Hook
+- `frontend/src/hooks/useSynthesisStream.ts` — AI 综述 SSE Hook
+- `backend/routers/compare.py` — 生产 API（含 `/reading-data` 和 `/synthesis-stream`）
+- `docs/compare-design-spec.md` — v2 设计规范
+- `docs/COMPARE_DEMO_REFERENCE.md` — Demo 前后端技术参考
 
 ## 9.6 要改文献库
 
@@ -1662,7 +1981,7 @@ Bug 修复：
 9. `frontend/src/RootApp.tsx`
 10. `frontend/src/App.tsx`
 11. `frontend/src/LibraryTab.tsx`
-12. `frontend/public/compare_*.html`
+12. `frontend/src/components/CompareView.tsx` + `compare/` 子组件
 
 ## 12. 维护建议
 
@@ -1690,8 +2009,8 @@ Bug 修复：
 
 优先决定：
 
-- 是放在 React 主工作台内
-- 还是像 compare 一样暂时挂旧页面
+- 是放在 React 主工作台内（如 CompareView）
+- 还是独立 HTML 页面（如 demo 页面）
 
 同时同步更新：
 

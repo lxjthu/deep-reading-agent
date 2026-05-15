@@ -10,7 +10,9 @@
 | ~~P0~~ | ~~参考文献梳理标签页 + 引用关系入库~~ | **已完成（2026-05）** | 无 | [REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md) | 全链路已实现：后端 7 个 API 端点（`/api/references/*`）、DeepSeek v4-flash 提取+追踪服务、`bib_references` + `bib_reference_citations` 表+迁移、前端 `ReferenceTraceTab` 组件。 |
 | P0.5 | 双栏 PDF 参考文献提取修复 | **已完成（2026-05-03）** | 建议在 P0 进入实施前先修 | [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | pypdf 对 CJK 编码双栏 PDF 的文本提取完全失败（中文乱码），需切换为 pdfplumber。影响所有中文学术期刊论文的参考文献提取。 |
 | P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
-| P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **部分完成**，核心 bug 未修 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | 合并为独立模块，不侵入现有代码。详见下方 2.2 节。 |
+| P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **已完成（2026-05-11）**，P3 提示词管理未做 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | P2 兜底修复（None 年份、缺作者）、P4 引用锚点（SSE 分维度流式）、二次引用过滤（DeepSeek 识别）已完成。P3 提示词管理未纳入。 |
+| P2.5 | AI 综述二次引用目录过滤 | **已完成（2026-05-11）** | AI 综述模块已上线 | 无 | 改用 DeepSeek 识别综述正文实际引用的二次文献，复用 system prompt + metadata_block 缓存命中。 |
+| ~~P3.5~~ | ~~批量精读（文件夹上传）~~ | **已完成（2026-05-11）** | 无 | [实施计划](./superpowers/plans/2026-05-11-batch-folder-reading.md) | 三个 Tab 各有「上传文件夹」按钮，复用单篇精读逻辑，`POST /batch/start` + `GET /batch/{batch_id}/status`。修复了 `create_reading_job` 后缺少 `flush` 导致 `scalar_one()` 找不到新 Job 的 bug。 |
 
 | ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
 | P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
@@ -216,44 +218,52 @@ PDF 结构复杂度：
 
 ### 2.2 AI 综述模块重构（P2 参考文献兜底 + P3 提示词管理 + P4 引用锚点）
 
-**状态：部分完成，核心问题未修。决定合并为独立模块，不侵入现有代码。**
+**状态：已完成（2026-05-11）**，P3 提示词管理未纳入。
 
-> 设计意图：将 P2（参考文献目录兜底）、P3（综述提示词管理）、P4（引用锚点强化）合并为一个独立模块。
-> 不修改 `compare.py` 现有函数，而是新建独立模块接管综述流程，确保改动隔离、可回退。
+#### 已完成的改动
 
-#### 待解决的问题
+**P2 — 参考文献目录兜底修复**
 
-**P2 — 参考文献目录兜底修复（AI 综述场景）**
+- `_safe_year()` 辅助函数统一处理 `None` 年份 → `"年份不详"`
+- `format_cite_tag()` / `format_inline_citation()` 内部 None 兜底
+- 全文 8 处 `dict.get('year', 'n.d.')` 替换为 `_safe_year()`
+- `bib_entry_to_paper_data()` 补上 `volume/issue/pages` 字段
+- `build_gbt7714_references()` 主要和二次引用均输出完整 GB/T 7714 格式（含年份、卷期、页码）
+- 参考文献条目之间增加空行分隔
+- 产物文件名改为 `综述-日期-主要作者.md`
 
-已完成：
+**P4 — 综述引用锚点强化 + SSE 流式返回**
 
-- `compare.py` 的 `build_reference_list()` 已有作者缺失 → `"佚名"` 兜底（line 409-410）
-- `compare.py` 的 `format_inline_citation()` 已有无作者 → `"(佚名, {year})"` 兜底（line 369-370）
-- `compare.py` 的 `build_reference_list()` 和 `build_paper_header()` 已有 `dict.get('year', 'n.d.')` 兜底
+- `/synthesis` 和 `/synthesis_long` 改为 `StreamingResponse(media_type="text/event-stream")`
+- 每个维度生成完立即推送 `event: dimension` 事件，前端逐维度显示
+- 完成后推送 `event: complete`，出错推送 `event: error`
+- 前端 3 个 HTML 文件（`compare_7step.html`、`compare_4step.html`、`compare_long.html`）改用 `fetch + ReadableStream` 读取
+- 流式期间底部显示"综述中……"提示
+- 维度内容不再截断（移除 `CONTENT_CHAR_LIMIT = 3000`），DeepSeek 支持百万上下文
+- OpenAI client timeout 统一设为 300 秒，Vite proxy timeout 调至 10 分钟
 
-未修复的核心 bug（均为 AI 综述生成时的问题）：
-
-1. **`None` 年份穿透**：`bib_entry.year` 为 `None` 时 `dict.get('year', 'n.d.')` 返回 `None`（键存在但值为 `None`），输出显示 `佚名 (None). 标题...`
-2. **行内引用 `None` 年份**：`format_inline_citation()` 中 `f"(佚名, {year})"` 当 `year=None` 时输出 `"(佚名, None)"`
-3. **中英文不一致**：代码使用英文 `"n.d."`，应统一为中文
-
-**P3 — 文献综述提示词纳入提示词管理**
+**P3 — 文献综述提示词纳入提示词管理（未实施）**
 
 - 将当前 `compare.py` 中硬编码的综述 prompt 迁入提示词管理
 - 新增 `synthesis` 类型，支持系统默认 + 用户覆盖
 - 建议槽位：`synthesis.system` / `synthesis.citation_guard` / `synthesis.compare_single` / `synthesis.compare_multi` / `synthesis.compare_cross` / `synthesis.long_single` / `synthesis.long_multi`
 
-**P4 — 综述引用锚点强化**
+### 2.2.1 AI 综述二次引用目录过滤（P2.5）
 
-- 为每篇文献生成明确 `citation_label`
-- 强约束模型正文引用必须复用系统给定标签
-- 禁止 `文献1 / 文献2 / 第一篇文献 / 上述研究`
+**状态：已完成（2026-05-11）**
 
-#### 实施策略
+**方案**：综述正文全部维度拼接完成后，将正文 + 所有候选二次引用文献列表交给 DeepSeek，让它识别正文实际引用了哪些二次引用文献。
 
-- **新建独立模块**（如 `backend/services/synthesis_builder.py`），封装：引用列表构建（含兜底）、提示词组装、引用锚点注入
-- **不修改 `compare.py` 现有函数**，新模块作为上游数据准备层被 compare 流程调用
-- 保证现有功能不受影响，新模块可独立测试和回退
+**实施**：
+
+1. `_collect_flat_secondary_refs()` — 将 bib_refs 展平为编号列表
+2. `_build_secondary_ref_check_prompt()` — 构建识别 prompt
+3. 调用 `deepseek-v4-flash`（temperature=0.1, max_tokens=500），复用 `SYNTHESIS_SYSTEM_PROMPT` + `metadata_block` 前缀保持缓存命中
+4. `_parse_cited_ref_ids()` — 解析返回的编号（S1,S3 等）
+5. `_filter_bib_refs_by_indices()` — 按编号过滤 bib_refs
+6. 过滤后的 bib_refs 传给 `build_gbt7714_references()`
+
+**涉及文件**：`backend/routers/compare.py`
 
 ### ~~2.3 文献综述提示词纳入提示词管理~~
 
@@ -290,6 +300,26 @@ PDF 结构复杂度：
 1. **`backend/services/data_portability.py`**：导出打包 + 导入解包核心逻辑
 2. **`backend/routers/data.py`**：`POST /api/data/export` + `POST /api/data/import`
 3. **前端组件**：用户菜单中"导出我的数据"和"导入数据"入口 + 确认弹窗 + 进度展示
+
+### 2.8 批量精读（文件夹上传）（P3.5）
+
+**状态：已完成（2026-05-11）**
+
+**实施内容**：
+
+- 后端 `reading.py` 新增 `BatchReadingRequest` 模型、`POST /batch/start` 和 `GET /batch/{batch_id}/status` 两个端点
+- `POST /batch/start`：接收 `file_ids` + `mode`，循环为每个文件创建 Job 并设 `batch_id`，复用单篇精读的 `create_reading_job` + worker 线程
+- `GET /batch/{batch_id}/status`：按 `Job.batch_id` 聚合查询所有 job 状态，返回 total/completed/failed/running/queued + 每篇 task 明细
+- 前端三个精读 Tab（LongTab / QuantTab / QualTab）各增加「上传文件夹」按钮（`webkitdirectory`）、文件预览弹窗、`useBatchReadingTracker` hook 管理轮询状态、批量进度面板
+- 前端错误处理：检查 `startRes.ok` + 校验 queued 计数，全部失败时抛出明确错误不再盲目轮询
+- 修复 `create_reading_job` 后缺少 `await db.flush()` 导致 `scalar_one()` 抛 `NoResultFound` 的 bug
+
+**关键决策**：
+- 文件类型过滤：前端过滤 `.pdf/.md/.markdown`，递归子目录
+- 重复处理：批量模式 `force_overwrite=true` 静默覆盖
+- 进度展示：内联进度面板（当前第 N/M 篇 + 文件列表状态），每 2 秒轮询
+
+无需 Alembic 迁移（`batch_id` 字段已存在于 `jobs` 表）。
 
 ### 2.7 P13 Playwright E2E + 部署验收
 

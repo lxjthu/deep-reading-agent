@@ -178,9 +178,15 @@
 | `run_long_task(...)` | 后台执行长文本精读 | 长文本分析失败 |
 | `run_quant_task(...)` | 后台执行七步精读 | 七步分析失败 |
 | `run_qual_task(...)` | 后台执行四步精读 | 四步分析失败 |
+| `_try_update_bib_metadata(...)` | 从前三页提取元数据并更新 `BibEntry`（只补空字段） | 精读后文献库元数据未更新 |
+| `_is_empty_result(content)` | 检测精读维度结果是否为空（空字符串/错误占位/过短无意义） | 后检查重试逻辑排查 |
+| `_check_and_retry_empty_dimensions(...)` | 检查所有维度结果，空维度自动重试（最多 2 次） | 精读结果部分为空、重试日志排查 |
 | `start_long_context(...)` | 启动长文本任务 | 前端开始长文本无响应 |
 | `start_quant(...)` | 启动七步任务 | 前端开始七步无响应 |
 | `start_qual(...)` | 启动四步任务 | 前端开始四步无响应 |
+| `BatchReadingRequest` | 批量精读请求体（`file_ids`, `mode`, `api_key` 等） | 批量精读请求字段问题 |
+| `start_batch_reading(...)` | 批量精读入口，循环创建 Job（共享 `batch_id`） | 批量精读全部启动失败 |
+| `get_batch_status(...)` | 按 `batch_id` 聚合查询所有 job 状态 | 批量进度 404 / 状态不对 |
 
 ## 2.12 `backend/routers/compare.py`
 
@@ -205,6 +211,22 @@
 | `get_structured_reading(...)` | 返回某个精读任务的结构化结果 | 对比页结构化接口 |
 | `analyze_comparison(...)` | 生成七步/四步对比综述 | 七步/四步综述生成问题 |
 | `analyze_long_comparison(...)` | 生成长文本对比综述 | 长文本综述生成问题 |
+| `SynthesisDimensionRequest` | 七步/四步 AI 综述请求体 | AI 综述请求字段问题 |
+| `SynthesisLongRequest` | 长文本 AI 综述请求体 | 长文本 AI 综述请求问题 |
+| `gather_bib_references(...)` | 从 BibReference 收集二次引用数据（含 volume/issue/pages/doi） | 二次引用缺失 |
+| `format_cite_tag(...)` | 中文间注法引用标注格式化（None 年份兜底为"年份不详"） | 引用标注格式异常 |
+| `_safe_year(...)` | year 值安全转换：None → "年份不详" | 年份显示 None |
+| `build_paper_metadata_block(...)` | 构建文献元数据+二次引用信息块 | prompt 中元数据异常 |
+| `build_synthesis_dimension_prompt(...)` | 单维度综述 prompt 构建（无字符截断） | 综述内容匹配不准 |
+| `_match_dimension_content(...)` | 维度内容匹配（精确→去前缀→模糊→兜底） | 维度内容找不到 |
+| `_collect_flat_secondary_refs(...)` | 将 bib_refs 展平为 [(member_id, ref)] 列表 | 二次引用过滤 |
+| `_build_secondary_ref_check_prompt(...)` | 构建让 DeepSeek 识别正文中实际引用的二次文献的 prompt | 二次引用识别 |
+| `_parse_cited_ref_ids(...)` | 解析 DeepSeek 返回的引用编号（S1,S3 等） | 二次引用编号解析 |
+| `_filter_bib_refs_by_indices(...)` | 按编号过滤 bib_refs | 二次引用过滤结果 |
+| `build_gbt7714_references(...)` | 生成 GB/T 7714 参考文献目录（主要+二次，条目间空行） | 参考文献格式问题 |
+| `persist_synthesis_result(...)` | 保存 synthesis_md 产物 | 综述产物保存异常 |
+| `synthesize_dimensions(...)` | `POST /synthesis` 七步/四步 AI 综述（SSE 流式返回） | AI 综述生成失败 |
+| `synthesize_long_dimensions(...)` | `POST /synthesis_long` 长文本 AI 综述（SSE 流式返回） | 长文本 AI 综述失败 |
 
 ## 2.13 `backend/routers/library.py`
 
@@ -228,7 +250,9 @@
 
 | 函数 | 作用 | 什么时候优先看 |
 |---|---|---|
-| `extract_front_matter(pdf_path)` | 从 PDF 前 1-3 页提取文本和 DOI/ISBN | 元数据提取失败 |
+| `extract_front_matter(pdf_path)` | 从 PDF 前 1-3 页或 MD 头部 150 行提取文本和 DOI/ISBN | 元数据提取失败 |
+| `extract_front_matter_md(md_path)` | 从 MD 文件头部提取文本（被 extract_front_matter 自动调用） | MD 文件元数据问题 |
+| `_is_markdown(file_path)` | 判断文件是否为 Markdown | 文件类型判断 |
 | `extract_dois(text)` | 从文本中正则提取 DOI | DOI 提取不全或误提取 |
 | `extract_isbns(text)` | 从文本中正则提取 ISBN | ISBN 提取问题 |
 | `extract_page_header(page)` | 提取页面页眉区域 | 页眉提取不准确 |
@@ -241,8 +265,9 @@
 
 | 函数 | 作用 | 什么时候优先看 |
 |---|---|---|
-| `extract_metadata_with_llm(front_matter, filename)` | 调用 DeepSeek 从 PDF 前几页抽取结构化元数据 | LLM 抽取结果异常 |
-| `_clean_metadata(data)` | 清洗和验证 LLM 返回的元数据 | 元数据字段格式问题 |
+| `extract_metadata_with_llm(front_matter, filename)` | 调用 DeepSeek 从 PDF 前三页抽取结构化元数据（含摘要、关键词） | LLM 抽取结果异常 |
+| `_clean_metadata(data)` | 清洗和验证 LLM 返回的元数据（含 abstract/keywords） | 元数据字段格式问题 |
+| `_empty_metadata()` | 返回空元数据字典（含 abstract/keywords 字段） | 新增字段默认值 |
 
 ## 2.13.3 `backend/services/metadata_sources.py`
 
@@ -567,6 +592,7 @@ Key functions/endpoints:
 | `persistReadingTaskId(...)` | 保存任务 id 到本地 | 精读任务恢复 |
 | `restoreReadingTaskId(...)` | 读取本地任务 id | 精读任务恢复 |
 | `useReadingTaskTracker(...)` | 统一管理长文本/七步/四步任务轮询状态 | 精读进度条、日志、恢复逻辑 |
+| `useBatchReadingTracker(...)` | 管理批量精读轮询状态（`batchId`, `total`, `completed`, `failed`, `tasks`） | 批量精读进度面板、轮询逻辑 |
 
 ### 3.4.3 业务组件函数
 
@@ -578,7 +604,7 @@ Key functions/endpoints:
 | `QualTab` | 四步精读页面 | 四步上传、启动、日志、结果预览 |
 | `PromptsTab` | 提示词管理页面 | 系统默认 / 用户覆盖编辑 |
 | `HistoryTab` | 历史记录页面 | 历史预览、下载、删除 |
-| `CompareTab` | iframe 对比页容器 | 对比页铺满布局 |
+| `CompareView` | React 对比综述主组件 | 替代 iframe，文献选择+维度导航+折叠面板+AI综述 |
 
 ## 3.5 `frontend/src/LibraryTab.tsx`
 
@@ -716,7 +742,9 @@ Key functions:
 | 精读结果有 Markdown 但 compare 页读不出来 | `reading.py.persist_reading_items(...)`、`compare.py.build_structured_paper_data(...)`、`compare_4step.html.loadReports()`、`compare_4step.html.getPaperSubQuestions(...)` |
 | 对比页 AI 综述按钮不亮 | `compare_7step.html.updateUI()`、`compare_4step.html.updateUI()` |
 | 历史记录预览报未认证 | `download.ts.openPreviewWithAuth(...)`、`history.py.preview_file(...)` |
+| 精读后文献库元数据未更新 | `reading.py._try_update_bib_metadata(...)`、`pdf_metadata_extract.py.extract_front_matter(...)`、`pdf_metadata_llm.py.extract_metadata_with_llm(...)` |
 | 提示词管理显示空或保存失败 | `prompt_service.py.ensure_builtin_prompt_templates(...)`、`get_prompt_payload(...)`、`prompts.py.get_prompt_item(...)` |
+| 模板市场 AI 生成白屏 | `TemplateMarket.tsx` 的 hooks 声明位置（须在所有 early return 之前） |
 
 ## 5. 维护建议
 

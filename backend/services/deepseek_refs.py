@@ -18,9 +18,10 @@ import os
 import re
 from typing import Optional
 
+import httpx
 import json_repair
 import pdfplumber
-from openai import OpenAI
+from openai import APITimeoutError, OpenAI
 from backend.utils.api_key import validate_deepseek_key
 
 logger = logging.getLogger(__name__)
@@ -266,17 +267,25 @@ def call_deepseek_json(
     api_key: Optional[str] = None,
 ) -> Optional[dict]:
     api_key = validate_deepseek_key(api_key)
-    client = OpenAI(api_key=api_key, base_url=BASE_URL)
+    client = OpenAI(
+        api_key=api_key,
+        base_url=BASE_URL,
+        timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
+    )
 
     for attempt in range(MAX_RETRIES):
-        resp = client.chat.completions.create(
-            model=MODEL,
-            extra_body={"thinking": {"type": "disabled"}},
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL,
+                extra_body={"thinking": {"type": "disabled"}},
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except (APITimeoutError, httpx.ConnectTimeout) as exc:
+            logger.warning("DeepSeek timeout (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, exc)
+            continue
         raw = resp.choices[0].message.content
         finish = resp.choices[0].finish_reason
         if raw and raw.strip():

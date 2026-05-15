@@ -1,925 +1,817 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>七步法对比分析</title>
-  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-  <script src="/auth-client.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      height: 100%;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f5f5;
-      padding: 12px 16px;
-      line-height: 1.6;
-    }
-    .container {
-      width: 100%;
-      max-width: none;
-      margin: 0;
-      min-height: 100%;
-    }
-    h1 { color: #1a1a2e; margin-bottom: 8px; }
-    .subtitle { color: #666; margin-bottom: 24px; }
-    
-    /* Controls */
-    .controls {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .controls-row {
-      display: flex;
-      gap: 16px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-    }
-    .controls-row:last-child { margin-bottom: 0; }
-    label { font-weight: 600; color: #374151; font-size: 14px; }
-    select {
-      padding: 8px 12px;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      font-size: 14px;
-      background: white;
-      cursor: pointer;
-    }
-    select:focus { outline: none; border-color: #059669; }
-    
-    /* Paper selection */
-    .paper-list {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .paper-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .paper-checkbox {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      background: #f3f4f6;
-      border-radius: 20px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-    }
-    .paper-checkbox:hover { background: #e5e7eb; }
-    .paper-checkbox input { cursor: pointer; }
-    .paper-checkbox.checked { background: #d1fae5; color: #065f46; }
-    .btn-delete {
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      padding: 4px;
-      border-radius: 4px;
-      opacity: 0.5;
-      transition: opacity 0.2s;
-    }
-    .btn-delete:hover { opacity: 1; background: #fee2e2; }
-    
-    /* AI Synthesis button */
-    /* Navigation tabs */
-    .nav-tabs { display: none; }
-    .nav-tab {
-      padding: 8px 16px;
-      border-radius: 6px;
-      text-decoration: none;
-      color: #6b7280;
-      background: white;
-      border: 1px solid #e5e7eb;
-      font-size: 14px;
-      transition: all 0.2s;
-    }
-    .nav-tab:hover { background: #f9fafb; }
-    .nav-tab.active {
-      background: #059669;
-      color: white;
-      border-color: #059669;
-    }
-
-    .btn-synthesis {
-      background: linear-gradient(135deg, #059669, #047857);
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      margin-left: auto;
-    }
-    .btn-synthesis:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(5,150,105,0.3); }
-    .btn-synthesis:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-    
-    /* Table */
-    .table-container {
-      background: white;
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .table-scroll {
-      overflow-x: auto;
-      min-height: 420px;
-      max-height: calc(100vh - 220px);
-      overflow-y: auto;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 600px;
-    }
-    thead th {
-      background: #1a1a2e;
-      color: white;
-      padding: 12px 16px;
-      text-align: left;
-      font-size: 13px;
-      font-weight: 600;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    thead th:first-child { min-width: 200px; }
-    tbody td {
-      padding: 12px 16px;
-      border-bottom: 1px solid #e5e7eb;
-      font-size: 13px;
-      vertical-align: top;
-    }
-    tbody tr:hover { background: #f9fafb; }
-    tbody td:first-child {
-      font-weight: 600;
-      color: #374151;
-      background: #f9fafb;
-      position: sticky;
-      left: 0;
-      z-index: 5;
-    }
-    .cell-content {
-      max-height: 120px;
-      overflow: hidden;
-      cursor: pointer;
-      position: relative;
-    }
-    .cell-content.expanded {
-      max-height: none;
-    }
-    .cell-content::after {
-      content: '';
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 30px;
-      background: linear-gradient(transparent, white);
-      pointer-events: none;
-    }
-    .cell-content.expanded::after { display: none; }
-    .cell-content:hover { color: #059669; }
-    .cell-empty {
-      color: #9ca3af;
-      font-style: italic;
-    }
-    
-    /* Paper header in table */
-    .paper-header {
-      font-size: 12px;
-      color: #6b7280;
-    }
-    .paper-title {
-      font-weight: 600;
-      color: #1a1a2e;
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    
-    /* Loading */
-    .loading {
-      text-align: center;
-      padding: 40px;
-      color: #6b7280;
-    }
-    .spinner {
-      display: inline-block;
-      width: 24px;
-      height: 24px;
-      border: 2px solid #e5e7eb;
-      border-top-color: #059669;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-right: 8px;
-      vertical-align: middle;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    
-    /* Empty state */
-    .empty {
-      text-align: center;
-      padding: 60px 20px;
-      color: #6b7280;
-    }
-    .empty-icon { font-size: 48px; margin-bottom: 12px; }
-    
-    /* Modal */
-    .modal-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 100;
-      justify-content: center;
-      align-items: center;
-    }
-    .modal-overlay.active { display: flex; }
-    .modal {
-      background: white;
-      border-radius: 12px;
-      width: 90%;
-      max-width: 900px;
-      max-height: 80vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-    .modal-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .modal-header h2 { font-size: 18px; color: #1a1a2e; }
-    .modal-close {
-      background: none;
-      border: none;
-      font-size: 24px;
-      cursor: pointer;
-      color: #6b7280;
-    }
-    .modal-body {
-      padding: 20px;
-      overflow-y: auto;
-      flex: 1;
-    }
-    .modal-body pre {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      font-family: inherit;
-      line-height: 1.8;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对比分析 · 七步精读</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<style>
+:root {
+  --bg-canvas: #faf8f5;
+  --bg-surface: #ffffff;
+  --bg-hover: #f5f2ee;
+  --bg-selected: rgba(22, 101, 52, 0.06);
+  --bg-warm: #f5efe8;
+  --text-primary: #2d2a26;
+  --text-secondary: #5c554d;
+  --text-tertiary: #9a9188;
+  --text-muted: #b5ada5;
+  --accent-primary: #166534;
+  --accent-primary-hover: #14532d;
+  --accent-gold: #b45309;
+  --accent-coral: #9f1239;
+  --border-light: #ebe7e0;
+  --border-medium: #ddd8cf;
+  --border-focus: #166534;
+  --shadow-sm: 0 1px 3px rgba(45, 42, 38, 0.05);
+  --shadow-md: 0 4px 12px rgba(45, 42, 38, 0.08);
+  --shadow-lg: 0 12px 32px rgba(45, 42, 38, 0.1);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  line-height: 1.7;
+  min-height: 100vh;
+}
+.page-header {
+  padding: 40px 60px 32px;
+  animation: fadeInUp 0.5s ease both;
+}
+.page-header h1 {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  font-weight: 700;
+  font-size: 28px;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+.page-header .subtitle {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+.paper-selection-bar {
+  margin: 0 60px 20px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  animation: fadeInUp 0.5s ease 0.1s both;
+}
+.paper-selection-bar .bar-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.paper-selection-bar .bar-label .count-badge {
+  font-weight: 500;
+  font-size: 12px;
+  background: var(--bg-selected);
+  color: var(--accent-primary);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+.paper-cards-scroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-medium) transparent;
+}
+.paper-cards-scroll::-webkit-scrollbar { height: 4px; }
+.paper-cards-scroll::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 2px; }
+.paper-card {
+  flex: 0 0 auto;
+  min-width: 240px;
+  max-width: 320px;
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--border-light);
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  user-select: none;
+}
+.paper-card:hover {
+  border-color: var(--border-medium);
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.paper-card.selected {
+  border-color: var(--accent-primary);
+  background: var(--bg-selected);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+.paper-card .card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.5;
+}
+.paper-card .card-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.paper-card .card-check {
+  float: right;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 2px solid var(--border-medium);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  margin-top: 2px;
+}
+.paper-card.selected .card-check {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.paper-card.selected .card-check::after {
+  content: '';
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.step-navigation {
+  margin: 0 60px 16px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  animation: fadeInUp 0.5s ease 0.15s both;
+}
+.step-pill {
+  padding: 8px 18px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-light);
+  background: var(--bg-surface);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.step-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+.step-pill.active {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+  box-shadow: 0 2px 8px rgba(22, 101, 52, 0.25);
+}
+.action-bar {
+  margin: 0 60px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+  animation: fadeInUp 0.5s ease 0.2s both;
+}
+.action-bar .step-name {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.action-bar .selection-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 3px 10px;
+  background: var(--bg-warm);
+  border-radius: var(--radius-full);
+}
+.action-bar .spacer { flex: 1; }
+.btn {
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid var(--border-light);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+.btn:hover { background: var(--bg-hover); border-color: var(--border-medium); }
+.btn-primary {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+.btn-primary:hover { background: var(--accent-primary-hover); }
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.accordion-list {
+  margin: 0 60px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.accordion-item {
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+  transition: box-shadow 0.25s ease;
+}
+.accordion-item:hover { box-shadow: var(--shadow-sm); }
+.accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.accordion-header:hover { background: var(--bg-hover); }
+.accordion-header .checkbox-wrapper {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.accordion-header .checkbox-wrapper input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  z-index: 1;
+}
+.accordion-header .checkbox-visual {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 2px solid var(--border-medium);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  pointer-events: none;
+}
+.accordion-header .checkbox-wrapper input:checked + .checkbox-visual {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.accordion-header .checkbox-wrapper input:checked + .checkbox-visual::after {
+  content: '';
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.accordion-header .question-label {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.accordion-header .expand-arrow {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.25s ease;
+  color: var(--text-tertiary);
+}
+.accordion-item.open .accordion-header .expand-arrow {
+  transform: rotate(180deg);
+}
+.accordion-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.35s ease;
+}
+.accordion-item.open .accordion-body {
+  max-height: 600px;
+}
+.accordion-body-inner {
+  padding: 4px 20px 20px;
+}
+.answer-cards-scroll {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-medium) transparent;
+}
+.answer-cards-scroll::-webkit-scrollbar { height: 4px; }
+.answer-cards-scroll::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 2px; }
+.answer-card {
+  flex: 0 0 380px;
+  max-height: 500px;
+  overflow-y: auto;
+  padding: 18px 20px;
+  background: var(--bg-canvas);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-medium) transparent;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.answer-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.answer-card::-webkit-scrollbar { width: 4px; }
+.answer-card::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 2px; }
+.answer-card .card-paper-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-light);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.answer-card .card-content {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+.answer-card .card-content p { margin-bottom: 10px; }
+.answer-card .card-content p:last-child { margin-bottom: 0; }
+.answer-card .card-content h1,
+.answer-card .card-content h2,
+.answer-card .card-content h3,
+.answer-card .card-content h4 {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  color: var(--text-primary);
+  margin: 14px 0 8px;
+  font-weight: 600;
+}
+.answer-card .card-content h1 { font-size: 16px; }
+.answer-card .card-content h2 { font-size: 15px; }
+.answer-card .card-content h3 { font-size: 14px; }
+.answer-card .card-content h4 { font-size: 13px; }
+.answer-card .card-content ul,
+.answer-card .card-content ol {
+  padding-left: 20px;
+  margin-bottom: 10px;
+}
+.answer-card .card-content li { margin-bottom: 4px; }
+.answer-card .card-content blockquote {
+  border-left: 3px solid var(--accent-primary);
+  padding: 6px 14px;
+  margin: 10px 0;
+  background: var(--bg-selected);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.answer-card .card-content code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: var(--bg-warm);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--accent-gold);
+}
+.answer-card .card-content pre {
+  background: var(--bg-warm);
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 10px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.answer-card .card-content pre code {
+  background: none;
+  padding: 0;
+  color: var(--text-primary);
+}
+.answer-card .card-content .table-wrapper {
+  overflow-x: auto;
+  margin: 10px 0;
+}
+.answer-card .card-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.answer-card .card-content th,
+.answer-card .card-content td {
+  padding: 6px 10px;
+  border: 1px solid var(--border-light);
+  text-align: left;
+}
+.answer-card .card-content th {
+  background: var(--bg-warm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.answer-card .card-content strong { color: var(--text-primary); }
+.answer-card .card-content a {
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+.answer-card .card-content a:hover { text-decoration: underline; }
+.answer-card .card-content .katex-display {
+  margin: 10px 0;
+  overflow-x: auto;
+}
+.empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--text-tertiary);
+  animation: fadeInUp 0.5s ease both;
+}
+.empty-state .empty-icon {
+  font-size: 40px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+.empty-state .empty-text { font-size: 15px; }
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 60px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  animation: fadeInUp 0.4s ease both;
+}
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-medium);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.error-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--accent-coral);
+  animation: fadeInUp 0.4s ease both;
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.accordion-item { animation: fadeInUp 0.4s ease both; }
+.accordion-item:nth-child(1) { animation-delay: 0.02s; }
+.accordion-item:nth-child(2) { animation-delay: 0.04s; }
+.accordion-item:nth-child(3) { animation-delay: 0.06s; }
+.accordion-item:nth-child(4) { animation-delay: 0.08s; }
+.accordion-item:nth-child(5) { animation-delay: 0.10s; }
+.accordion-item:nth-child(6) { animation-delay: 0.12s; }
+.accordion-item:nth-child(7) { animation-delay: 0.14s; }
+.accordion-item:nth-child(8) { animation-delay: 0.16s; }
+.accordion-item:nth-child(9) { animation-delay: 0.18s; }
+.accordion-item:nth-child(10) { animation-delay: 0.20s; }
+@media (max-width: 900px) {
+  .page-header, .paper-selection-bar, .step-navigation, .action-bar, .accordion-list {
+    margin-left: 20px;
+    margin-right: 20px;
+  }
+  .page-header { padding: 24px 20px 20px; }
+  .answer-card { flex: 0 0 300px; }
+}
+</style>
 </head>
 <body>
-  <div class="container">
-    <h1>📊 七步法对比分析</h1>
-    <p class="subtitle">选择步骤和文献，横向对比每篇论文的回答（动态提取子问题）</p>
-    
-    <div class="controls">
-      <div class="controls-row">
-        <label>选择步骤：</label>
-        <select id="stepSelect">
-          <option value="">加载中...</option>
-        </select>
-      </div>
-      <div class="controls-row">
-        <label>选择文献：</label>
-        <div class="paper-list" id="paperList">
-          <span class="loading"><span class="spinner"></span>加载中...</span>
-        </div>
-      </div>
-      <div class="controls-row" style="justify-content:space-between;align-items:flex-start;">
-        <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;">
-          <span id="selectedQuestionCount" style="display:inline-flex;align-items:center;padding:5px 10px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:13px;font-weight:700;">已选中 0 个问题</span>
-          <span id="selectedPaperCount" style="font-size:13px;color:#4b5563;">已选文献 0 篇</span>
-          <span id="selectedStepSummary" style="font-size:13px;color:#4b5563;">当前步骤：未选择</span>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto;">
-          <span id="synthesisHint" style="font-size:13px;color:#b45309;">AI 综述至少需要 2 篇文献，并至少选择 1 个问题。</span>
-          <button id="btnClearSelection" type="button" style="padding:10px 16px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;" disabled>全部取消</button>
-          <button class="btn-synthesis" id="btnSynthesis" disabled style="margin-left:0;">🤖 生成 AI 综述</button>
-        </div>
-      </div>
-    </div>
-    
-    <div class="table-container" id="tableContainer">
-      <div class="empty">
-        <div class="empty-icon">📋</div>
-        <p>请选择步骤和文献开始对比</p>
-      </div>
-    </div>
+<header class="page-header">
+  <h1>对比分析 · 七步精读</h1>
+  <p class="subtitle">选择论文与步骤，横向对比各篇精读结果</p>
+</header>
+<section class="paper-selection-bar" id="paperBar">
+  <div class="bar-label">
+    选择论文
+    <span class="count-badge" id="paperCount">0 篇</span>
   </div>
-  
-  <!-- Modal for AI Synthesis -->
-  <div class="modal-overlay" id="modalOverlay">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>🤖 AI 文献综述</h2>
-        <button class="modal-close" id="modalClose">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="loading" id="synthesisLoading">
-          <span class="spinner"></span>
-          正在生成文献综述，请稍候...
-        </div>
-        <pre id="synthesisContent" style="display:none;"></pre>
-        <div id="synthesisActions" style="display:none; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-          <button id="btnDownloadSynthesis" class="btn-synthesis" style="background: #3b82f6;">💾 保存到历史记录</button>
-        </div>
-      </div>
-    </div>
+  <div class="paper-cards-scroll" id="paperCards"></div>
+</section>
+<nav class="step-navigation" id="stepNav"></nav>
+<div class="action-bar" id="actionBar" style="display:none;">
+  <span class="step-name" id="actionStepName"></span>
+  <span class="selection-count" id="actionSelCount">已选 0 项</span>
+  <span class="spacer"></span>
+  <button class="btn" id="btnSelectAll" type="button">当前步骤全选</button>
+  <button class="btn" id="btnClear" type="button">清空选择</button>
+  <button class="btn btn-primary" id="btnSynthesis" type="button" disabled>生成 AI 综述</button>
+</div>
+<main class="accordion-list" id="accordionList">
+  <div class="empty-state">
+    <div class="empty-icon">&#128218;</div>
+    <p class="empty-text">请先选择论文，然后选择步骤开始对比</p>
   </div>
-
-  <script>
-    if (!window.requireAuthSession()) { throw new Error('auth required'); }
-    function getCurrentApiKey() {
-      try {
-        const rawUser = localStorage.getItem('dra_user');
-        const user = rawUser ? JSON.parse(rawUser) : null;
-        const username = typeof user?.username === 'string' ? user.username.trim() : '';
-        return username ? (localStorage.getItem(`deepseek_api_key:${username}`) || '') : '';
-      } catch (error) {
-        console.warn('Failed to load scoped API key:', error);
-        return '';
-      }
+</main>
+<script>
+(function() {
+  var API_URL = 'http://localhost:8001/api/compare-demo/quant';
+  var STEP_KEYS = [
+    '第一步：核心贡献识别',
+    '第二步：理论框架评估',
+    '第三步：方法论批判',
+    '第四步：实证结果解读',
+    '第五步：局限性分析',
+    '第六步：实践意义',
+    '第七步：未来方向'
+  ];
+  var STEP_PILLS = [
+    { key: '__all__', label: '全部' },
+    { key: STEP_KEYS[0], label: '①核心贡献' },
+    { key: STEP_KEYS[1], label: '②理论框架' },
+    { key: STEP_KEYS[2], label: '③方法论' },
+    { key: STEP_KEYS[3], label: '④实证结果' },
+    { key: STEP_KEYS[4], label: '⑤局限性' },
+    { key: STEP_KEYS[5], label: '⑥实践意义' },
+    { key: STEP_KEYS[6], label: '⑦未来方向' }
+  ];
+  var papers = [];
+  var selectedPaperIds = new Set();
+  var currentStep = STEP_KEYS[0];
+  var selectedSubQIds = new Set();
+  var openAccordions = new Set();
+  function loadData() {
+    showLoading();
+    fetch(API_URL)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        papers = data.papers || [];
+        renderPaperCards();
+        renderStepNav();
+        selectStep(currentStep);
+      })
+      .catch(function(err) {
+        showError('数据加载失败：' + err.message);
+      });
+  }
+  function showLoading() {
+    document.getElementById('accordionList').innerHTML =
+      '<div class="loading-state"><div class="loading-spinner"></div>加载中...</div>';
+  }
+  function showError(msg) {
+    document.getElementById('accordionList').innerHTML =
+      '<div class="error-state">' + escapeHtml(msg) + '</div>';
+  }
+  function escapeHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+  function renderPaperCards() {
+    var container = document.getElementById('paperCards');
+    if (papers.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p class="empty-text">暂无论文数据</p></div>';
+      return;
     }
-
-    function promptForApiKey() {
-      let key = getCurrentApiKey();
-      if (key) return key;
-      key = prompt('请输入 DeepSeek API Key（sk-开头）：');
-      if (!key || !key.trim()) return '';
-      key = key.trim();
-      try {
-        const rawUser = localStorage.getItem('dra_user');
-        const user = rawUser ? JSON.parse(rawUser) : null;
-        const username = typeof user?.username === 'string' ? user.username.trim() : '';
-        if (username) localStorage.setItem(`deepseek_api_key:${username}`, key);
-      } catch (_) {}
-      return key;
+    container.innerHTML = papers.map(function(p, i) {
+      var sel = selectedPaperIds.has(p.id) ? ' selected' : '';
+      var authors = (p.authors || []).slice(0, 3).join(', ');
+      if ((p.authors || []).length > 3) authors += ' 等';
+      var metaParts = [];
+      if (p.year) metaParts.push(p.year);
+      if (p.journal) metaParts.push(p.journal);
+      return '<div class="paper-card' + sel + '" data-id="' + p.id + '" onclick="window.__togglePaper(\'' + p.id + '\')">' +
+        '<div class="card-check"></div>' +
+        '<div class="card-title">' + escapeHtml(p.title || '无标题') + '</div>' +
+        '<div class="card-meta">' +
+          (authors ? '<span>' + escapeHtml(authors) + '</span>' : '') +
+          (metaParts.length ? '<span>' + escapeHtml(metaParts.join(' · ')) + '</span>' : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+    updatePaperCount();
+  }
+  window.__togglePaper = function(id) {
+    if (selectedPaperIds.has(id)) selectedPaperIds.delete(id);
+    else selectedPaperIds.add(id);
+    renderPaperCards();
+    renderAccordion();
+    updateActionBar();
+  };
+  function updatePaperCount() {
+    document.getElementById('paperCount').textContent = selectedPaperIds.size + ' 篇';
+  }
+  function renderStepNav() {
+    var nav = document.getElementById('stepNav');
+    nav.innerHTML = STEP_PILLS.map(function(s) {
+      var active = s.key === currentStep ? ' active' : '';
+      return '<button class="step-pill' + active + '" data-step="' + s.key + '" onclick="window.__selectStep(\'' + s.key.replace(/'/g, "\\'") + '\')">' + s.label + '</button>';
+    }).join('');
+  }
+  window.__selectStep = function(key) {
+    currentStep = key;
+    renderStepNav();
+    renderAccordion();
+    updateActionBar();
+  };
+  function selectStep(key) {
+    currentStep = key;
+    renderStepNav();
+    renderAccordion();
+    updateActionBar();
+  }
+  function getStepsToRender() {
+    if (currentStep === '__all__') return STEP_KEYS;
+    return [currentStep];
+  }
+  function renderAccordion() {
+    var list = document.getElementById('accordionList');
+    var selectedPapers = papers.filter(function(p) { return selectedPaperIds.has(p.id); });
+    if (selectedPapers.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128218;</div><p class="empty-text">请先选择论文，然后选择步骤开始对比</p></div>';
+      document.getElementById('actionBar').style.display = 'none';
+      return;
     }
-    // Global state
-    let allReports = [];        // All 7step reports with parsed content
-    let selectedStep = '';      // Currently selected step
-    let selectedPapers = [];    // Selected paper filenames
-    let selectedSubQuestions = new Set(); // Selected sub-questions for AI synthesis
-    
-    // Seven steps definition (only step names, sub-questions are dynamically extracted)
-    const STEPS = [
-      { id: '第一步', label: '第一步：核心贡献识别' },
-      { id: '第二步', label: '第二步：理论框架评估' },
-      { id: '第三步', label: '第三步：方法论批判' },
-      { id: '第四步', label: '第四步：实证结果解读' },
-      { id: '第五步', label: '第五步：局限性分析' },
-      { id: '第六步', label: '第六步：实践意义' },
-      { id: '第七步', label: '第七步：未来方向' }
-    ];
-    
-    // Parse YAML frontmatter
-    function parseFrontmatter(content) {
-      if (!content.startsWith('---')) return {};
-      const end = content.indexOf('---', 3);
-      if (end === -1) return {};
-      const yamlContent = content.substring(3, end).trim();
-      try {
-        return jsyaml.load(yamlContent) || {};
-      } catch (e) {
-        console.error('YAML parse error:', e);
-        return {};
-      }
-    }
-    
-    /**
-     * Parse all sub-questions and their content for a given step
-     * Returns: { "完整子问题标题": "内容文本", ... }
-     */
-    function parseStepContent(content, stepId) {
-      const lines = content.split('\n');
-      let inStep = false;
-      let currentSubQuestion = null;
-      const subQuestions = {};
-      
-      // Build regex to match step header like "## 第一步：核心贡献识别" or "## 第一步"
-      const stepRegex = new RegExp(`^##\\s+${stepId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[：:].*`);
-      
-      for (const line of lines) {
-        // Check for step header
-        if (line.match(/^##\s+第[一二三四五六七八九十]+步/)) {
-          if (line.match(stepRegex)) {
-            inStep = true;
-            continue;
-          } else if (inStep) {
-            break;
-          }
+    document.getElementById('actionBar').style.display = 'flex';
+    var steps = getStepsToRender();
+    var html = '';
+    for (var si = 0; si < steps.length; si++) {
+      var stepKey = steps[si];
+      var stepLabel = stepKey;
+      for (var pi = 0; pi < papers.length; pi++) {
+        if (papers[pi].steps && papers[pi].steps[stepKey]) {
+          stepLabel = papers[pi].steps[stepKey].label || stepKey;
+          break;
         }
-        
-        if (!inStep) continue;
-        
-        // Match sub-question: ### **数字. 标题**
-        const subQMatch = line.match(/^###\s+\*\*(\d+)\.\s+(.+?)\*\*/);
-        if (subQMatch) {
-          currentSubQuestion = `${subQMatch[1]}. ${subQMatch[2].trim()}`;
-          subQuestions[currentSubQuestion] = [];
-        } else if (currentSubQuestion) {
-          subQuestions[currentSubQuestion].push(line);
+      }
+      var subQuestions = getSubQuestionsForStep(selectedPapers, stepKey);
+      if (subQuestions.length === 0) continue;
+      for (var qi = 0; qi < subQuestions.length; qi++) {
+        var sq = subQuestions[qi];
+        var isOpen = openAccordions.has(sq.id);
+        var isChecked = selectedSubQIds.has(sq.id);
+        html += '<div class="accordion-item' + (isOpen ? ' open' : '') + '" data-sqid="' + sq.id + '">';
+        html += '<div class="accordion-header" onclick="window.__toggleAccordion(\'' + sq.id + '\')">';
+        html += '<div class="checkbox-wrapper" onclick="event.stopPropagation()">';
+        html += '<input type="checkbox"' + (isChecked ? ' checked' : '') + ' onchange="window.__toggleCheck(\'' + sq.id + '\', this.checked)">';
+        html += '<div class="checkbox-visual"></div>';
+        html += '</div>';
+        html += '<span class="question-label">' + escapeHtml(sq.label) + '</span>';
+        html += '<span class="expand-arrow">&#9662;</span>';
+        html += '</div>';
+        html += '<div class="accordion-body"><div class="accordion-body-inner">';
+        html += '<div class="answer-cards-scroll">';
+        for (var ppi = 0; ppi < selectedPapers.length; ppi++) {
+          var paper = selectedPapers[ppi];
+          var content = getSubQuestionContent(paper, stepKey, sq.id);
+          if (content === null) continue;
+          html += '<div class="answer-card">';
+          html += '<div class="card-paper-title">' + escapeHtml(paper.title || '无标题') + '</div>';
+          html += '<div class="card-content">' + renderMarkdown(content) + '</div>';
+          html += '</div>';
+        }
+        html += '</div></div></div></div>';
+      }
+    }
+    if (!html) {
+      html = '<div class="empty-state"><div class="empty-icon">&#128203;</div><p class="empty-text">当前步骤下没有可对比的内容</p></div>';
+    }
+    list.innerHTML = html;
+    renderMathInContent();
+  }
+  function getSubQuestionsForStep(selectedPapers, stepKey) {
+    var seen = {};
+    var result = [];
+    for (var i = 0; i < selectedPapers.length; i++) {
+      var step = selectedPapers[i].steps && selectedPapers[i].steps[stepKey];
+      if (!step || !step.subQuestions) continue;
+      for (var j = 0; j < step.subQuestions.length; j++) {
+        var sq = step.subQuestions[j];
+        if (!seen[sq.id]) {
+          seen[sq.id] = true;
+          result.push(sq);
         }
       }
-      
-      // Join lines for each sub-question
-      const result = {};
-      for (const [key, lines] of Object.entries(subQuestions)) {
-        result[key] = lines.join('\n').trim();
-      }
-      return result;
     }
-    
-    // Fetch all 7step reports
-    async function loadReports() {
+    return result;
+  }
+  function getSubQuestionContent(paper, stepKey, subQId) {
+    var step = paper.steps && paper.steps[stepKey];
+    if (!step || !step.subQuestions) return null;
+    for (var i = 0; i < step.subQuestions.length; i++) {
+      if (step.subQuestions[i].id === subQId) {
+        return step.subQuestions[i].content || null;
+      }
+    }
+    return null;
+  }
+  function renderMarkdown(text) {
+    if (!text) return '';
+    try {
+      return marked.parse(text);
+    } catch(e) {
+      return escapeHtml(text);
+    }
+  }
+  function renderMathInContent() {
+    var cards = document.querySelectorAll('.card-content');
+    for (var i = 0; i < cards.length; i++) {
       try {
-        const response = await authFetch('/api/history/');
-        const data = await response.json();
-        const reports = data.reading.filter(r => r.filename.includes('_7step'));
-        
-        // Download and parse each report
-        allReports = [];
-        for (const report of reports) {
-          try {
-            const contentResponse = await authFetch(`/api/download/${encodeURIComponent(report.filename)}`);
-            const content = await contentResponse.text();
-            const frontmatter = parseFrontmatter(content);
-            allReports.push({
-              filename: report.filename,
-              frontmatter: frontmatter,
-              content: content,
-              title: frontmatter.title || report.filename.replace('_7step.md', '')
-            });
-          } catch (e) {
-            console.error('Error loading report:', report.filename, e);
-          }
-        }
-        
-        renderPaperList();
-        renderStepSelect();
-      } catch (e) {
-        console.error('Error loading reports:', e);
-        document.getElementById('paperList').innerHTML = '<span style="color:red">加载失败，请刷新重试</span>';
-      }
-    }
-    
-    // Render paper selection
-    function renderPaperList() {
-      const container = document.getElementById('paperList');
-      if (allReports.length === 0) {
-        container.innerHTML = '<span>没有找到七步法报告</span>';
-        return;
-      }
-      
-      container.innerHTML = allReports.map(report => {
-        const fm = report.frontmatter;
-        const label = fm.title ? `${fm.title.slice(0, 30)}${fm.title.length > 30 ? '...' : ''}` : report.filename;
-        const meta = fm.year ? `(${fm.year})` : '';
-        return `
-          <div class="paper-item" style="display:flex;align-items:center;gap:4px;">
-            <label class="paper-checkbox" data-filename="${report.filename}">
-              <input type="checkbox" value="${report.filename}" onchange="togglePaper('${report.filename}')">
-              <span>${label} ${meta}</span>
-            </label>
-            <button class="btn-delete" onclick="deleteReport('${report.filename}')" title="删除">🗑</button>
-          </div>
-        `;
-      }).join('');
-    }
-    
-    // Delete report
-    async function deleteReport(filename) {
-      if (!confirm(`确定删除 ${filename}？\n此操作不可恢复。`)) return;
-      
-      try {
-        const response = await authFetch(`/api/history/${encodeURIComponent(filename)}`, {
-          method: 'DELETE'
+        renderMathInElement(cards[i], {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '\\[', right: '\\]', display: true}
+          ],
+          throwOnError: false
         });
-        
-        if (response.ok) {
-          // Remove from selected papers if it was selected
-          const idx = selectedPapers.indexOf(filename);
-          if (idx > -1) {
-            selectedPapers.splice(idx, 1);
-          }
-          // Remove from allReports
-          allReports = allReports.filter(r => r.filename !== filename);
-          // Re-render
-          renderPaperList();
-          if (selectedStep && selectedPapers.length > 0) {
-            renderComparisonTable();
-          } else {
-            document.getElementById('tableContainer').innerHTML = `
-              <div class="empty">
-                <div class="empty-icon">📋</div>
-                <p>请选择步骤和文献开始对比</p>
-              </div>
-            `;
-          }
-        } else {
-          alert('删除失败');
-        }
-      } catch (e) {
-        alert('删除失败: ' + e.message);
-      }
+      } catch(e) {}
     }
-    
-    // Render step select
-    function renderStepSelect() {
-      const select = document.getElementById('stepSelect');
-      select.innerHTML = '<option value="">请选择步骤</option>' + 
-        STEPS.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
-      select.onchange = (e) => selectStep(e.target.value);
+  }
+  window.__toggleAccordion = function(sqId) {
+    if (openAccordions.has(sqId)) openAccordions.delete(sqId);
+    else openAccordions.add(sqId);
+    renderAccordion();
+  };
+  window.__toggleCheck = function(sqId, checked) {
+    if (checked) selectedSubQIds.add(sqId);
+    else selectedSubQIds.delete(sqId);
+    updateActionBar();
+  };
+  function updateActionBar() {
+    var bar = document.getElementById('actionBar');
+    if (selectedPaperIds.size === 0) {
+      bar.style.display = 'none';
+      return;
     }
-    
-    function getStepLabel(stepId) {
-      return STEPS.find(step => step.id === stepId)?.label || stepId || '未选择';
-    }
-
-    function makeQuestionKey(stepId, subQ) {
-      return `[${stepId}] ${subQ}`;
-    }
-
-    function parseQuestionKey(key) {
-      const match = key.match(/^\[(.+?)\]\s*(.+)$/);
-      if (!match) return { stepId: '', questionLabel: key };
-      return { stepId: match[1], questionLabel: match[2] };
-    }
-
-    function getPaperSubQuestions(paper, stepId) {
-      return parseStepContent(paper.content || '', stepId);
-    }
-
-    function buildPaperMeta(paper) {
-      const fm = paper.frontmatter || {};
-      return {
-        filename: paper.filename,
-        title: fm.title || paper.filename,
-        authors: fm.authors || [],
-        year: fm.year,
-        journal: fm.journal || fm.source || fm['期刊'] || '',
-        volume: fm.volume || fm['卷'] || '',
-        issue: fm.issue || fm['期'] || '',
-        pages: fm.pages || fm['页码'] || '',
-        doi: fm.doi || ''
-      };
-    }
-
-    function renderEmptyState(message = '请选择步骤和文献开始对比') {
-      document.getElementById('tableContainer').innerHTML = `
-        <div class="empty">
-          <div class="empty-icon">📋</div>
-          <p>${message}</p>
-        </div>
-      `;
-    }
-
-    function pruneSelectedQuestions() {
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      const available = new Set();
-      for (const step of STEPS) {
-        for (const paper of papers) {
-          const subQuestions = getPaperSubQuestions(paper, step.id);
-          Object.keys(subQuestions).forEach(subQ => available.add(makeQuestionKey(step.id, subQ)));
+    bar.style.display = 'flex';
+    var stepName = currentStep === '__all__' ? '全部步骤' : currentStep;
+    document.getElementById('actionStepName').textContent = stepName;
+    document.getElementById('actionSelCount').textContent = '已选 ' + selectedSubQIds.size + ' 项';
+    var canSynth = selectedPaperIds.size >= 2 && selectedSubQIds.size >= 1;
+    document.getElementById('btnSynthesis').disabled = !canSynth;
+  }
+  document.getElementById('btnSelectAll').addEventListener('click', function() {
+    var selectedPapers = papers.filter(function(p) { return selectedPaperIds.has(p.id); });
+    var steps = getStepsToRender();
+    for (var si = 0; si < steps.length; si++) {
+      var stepKey = steps[si];
+      for (var pi = 0; pi < selectedPapers.length; pi++) {
+        var step = selectedPapers[pi].steps && selectedPapers[pi].steps[stepKey];
+        if (!step || !step.subQuestions) continue;
+        for (var qi = 0; qi < step.subQuestions.length; qi++) {
+          selectedSubQIds.add(step.subQuestions[qi].id);
         }
       }
-      Array.from(selectedSubQuestions).forEach(key => {
-        if (!available.has(key)) {
-          selectedSubQuestions.delete(key);
-        }
-      });
     }
-
-    function updateSelectionSummary() {
-      const selectedCount = selectedSubQuestions.size;
-      const paperCount = selectedPapers.length;
-      const canSynthesize = paperCount >= 2 && selectedCount >= 1;
-      const hint = document.getElementById('synthesisHint');
-      document.getElementById('selectedQuestionCount').textContent = `已选中 ${selectedCount} 个问题`;
-      document.getElementById('selectedPaperCount').textContent = `已选文献 ${paperCount} 篇`;
-      document.getElementById('selectedStepSummary').textContent = `当前步骤：${getStepLabel(selectedStep)}`;
-      document.getElementById('btnClearSelection').disabled = selectedCount === 0;
-
-      if (paperCount < 2) {
-        hint.textContent = 'AI 综述至少需要 2 篇文献。';
-        hint.style.color = '#b45309';
-      } else if (selectedCount < 1) {
-        hint.textContent = '请先在任意步骤中勾选至少 1 个问题。';
-        hint.style.color = '#b45309';
-      } else {
-        hint.textContent = '已满足生成条件，可以开始 AI 综述。';
-        hint.style.color = '#047857';
-      }
-    }
-
-    function updateSelectAllCheckbox() {
-      const selectAllCheckbox = document.getElementById('selectAllSubQ');
-      if (!selectAllCheckbox || !selectedStep) return;
-      const checkboxes = Array.from(document.querySelectorAll('tbody input[type="checkbox"]'));
-      const checkedBoxes = checkboxes.filter(cb => cb.checked);
-      selectAllCheckbox.checked = checkboxes.length > 0 && checkedBoxes.length === checkboxes.length;
-      selectAllCheckbox.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < checkboxes.length;
-    }
-
-    // Toggle paper selection
-    function togglePaper(filename) {
-      const idx = selectedPapers.indexOf(filename);
-      if (idx > -1) {
-        selectedPapers.splice(idx, 1);
-      } else {
-        selectedPapers.push(filename);
-      }
-      pruneSelectedQuestions();
-      updateUI();
-    }
-    
-    // Select step
-    function selectStep(stepId) {
-      selectedStep = stepId;
-      updateUI();
-    }
-    
-    // Update UI
-    function updateUI() {
-      const btn = document.getElementById('btnSynthesis');
-      const canSynthesize = selectedPapers.length >= 2 && selectedSubQuestions.size > 0;
-      btn.disabled = !canSynthesize;
-      updateSelectionSummary();
-      
-      if (selectedStep && selectedPapers.length > 0) {
-        renderComparisonTable();
-      } else {
-        renderEmptyState();
-      }
-    }
-    
-    /**
-     * Collect all sub-questions from all selected papers for the current step
-     * Then build a comparison table where:
-     * - Rows = union of all sub-questions (sorted by number), each with checkbox
-     * - Columns = selected papers
-     */
-    function renderComparisonTable() {
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      if (papers.length === 0 || !selectedStep) return;
-      
-      // Parse each paper's content for this step
-      const parsedPapers = papers.map(paper => {
-        const subQuestions = parseStepContent(paper.content, selectedStep);
-        return {
-          ...paper,
-          subQuestions: subQuestions
-        };
-      });
-      
-      // Collect all unique sub-question titles across all papers
-      const allSubQuestions = new Set();
-      for (const paper of parsedPapers) {
-        for (const key of Object.keys(paper.subQuestions)) {
-          allSubQuestions.add(key);
-        }
-      }
-      
-      // Sort sub-questions by their number prefix
-      const sortedSubQuestions = Array.from(allSubQuestions).sort((a, b) => {
-        const numA = parseInt(a.match(/^\d+/)?.[0] || '0');
-        const numB = parseInt(b.match(/^\d+/)?.[0] || '0');
-        return numA - numB;
-      });
-      
-      if (sortedSubQuestions.length === 0) {
-        document.getElementById('tableContainer').innerHTML = `
-          <div class="empty">
-            <div class="empty-icon">📭</div>
-            <p>所选文献的该步骤下没有找到子问题内容</p>
-          </div>
-        `;
-        return;
-      }
-      
-      // Build table
-      let html = '<div class="table-scroll"><table>';
-      
-      // Header with "Select All" checkbox
-      html += '<thead><tr><th><label style="cursor:pointer;"><input type="checkbox" id="selectAllSubQ" onchange="toggleAllSubQuestions(this.checked)"> 当前步骤全选</label></th>';
-      for (const paper of parsedPapers) {
-        const fm = paper.frontmatter;
-        html += `<th>
-          <div class="paper-title">${fm.title || paper.filename}</div>
-          <div class="paper-header">${fm.authors ? fm.authors.join(', ') : ''} ${fm.year ? `(${fm.year})` : ''}</div>
-        </th>`;
-      }
-      html += '</tr></thead>';
-      
-      // Body with per-row checkboxes
-      html += '<tbody>';
-      for (const subQ of sortedSubQuestions) {
-        const isChecked = selectedSubQuestions.has(makeQuestionKey(selectedStep, subQ)) ? 'checked' : '';
-        html += `<tr><td><label style="cursor:pointer;display:flex;align-items:center;gap:6px;"><input type="checkbox" value="${subQ.replace(/"/g, '&quot;')}" onchange="toggleSubQuestion(this.value, this.checked)" ${isChecked}> ${subQ}</label></td>`;
-        for (const paper of parsedPapers) {
-          const content = paper.subQuestions[subQ];
-          if (content && content.trim()) {
-            html += `<td><div class="cell-content" onclick="this.classList.toggle('expanded')">${content}</div></td>`;
-          } else {
-            html += `<td><span class="cell-empty">（未回答）</span></td>`;
-          }
-        }
-        html += '</tr>';
-      }
-      html += '</tbody></table></div>';
-      
-      document.getElementById('tableContainer').innerHTML = html;
-      updateSelectAllCheckbox();
-    }
-    
-    // Toggle all sub-questions for the current step only
-    function toggleAllSubQuestions(checked) {
-      if (!selectedStep) return;
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      const parsedPapers = papers.map(paper => {
-        return { ...paper, subQuestions: parseStepContent(paper.content, selectedStep) };
-      });
-      
-      // Collect all sub-questions
-      const allSubQs = new Set();
-      for (const paper of parsedPapers) {
-        for (const key of Object.keys(paper.subQuestions)) {
-          allSubQs.add(key);
-        }
-      }
-      
-      for (const sq of allSubQs) {
-        const key = makeQuestionKey(selectedStep, sq);
-        if (checked) {
-          selectedSubQuestions.add(key);
-        } else {
-          selectedSubQuestions.delete(key);
-        }
-      }
-      updateUI();
-    }
-    
-    // Toggle single sub-question
-    function toggleSubQuestion(subQ, checked) {
-      const key = makeQuestionKey(selectedStep, subQ);
-      if (checked) {
-        selectedSubQuestions.add(key);
-      } else {
-        selectedSubQuestions.delete(key);
-      }
-      updateSelectionSummary();
-      updateSelectAllCheckbox();
-    }
-    
-    function clearAllSelectedQuestions() {
-      selectedSubQuestions.clear();
-      updateUI();
-    }
-
-    document.getElementById('btnClearSelection').onclick = clearAllSelectedQuestions;
-
-    // AI Synthesis - supports single-step and cross-step accumulation
-    document.getElementById('btnSynthesis').onclick = async () => {
-      if (selectedPapers.length < 2) {
-        alert('请至少选择两篇文献');
-        return;
-      }
-      if (selectedSubQuestions.size === 0) {
-        alert('请至少选择一个问题');
-        return;
-      }
-      
-      const modal = document.getElementById('modalOverlay');
-      const loading = document.getElementById('synthesisLoading');
-      const content = document.getElementById('synthesisContent');
-      
-      modal.classList.add('active');
-      loading.style.display = 'block';
-      content.style.display = 'none';
-      
-      const papers = allReports.filter(r => selectedPapers.includes(r.filename));
-      const selectedEntries = Array.from(selectedSubQuestions).map(parseQuestionKey).filter(entry => entry.stepId && entry.questionLabel);
-      const selectedStepIds = Array.from(new Set(selectedEntries.map(entry => entry.stepId)));
-      const isCrossStep = selectedStepIds.length > 1;
-      const singleStepId = selectedStepIds[0];
-      const singleStepQuestions = selectedEntries
-        .filter(entry => entry.stepId === singleStepId)
-        .map(entry => entry.questionLabel);
-      const requestMode = isCrossStep ? 'cross' : (singleStepQuestions.length > 1 ? 'multi' : 'single');
-      const requestStep = isCrossStep ? '跨步骤综述' : getStepLabel(singleStepId);
-      const requestSubQuestions = isCrossStep
-        ? Array.from(selectedSubQuestions)
-        : singleStepQuestions;
-      const paperData = papers.map(paper => {
-        const meta = buildPaperMeta(paper);
-        const selectedContent = {};
-        if (isCrossStep) {
-          for (const key of selectedSubQuestions) {
-            const { stepId, questionLabel } = parseQuestionKey(key);
-            const allSubQs = getPaperSubQuestions(paper, stepId);
-            if (allSubQs[questionLabel]) {
-              selectedContent[key] = allSubQs[questionLabel];
-            }
-          }
-        } else {
-          const allSubQs = getPaperSubQuestions(paper, singleStepId);
-          for (const questionLabel of singleStepQuestions) {
-            if (allSubQs[questionLabel]) {
-              selectedContent[questionLabel] = allSubQs[questionLabel];
-            }
-          }
-        }
-        return {
-          ...meta,
-          subQuestions: selectedContent
-        };
-      });
-      
-      try {
-        const apiKey = promptForApiKey();
-        if (!apiKey) { alert('请先设置 DeepSeek API Key'); return; }
-        const response = await authFetch('/api/compare/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            step: requestStep,
-            papers: selectedPapers,
-            subQuestions: requestSubQuestions,
-            paperData: paperData,
-            api_key: apiKey,
-            mode: requestMode
-          })
-        });
-        
-        const result = await response.json();
-        
-        loading.style.display = 'none';
-        content.style.display = 'block';
-        content.textContent = result.synthesis || '生成失败';
-        
-        // Show save button
-        const actions = document.getElementById('synthesisActions');
-        actions.style.display = 'block';
-        
-        // Save handler
-        document.getElementById('btnDownloadSynthesis').onclick = async () => {
-          try {
-            const saveRes = await authFetch('/api/history/synthesis/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                dimension: isCrossStep ? `跨步骤综述（${selectedSubQuestions.size}个问题）` : requestStep + (singleStepQuestions.length > 1 ? '（多问题）' : ''),
-                papers: paperData.map(p => p.title || p.filename),
-                content: result.synthesis
-              })
-            });
-            const saveData = await saveRes.json();
-            if (saveData.success) {
-              alert('✓ 已保存到历史记录');
-            } else {
-              alert('保存失败');
-            }
-          } catch (e) {
-            alert('保存失败: ' + e.message);
-          }
-        };
-      } catch (e) {
-        loading.style.display = 'none';
-        content.style.display = 'block';
-        content.textContent = '生成失败: ' + e.message;
-      }
-    };
-    
-    // Close modal
-    document.getElementById('modalClose').onclick = () => {
-      document.getElementById('modalOverlay').classList.remove('active');
-    };
-    document.getElementById('modalOverlay').onclick = (e) => {
-      if (e.target === document.getElementById('modalOverlay')) {
-        document.getElementById('modalOverlay').classList.remove('active');
-      }
-    };
-    
-    // Initialize
-    loadReports();
-  </script>
+    renderAccordion();
+    updateActionBar();
+  });
+  document.getElementById('btnClear').addEventListener('click', function() {
+    selectedSubQIds.clear();
+    renderAccordion();
+    updateActionBar();
+  });
+  document.getElementById('btnSynthesis').addEventListener('click', function() {
+    if (selectedPaperIds.size < 2 || selectedSubQIds.size < 1) return;
+    alert('AI 综述功能将在后续版本中提供。\n已选 ' + selectedPaperIds.size + ' 篇论文，' + selectedSubQIds.size + ' 个子问题。');
+  });
+  loadData();
+})();
+</script>
 </body>
 </html>

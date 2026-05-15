@@ -20,7 +20,12 @@ def extract_metadata(paper_text: str, api_key: str) -> dict:
     """Extract paper metadata using DeepSeek API"""
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        import httpx
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com",
+            timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
+        )
         
         prompt = f"""请从以下论文的前两页内容中，提取论文元数据。
 只返回 JSON，不要任何其他文字：

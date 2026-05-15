@@ -148,8 +148,12 @@ API Key 本身没有单独的后端管理接口。
 | 长文本精读 | `POST /api/reading/long/start` | `api_key` |
 | 七步精读 | `POST /api/reading/quant/start` | `api_key` |
 | 四步精读 | `POST /api/reading/qual/start` | `api_key` |
+| 批量精读 | `POST /api/reading/batch/start` | `api_key`, `file_ids`, `mode` |
+| 批量进度 | `GET /api/reading/batch/{batch_id}/status` | — |
 | 七步/四步综述 | `POST /api/compare/analyze` | `api_key` |
 | 长文本综述 | `POST /api/compare/analyze_long` | `api_key` |
+| 七步/四步 AI 综述 | `POST /api/compare/synthesis` | `api_key` | SSE 流式 |
+| 长文本 AI 综述 | `POST /api/compare/synthesis_long` | `api_key` | SSE 流式 |
 
 ## 4.3 数据库映射
 
@@ -297,6 +301,7 @@ API Key 本身没有单独的后端管理接口。
 - 维度选择
 - 自定义问题
 - 提取模式
+- 批量文件列表（`batchFiles`）、批量预览（`showBatchPreview`）、批量进度追踪器（`batchTracker`，来自 `useBatchReadingTracker`）
 
 ## 7.2 API 映射
 
@@ -305,6 +310,8 @@ API Key 本身没有单独的后端管理接口。
 | 启动长文本 | `POST /api/reading/long/start` | `reading.py.start_long_context(...)` |
 | 启动七步 | `POST /api/reading/quant/start` | `reading.py.start_quant(...)` |
 | 启动四步 | `POST /api/reading/qual/start` | `reading.py.start_qual(...)` |
+| 批量精读 | `POST /api/reading/batch/start` | `reading.py.start_batch_reading(...)` |
+| 批量进度 | `GET /api/reading/batch/{batch_id}/status` | `reading.py.get_batch_status(...)` |
 | 查任务状态 | `GET /api/reading/task/{task_id}/status` | `reading.py.get_task_status(...)` |
 | 取消任务 | `POST /api/reading/task/{task_id}/cancel` | `reading.py.cancel_task(...)` |
 
@@ -363,8 +370,10 @@ API Key 本身没有单独的后端管理接口。
 | 前端动作 | API | 后端函数 |
 |---|---|---|
 | 读取结构化精读结果 | `GET /api/compare/jobs/{job_id}/structured` | `compare.py.get_structured_reading(...)` |
-| 七步/四步综述 | `POST /api/compare/analyze` | `compare.py.analyze_comparison(...)` |
-| 长文本综述 | `POST /api/compare/analyze_long` | `compare.py.analyze_long_comparison(...)` |
+| 七步/四步综述（对比分析） | `POST /api/compare/analyze` | `compare.py.analyze_comparison(...)` |
+| 长文本综述（对比分析） | `POST /api/compare/analyze_long` | `compare.py.analyze_long_comparison(...)` |
+| 七步/四步 AI 综述 | `POST /api/compare/synthesis` | `compare.py.synthesize_dimensions(...)` | SSE 流式 |
+| 长文本 AI 综述 | `POST /api/compare/synthesis_long` | `compare.py.synthesize_long_dimensions(...)` | SSE 流式 |
 | 保存综述到历史 | `POST /api/history/synthesis/` | `history.py.save_synthesis(...)` |
 
 ## 8.3 数据库映射
@@ -391,7 +400,7 @@ API Key 本身没有单独的后端管理接口。
 |---|---|
 | 对比表格 | 前端 HTML 页面解析或后端结构化接口 |
 | AI 综述按钮是否点亮 | 前端选中状态 + 至少两篇文献规则 |
-| 综述正文 | `/api/compare/analyze*` 返回 |
+| 综述正文 | `/api/compare/analyze*` 或 `/api/compare/synthesis*` 返回 |
 | 历史综述列表 | `history.py.list_synthesis(...)` |
 
 ## 9. 我的文献库链路
