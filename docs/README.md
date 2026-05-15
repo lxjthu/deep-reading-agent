@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-09
+> 最后更新：2026-05-15
 
 ---
 
@@ -66,6 +66,7 @@
 | [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | 方案 | 双栏 PDF 参考文献提取修复 | 理解 pdfplumber + use_text_flow 方案 |
 | [REFERENCE_CITATION_DEEPSEEK_FLASH_PLAN.md](REFERENCE_CITATION_DEEPSEEK_FLASH_PLAN.md) | 方案 | DeepSeek Flash 模型用于引用追踪 | 引用追踪模型选型 |
 | [COMPARE_SYNTHESIS_SELECTION_PLAN.md](COMPARE_SYNTHESIS_SELECTION_PLAN.md) | 方案 | 对比综述选择交互改进 | 对比页多选交互设计 |
+| [COMPARE_CARD_ACTIONS_IMPL.md](COMPARE_CARD_ACTIONS_IMPL.md) | 实现 | 对比页 AnswerCard 三按钮（编辑/点评/AI总结）实施记录 | 理解对比页卡片操作功能的数据库、API、前端实现 |
 | [TESTSET_AND_P2_PLAN.md](TESTSET_AND_P2_PLAN.md) | 方案 | 测试集与 P2 规划 | 测试相关规划 |
 
 ---

@@ -44,8 +44,7 @@ def build_executable():
         (".env.example", "."),
         ("prompts", "prompts"),
         ("new_architecture", "new_architecture"),
-        ("backend/db/migrations", "backend/db/migrations"),
-        ("backend/alembic.ini", "backend"),
+        ("backend", "backend"),
     ]
     
     add_data_args = []
@@ -97,12 +96,16 @@ def build_executable():
         "backend.db",
         "backend.db.models",
         "backend.db.session",
+        "backend.db.utils",
         "backend.dimension_seed",
         "backend.prompt_service",
         "backend.template_seed",
         "backend.prompt_registry",
         "backend.upload_storage",
         "backend.auth",
+        "backend.auth.dependencies",
+        "backend.auth.security",
+        "backend.auth.schemas",
         "backend.routers.admin",
         "backend.routers.auth",
         "backend.routers.upload",
@@ -119,6 +122,14 @@ def build_executable():
         "backend.routers.dimensions",
         "backend.services.queue_manager",
         "backend.services.deepseek_refs",
+        "backend.services.data_portability",
+        "backend.services.metadata_match_service",
+        "backend.services.metadata_sources",
+        "backend.services.crossref_source",
+        "backend.services.openalex_source",
+        "backend.services.pdf_metadata_extract",
+        "backend.services.pdf_metadata_llm",
+        "backend.services.ai_template_generator",
         "backend.utils.api_key",
         "new_architecture.config",
         "new_architecture.paper_cache",
@@ -158,6 +169,11 @@ echo ============================================
 echo.
 
 DeepReadingAgent\\DeepReadingAgent.exe
+if %errorlevel% neq 0 (
+    echo.
+    echo [错误] 程序异常退出，错误代码: %errorlevel%
+)
+pause
 """
     bat_path = DIST_DIR / "启动DeepReadingAgent.bat"
     bat_path.parent.mkdir(parents=True, exist_ok=True)

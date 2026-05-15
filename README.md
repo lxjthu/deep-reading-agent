@@ -78,7 +78,7 @@ graph TD
   - **中文文献**: 自动提炼标题关键词并生成 <20 字的一句话极简摘要。
 
 ### 附加能力：参考文献抽取与引用追踪 (References & Citation Tracing)
-- **目标**: 从论文原文中抽取“参考文献列表”，并在正文中反向定位每条参考文献的引用位置。
+- **目标**: 从论文原文中抽取"参考文献列表"，并在正文中反向定位每条参考文献的引用位置。
 - **入口脚本**:
   - 参考文献抽取：`extract_references.py` / `run_reference_extractor.ps1`
   - 引用追踪：`citation_tracer.py` / `run_citation_tracer.ps1`
@@ -86,6 +86,17 @@ graph TD
   - `*_references.xlsx`：结构化参考文献表
   - `*_references_with_citations.xlsx`：在参考文献表上追加引用次数与上下文
   - `*_references_citation_trace.md`：按参考文献序号输出的可读追踪日志
+
+### 在线版 (Web Mode)
+
+多用户在线精读工作台，支持注册登录、PDF 上传、三种精读模式、对比分析、AI 综述、文献库等功能。
+
+**对比分析页卡片操作**：在对比视图中，每张 AnswerCard 支持三种操作：
+- **编辑**：直接修改精读内容（覆盖层，不破坏原始结果）
+- **点评**：选中文字添加高亮笔记，支持多种颜色标记
+- **AI 总结**：选中文字调用 DeepSeek 生成一句话总结
+
+详细技术实现见 [COMPARE_CARD_ACTIONS_IMPL.md](docs/COMPARE_CARD_ACTIONS_IMPL.md)。完整在线版架构见 [AGENTS.md](AGENTS.md)。
 
 ## 快速开始
 
@@ -119,24 +130,32 @@ python paddleocr_pipeline.py "paper.pdf" --out_dir "paddleocr_md"
 .
 ├── app.py                      # Gradio 图形界面入口
 ├── start.bat                   # Windows 一键启动脚本
+├── backend/                    # 在线版 FastAPI 后端
+│   ├── main.py                 # FastAPI 入口
+│   ├── routers/                # API 路由（auth/upload/filter/reading/compare/library/...）
+│   ├── db/                     # SQLAlchemy 2.0 async ORM + Alembic 迁移
+│   ├── auth/                   # JWT 鉴权
+│   ├── services/               # 业务服务（任务队列、AI总结、参考文献提取）
+│   ├── prompt_registry.py      # 提示词槽位注册表
+│   └── prompt_service.py       # 提示词解析服务
+├── frontend/                   # 在线版 React 19 + Vite + Tailwind
+│   └── src/
+│       ├── App.tsx             # 工作台壳（Tab导航）
+│       ├── RootApp.tsx         # 路由守卫、登录注册
+│       ├── components/
+│       │   ├── CompareView.tsx         # 对比分析主组件
+│       │   └── compare/                # 对比子组件（AnswerCard/AccordionPanel/...）
+│       └── store/auth.ts      # Zustand 登录态
+├── new_architecture/           # LLM 对话引擎（长文本/七步/四步精读）
 ├── paddleocr_pipeline.py       # PDF → Markdown 提取（3层回退）
 ├── deep_read_pipeline.py       # QUANT 7步深度精读
 ├── social_science_analyzer_v2.py  # QUAL 4层金字塔分析
 ├── smart_scholar_lib.py        # 论文分类 + 提取调度
-├── run_batch_pipeline.py       # 批量处理主控脚本
-├── run_full_pipeline.py        # 单文件全流程脚本
-├── smart_literature_filter.py  # WoS/CNKI 文献筛选
-├── inject_obsidian_meta.py     # Obsidian 元数据注入
-├── translation_pipeline.py     # 经济学论文中文重述流水线（Tab 6）
-├── deep_reading_steps/         # 精读子任务 Python 脚本
-├── qual_metadata_extractor/    # QUAL 元数据提取模块
 ├── prompts/                    # 提示词配置目录
-│   └── literature_filter/      # 文献筛选各模式提示词
-├── paddleocr_md/               # 提取输出目录 (gitignored)
-├── deep_reading_results/       # QUANT 分析结果 (gitignored)
-├── social_science_results_v2/  # QUAL 分析结果 (gitignored)
-├── translation_results/        # 中文重述结果 (gitignored)
-├── processed_papers.json       # 批量处理状态账本 (gitignored)
+│   ├── literature_filter/      # 文献筛选各模式提示词
+│   └── compare/                # 对比分析提示词（AI总结等）
+├── docs/                       # 技术文档（详见 docs/README.md）
 ├── README_GUI.md               # GUI 使用手册
+├── AGENTS.md                   # 在线版架构速查（AI Agent 开发指南）
 └── requirements.txt
 ```

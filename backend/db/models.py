@@ -100,7 +100,7 @@ class PromptTemplate(Base):
             name="ck_prompt_templates_scope",
         ),
         CheckConstraint(
-            "prompt_type IN ('quant','qual','long','filter')",
+            "prompt_type IN ('quant','qual','long','filter','compare')",
             name="ck_prompt_templates_type",
         ),
         UniqueConstraint(
@@ -663,3 +663,71 @@ class TemplateItem(Base):
 
 
 Index("idx_template_items_template", TemplateItem.template_id)
+
+
+# --------------------------------------------------------------------------
+# Reading item edits (overlay on ReadingItem.content)
+# --------------------------------------------------------------------------
+
+class ReadingItemEdit(Base):
+    __tablename__ = "reading_item_edits"
+    __table_args__ = (
+        UniqueConstraint("reading_item_id", "owner_user_id", name="uq_rie_item_owner"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reading_item_id: Mapped[int] = mapped_column(
+        ForeignKey("reading_items.id", ondelete="CASCADE"), nullable=False
+    )
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    edited_content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_rie_owner", ReadingItemEdit.owner_user_id)
+Index("idx_rie_item", ReadingItemEdit.reading_item_id)
+
+
+# --------------------------------------------------------------------------
+# Annotations (user notes + AI summaries)
+# --------------------------------------------------------------------------
+
+class Annotation(Base):
+    __tablename__ = "annotations"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('compare_card','ai_summary','library_note')",
+            name="ck_annotations_source_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    source_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(String, nullable=False)
+    bib_entry_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    selected_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    char_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    char_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_ai_generated: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    color: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_annotations_owner", Annotation.owner_user_id)
+Index("idx_annotations_source", Annotation.source_type, Annotation.source_id)
+Index("idx_annotations_bib", Annotation.bib_entry_id)
+Index("idx_annotations_ai", Annotation.is_ai_generated)
