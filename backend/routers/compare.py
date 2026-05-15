@@ -18,7 +18,7 @@ from starlette.responses import StreamingResponse
 
 from auth.dependencies import current_user
 from db import PROJECT_ROOT, get_db
-from db.models import Artifact, Annotation, BibEntry, DimensionItem, DimensionSet, Job, JobBibEntry, ReadingItem, ReadingItemEdit, User
+from db.models import Annotation, Artifact, BibEntry, DimensionItem, DimensionSet, Job, JobBibEntry, ReadingItem, ReadingItemEdit, User
 from db.utils import compute_dedup_key
 from backend.utils.api_key import validate_deepseek_key
 
@@ -166,8 +166,9 @@ async def build_compare_response(
     bib_entries: dict[str, BibEntry],
     user_id: int | None = None,
     db: AsyncSession | None = None,
+    *,
     edits_map: dict[int, ReadingItemEdit] | None = None,
-    annotations_map: dict[int, list[Annotation]] | None = None,
+    annotations_map: dict[int, list] | None = None,
 ) -> dict:
     mode_labels = {"long": "长文本精读", "quant": "七步精读", "qual": "四步精读"}
     papers = []
@@ -186,6 +187,8 @@ async def build_compare_response(
                 long_dim_set_map[dim_name] = set_name
 
     for bib_id, items in bib_entries_items.items():
+        if bib_id not in bib_entries:
+            continue
         bib = bib_entries[bib_id]
         paper = {
             "id": bib.id,
@@ -203,7 +206,7 @@ async def build_compare_response(
                 if item.item_key in seen:
                     continue
                 seen.add(item.item_key)
-                dim_dict = {
+                dim_dict: dict = {
                     "id": item.item_key,
                     "label": item.item_label,
                     "content": item.content or "",
@@ -214,7 +217,6 @@ async def build_compare_response(
                         "edited_content": edits_map[item.id].edited_content,
                         "updated_at": edits_map[item.id].updated_at.isoformat() if edits_map[item.id].updated_at else None,
                     }
-                    dim_dict["content"] = edits_map[item.id].edited_content
                 if annotations_map and item.id in annotations_map:
                     dim_dict["annotations"] = [
                         {
@@ -230,8 +232,6 @@ async def build_compare_response(
                         }
                         for a in annotations_map[item.id]
                     ]
-                else:
-                    dim_dict["annotations"] = []
                 ds_name = long_dim_set_map.get(item.item_label)
                 if ds_name is not None:
                     dim_dict["dim_set_name"] = ds_name
@@ -243,20 +243,19 @@ async def build_compare_response(
                 step_name = item.parent_key or item.item_label
                 if step_name not in steps:
                     steps[step_name] = {"label": step_name, "subQuestions": []}
-                sq_dict = {
+                sq: dict = {
                     "id": item.item_key,
                     "label": item.item_label,
                     "content": item.content or "",
                     "reading_item_id": item.id,
                 }
                 if edits_map and item.id in edits_map:
-                    sq_dict["edit"] = {
+                    sq["edit"] = {
                         "edited_content": edits_map[item.id].edited_content,
                         "updated_at": edits_map[item.id].updated_at.isoformat() if edits_map[item.id].updated_at else None,
                     }
-                    sq_dict["content"] = edits_map[item.id].edited_content
                 if annotations_map and item.id in annotations_map:
-                    sq_dict["annotations"] = [
+                    sq["annotations"] = [
                         {
                             "id": a.id,
                             "source_type": a.source_type,
@@ -270,9 +269,7 @@ async def build_compare_response(
                         }
                         for a in annotations_map[item.id]
                     ]
-                else:
-                    sq_dict["annotations"] = []
-                steps[step_name]["subQuestions"].append(sq_dict)
+                steps[step_name]["subQuestions"].append(sq)
             paper["steps"] = steps
 
         papers.append(paper)
@@ -338,11 +335,9 @@ async def get_reading_data(
 
     bib_entries_items: dict[str, list[ReadingItem]] = {}
     bib_ids: set[str] = set()
-    item_ids: list[int] = []
     for item in all_items:
         bib_entries_items.setdefault(item.bib_entry_id, []).append(item)
         bib_ids.add(item.bib_entry_id)
-        item_ids.append(item.id)
 
     bib_rows = (
         await db.execute(
@@ -351,34 +346,37 @@ async def get_reading_data(
     ).scalars().all()
     bib_entries = {b.id: b for b in bib_rows}
 
-    edits_rows = (
+    all_item_ids = [item.id for items in bib_entries_items.values() for item in items]
+
+    edit_rows = (
         await db.execute(
             select(ReadingItemEdit).where(
                 ReadingItemEdit.owner_user_id == user.id,
-                ReadingItemEdit.reading_item_id.in_(item_ids),
+                ReadingItemEdit.reading_item_id.in_(all_item_ids),
             )
         )
     ).scalars().all()
-    edits_map: dict[int, ReadingItemEdit] = {e.reading_item_id: e for e in edits_rows}
+    edits_map: dict[int, ReadingItemEdit] = {e.reading_item_id: e for e in edit_rows}
 
     ann_rows = (
         await db.execute(
             select(Annotation).where(
                 Annotation.owner_user_id == user.id,
                 Annotation.source_type.in_(["compare_card", "ai_summary"]),
-                Annotation.source_id.in_([str(iid) for iid in item_ids]),
+                Annotation.source_id.in_([str(iid) for iid in all_item_ids]),
             )
         )
     ).scalars().all()
-    annotations_map: dict[int, list[Annotation]] = {}
-    for a in ann_rows:
-        try:
-            rid = int(a.source_id)
-        except (ValueError, TypeError):
-            continue
-        annotations_map.setdefault(rid, []).append(a)
+    annotations_map: dict[int, list] = {}
+    for ann in ann_rows:
+        key = int(ann.source_id)
+        annotations_map.setdefault(key, []).append(ann)
 
-    return await build_compare_response(mode, bib_entries_items, bib_entries, user.id, db, edits_map, annotations_map)
+    return await build_compare_response(
+        mode, bib_entries_items, bib_entries, user.id, db,
+        edits_map=edits_map,
+        annotations_map=annotations_map,
+    )
 
 
 async def resolve_compare_members(
@@ -1676,240 +1674,6 @@ async def synthesis_stream(
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
-
-# --------------------------------------------------------------------------
-# Edit overlay endpoints
-# --------------------------------------------------------------------------
-
-class EditContentRequest(BaseModel):
-    edited_content: str
-
-
-@router.put("/reading-items/{item_id}/edit")
-async def save_reading_item_edit(
-    item_id: int,
-    req: EditContentRequest,
-    user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    item = await db.get(ReadingItem, item_id)
-    if item is None or item.owner_user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reading item not found")
-
-    existing = (
-        await db.execute(
-            select(ReadingItemEdit).where(
-                ReadingItemEdit.reading_item_id == item_id,
-                ReadingItemEdit.owner_user_id == user.id,
-            )
-        )
-    ).scalar_one_or_none()
-
-    if existing is not None:
-        existing.edited_content = req.edited_content
-        existing.updated_at = utcnow_naive()
-    else:
-        db.add(
-            ReadingItemEdit(
-                reading_item_id=item_id,
-                owner_user_id=user.id,
-                edited_content=req.edited_content,
-            )
-        )
-    await db.commit()
-    return {"status": "ok"}
-
-
-@router.delete("/reading-items/{item_id}/edit")
-async def delete_reading_item_edit(
-    item_id: int,
-    user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    existing = (
-        await db.execute(
-            select(ReadingItemEdit).where(
-                ReadingItemEdit.reading_item_id == item_id,
-                ReadingItemEdit.owner_user_id == user.id,
-            )
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        await db.delete(existing)
-        await db.commit()
-    return {"status": "ok"}
-
-
-# --------------------------------------------------------------------------
-# Annotations CRUD
-# --------------------------------------------------------------------------
-
-class CreateAnnotationRequest(BaseModel):
-    source_type: str
-    source_id: str
-    selected_text: Optional[str] = None
-    note: str
-    char_start: Optional[int] = None
-    char_end: Optional[int] = None
-    color: Optional[str] = None
-    bib_entry_id: Optional[str] = None
-
-
-class UpdateAnnotationRequest(BaseModel):
-    note: Optional[str] = None
-    color: Optional[str] = None
-
-
-@router.post("/annotations")
-async def create_annotation(
-    req: CreateAnnotationRequest,
-    user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    ann_id = str(uuid.uuid4())
-    db.add(
-        Annotation(
-            id=ann_id,
-            owner_user_id=user.id,
-            source_type=req.source_type,
-            source_id=req.source_id,
-            bib_entry_id=req.bib_entry_id,
-            selected_text=req.selected_text,
-            note=req.note,
-            char_start=req.char_start,
-            char_end=req.char_end,
-            is_ai_generated=0,
-            color=req.color,
-        )
-    )
-    await db.commit()
-    return {"id": ann_id}
-
-
-@router.get("/annotations")
-async def list_annotations(
-    source_type: Optional[str] = None,
-    source_id: Optional[str] = None,
-    is_ai: Optional[int] = None,
-    user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    stmt = select(Annotation).where(Annotation.owner_user_id == user.id)
-    if source_type is not None:
-        stmt = stmt.where(Annotation.source_type == source_type)
-    if source_id is not None:
-        stmt = stmt.where(Annotation.source_id == source_id)
-    if is_ai is not None:
-        stmt = stmt.where(Annotation.is_ai_generated == is_ai)
-    stmt = stmt.order_by(Annotation.created_at.asc())
-    rows = (await db.execute(stmt)).scalars().all()
-    return [
-        {
-            "id": a.id,
-            "source_type": a.source_type,
-            "source_id": a.source_id,
-            "bib_entry_id": a.bib_entry_id,
-            "selected_text": a.selected_text,
-            "note": a.note,
-            "char_start": a.char_start,
-            "char_end": a.char_end,
-            "is_ai_generated": a.is_ai_generated,
-            "color": a.color,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in rows
-    ]
-
-
-@router.put("/annotations/{ann_id}")
-async def update_annotation(
-    ann_id: str,
-    req: UpdateAnnotationRequest,
-    user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    ann = await db.get(Annotation, ann_id)
-    if ann is None or ann.owner_user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annotation not found")
-    if req.note is not None:
-        ann.note = req.note
-    if req.color is not None:
-        ann.color = req.color
-    ann.updated_at = utcnow_naive()
-    await db.commit()
-    return {"status": "ok"}
-
-
-@router.delete("/annotations/{ann_id}")
-async def delete_annotation(
-    ann_id: str,
-    user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    ann = await db.get(Annotation, ann_id)
-    if ann is None or ann.owner_user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annotation not found")
-    await db.delete(ann)
-    await db.commit()
-    return {"status": "ok"}
-
-
-# --------------------------------------------------------------------------
-# AI summary endpoint
-# --------------------------------------------------------------------------
-
-class AiSummaryRequest(BaseModel):
-    text: str
-    api_key: str
-    reading_item_id: int
-    bib_entry_id: Optional[str] = None
-    char_start: Optional[int] = None
-    char_end: Optional[int] = None
-
-
-@router.post("/ai-summary")
-async def ai_summary(
-    req: AiSummaryRequest,
-    user: User = Depends(current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    from openai import OpenAI
-    from prompt_service import get_effective_prompt_text
-
-    prompt_text = await get_effective_prompt_text(
-        db, user_id=user.id, prompt_type="compare", prompt_key="ai_summary"
-    )
-    prompt_text = prompt_text.replace("{selected_text}", req.text)
-
-    client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=120.0)
-    response = client.chat.completions.create(
-        model="deepseek-v4-flash",
-        extra_body={"thinking": {"type": "disabled"}},
-        messages=[{"role": "user", "content": prompt_text}],
-        temperature=0.3,
-        max_tokens=200,
-    )
-    summary = response.choices[0].message.content or ""
-
-    ann_id = str(uuid.uuid4())
-    db.add(
-        Annotation(
-            id=ann_id,
-            owner_user_id=user.id,
-            source_type="ai_summary",
-            source_id=str(req.reading_item_id),
-            bib_entry_id=req.bib_entry_id,
-            selected_text=req.text,
-            note=summary,
-            char_start=req.char_start,
-            char_end=req.char_end,
-            is_ai_generated=1,
-        )
-    )
-    await db.commit()
-    return {"summary": summary, "annotation_id": ann_id}
-
-
 @router.post("/synthesis_long")
 async def synthesize_long_dimensions(
     req: SynthesisLongRequest,
@@ -2049,3 +1813,201 @@ async def synthesize_long_dimensions(
             yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@router.put("/reading-items/{item_id}/edit")
+async def save_reading_item_edit(
+    item_id: int,
+    body: dict,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ri = await db.get(ReadingItem, item_id)
+    if not ri or ri.owner_user_id != user.id:
+        raise HTTPException(404, "ReadingItem not found")
+    content = body.get("edited_content", "")
+    existing = (
+        await db.execute(
+            select(ReadingItemEdit).where(
+                ReadingItemEdit.reading_item_id == item_id,
+                ReadingItemEdit.owner_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing:
+        existing.edited_content = content
+        existing.updated_at = datetime.now(UTC)
+    else:
+        db.add(ReadingItemEdit(
+            reading_item_id=item_id,
+            owner_user_id=user.id,
+            edited_content=content,
+        ))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/reading-items/{item_id}/edit")
+async def delete_reading_item_edit(
+    item_id: int,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ri = await db.get(ReadingItem, item_id)
+    if not ri or ri.owner_user_id != user.id:
+        raise HTTPException(404, "ReadingItem not found")
+    existing = (
+        await db.execute(
+            select(ReadingItemEdit).where(
+                ReadingItemEdit.reading_item_id == item_id,
+                ReadingItemEdit.owner_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing:
+        await db.delete(existing)
+        await db.commit()
+    return {"ok": True}
+
+
+@router.post("/annotations")
+async def create_annotation(
+    body: dict,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ann_id = str(uuid.uuid4())
+    db.add(Annotation(
+        id=ann_id,
+        owner_user_id=user.id,
+        source_type=body.get("source_type", "compare_card"),
+        source_id=str(body.get("source_id", "")),
+        bib_entry_id=body.get("bib_entry_id"),
+        selected_text=body.get("selected_text"),
+        note=body.get("note", ""),
+        char_start=body.get("char_start"),
+        char_end=body.get("char_end"),
+        is_ai_generated=0,
+        color=body.get("color"),
+    ))
+    await db.commit()
+    return {"id": ann_id}
+
+
+@router.get("/annotations")
+async def list_annotations(
+    source_type: Optional[str] = None,
+    source_id: Optional[str] = None,
+    is_ai: Optional[int] = None,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Annotation).where(Annotation.owner_user_id == user.id)
+    if source_type:
+        stmt = stmt.where(Annotation.source_type == source_type)
+    if source_id:
+        stmt = stmt.where(Annotation.source_id == source_id)
+    if is_ai is not None:
+        stmt = stmt.where(Annotation.is_ai_generated == is_ai)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": a.id,
+            "source_type": a.source_type,
+            "source_id": a.source_id,
+            "selected_text": a.selected_text,
+            "note": a.note,
+            "char_start": a.char_start,
+            "char_end": a.char_end,
+            "is_ai_generated": a.is_ai_generated,
+            "color": a.color,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in rows
+    ]
+
+
+@router.put("/annotations/{ann_id}")
+async def update_annotation(
+    ann_id: str,
+    body: dict,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ann = await db.get(Annotation, ann_id)
+    if not ann or ann.owner_user_id != user.id:
+        raise HTTPException(404, "Annotation not found")
+    if "note" in body:
+        ann.note = body["note"]
+    if "color" in body:
+        ann.color = body["color"]
+    ann.updated_at = datetime.now(UTC)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/annotations/{ann_id}")
+async def delete_annotation(
+    ann_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ann = await db.get(Annotation, ann_id)
+    if not ann or ann.owner_user_id != user.id:
+        raise HTTPException(404, "Annotation not found")
+    await db.delete(ann)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/ai-summary")
+async def ai_summary(
+    body: dict,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    text = body.get("text", "")
+    api_key = body.get("api_key", "")
+    reading_item_id = body.get("reading_item_id")
+
+    if not text.strip() or not api_key:
+        raise HTTPException(400, "text and api_key required")
+
+    validate_deepseek_key(api_key)
+
+    from prompt_service import get_prompt_payload
+    payload = await get_prompt_payload(
+        db, prompt_type="compare", prompt_key="ai_summary", user_id=user.id
+    )
+    prompt_text = payload.effective_content.replace("{selected_text}", text)
+
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com", timeout=120.0)
+    response = client.chat.completions.create(
+        model="deepseek-v4-flash",
+        extra_body={"thinking": {"type": "disabled"}},
+        messages=[
+            {"role": "system", "content": "你是一位学术文本总结助手。"},
+            {"role": "user", "content": prompt_text},
+        ],
+        temperature=0.3,
+        max_tokens=200,
+    )
+    summary = response.choices[0].message.content.strip()
+
+    ann_id = str(uuid.uuid4())
+    db.add(Annotation(
+        id=ann_id,
+        owner_user_id=user.id,
+        source_type="ai_summary",
+        source_id=str(reading_item_id) if reading_item_id else "",
+        bib_entry_id=body.get("bib_entry_id"),
+        selected_text=text,
+        note=summary,
+        char_start=body.get("char_start"),
+        char_end=body.get("char_end"),
+        is_ai_generated=1,
+    ))
+    await db.commit()
+
+    return {"summary": summary, "annotation_id": ann_id}

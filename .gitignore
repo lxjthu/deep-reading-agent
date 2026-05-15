@@ -1,4 +1,5 @@
 .env
+.venv/
 venv/
 .venv/
 __pycache__/
@@ -37,10 +38,22 @@ frontend/dist/
 node_modules/
 fix_boundaries.py
 test_*.txt
+test_*.py
+
+# PyInstaller
+build/
+dist/
+*.spec
 
 # Database (multi-user system) — sqlite file lives at repo-root db/
 # Use a leading slash to anchor to repo root so backend/db/ (the package) is NOT ignored.
 /db/
+*.db
+*.sqlite
+
+# Temp debug / test scripts
+check_*.py
+export_*.py
 
 # Build artifacts
 build/

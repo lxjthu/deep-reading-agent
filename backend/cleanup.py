@@ -10,7 +10,9 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import AsyncSessionLocal, DB_DIR, PROJECT_ROOT
-from db.models import Artifact, BibEntry, File, Job, UploadBatch
+from sqlalchemy import delete as sa_delete, select, update
+
+from db.models import Annotation, Artifact, BibEntry, File, Job, ReadingItem, ReadingItemEdit, UploadBatch
 from upload_storage import get_upload_root, resolve_storage_path
 
 
@@ -165,6 +167,11 @@ async def _cleanup_with_session(
     ).scalars().all()
     for bib in expired_bibs:
         if not dry_run:
+            await db.execute(sa_delete(ReadingItemEdit).where(ReadingItemEdit.reading_item_id.in_(
+                select(ReadingItem.id).where(ReadingItem.bib_entry_id == bib.id)
+            )))
+            await db.execute(sa_delete(Annotation).where(Annotation.bib_entry_id == str(bib.id)))
+            await db.execute(sa_delete(ReadingItem).where(ReadingItem.bib_entry_id == bib.id))
             await db.delete(bib)
         stats["bib_entries_deleted"] += 1
 
@@ -291,6 +298,11 @@ async def _cleanup_normal_with_session(
             await db.delete(job)
         stats["jobs_deleted"] += 1
 
+    # 2.5 ReadingItemEdits and Annotations (before ReadingItems)
+    if not dry_run:
+        await db.execute(sa_delete(ReadingItemEdit).where(ReadingItemEdit.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(Annotation).where(Annotation.owner_user_id.in_(normal_user_ids)))
+
     # 3. BibEntries
     bibs = (
         await db.execute(
@@ -299,6 +311,7 @@ async def _cleanup_normal_with_session(
     ).scalars().all()
     for bib in bibs:
         if not dry_run:
+            await db.execute(sa_delete(ReadingItem).where(ReadingItem.bib_entry_id == bib.id))
             await db.delete(bib)
         stats["bib_entries_deleted"] += 1
 

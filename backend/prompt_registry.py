@@ -62,7 +62,10 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
         "empiricist": {"title": "实证主义者", "file_path": "prompts/literature_filter/empiricist.md"},
     },
     "compare": {
-        "ai_summary": {"title": "AI 文本总结", "file_path": "prompts/compare/ai_summary.md"},
+        "ai_summary": {
+            "title": "AI 文本总结",
+            "file_path": "prompts/compare/ai_summary.md",
+        },
     },
 }
 
@@ -125,22 +128,10 @@ def get_builtin_fallback(prompt_type: str, prompt_key: str) -> str:
             return dim.get("system_prompt_addition", "请直接输出分析内容，不要客套开场白。")
     if prompt_type == "filter":
         return FILTER_FALLBACK_TEMPLATE
-    if prompt_type == "compare":
-        if prompt_key == "ai_summary":
-            return (
-                "你是一位学术文本总结助手。请将用户选中的学术文本片段总结为一句话。\n\n"
-                "要求：\n"
-                "1. 保留核心信息（研究对象、方法、结论、关键数据等）\n"
-                "2. 语言简洁，不超过 50 个汉字\n"
-                "3. 使用学术语言，避免口语化\n"
-                "4. 不要添加原文中没有的信息\n\n"
-                "选中的文本：\n"
-                "{selected_text}"
-            )
     if prompt_type == "quant":
-        title = get_prompt_definition(prompt_type, prompt_key)['title']
-        return f"请围绕\u201c{title}\u201d直接输出分析内容，不要客套开场白。"
+        return f'请围绕"{get_prompt_definition(prompt_type, prompt_key)["title"]}"直接输出分析内容，不要客套开场白。'
     if prompt_type == "qual":
-        title = get_prompt_definition(prompt_type, prompt_key)['title']
-        return f"请围绕\u201c{title}\u201d直接输出分析内容，不要客套开场白。"
+        return f'请围绕"{get_prompt_definition(prompt_type, prompt_key)["title"]}"直接输出分析内容，不要客套开场白。'
+    if prompt_type == "compare":
+        return "你是一位学术文本总结助手。请将用户选中的学术文本片段总结为一句话。要求：1.保留核心信息 2.语言简洁，不超过50个汉字 3.使用学术语言 4.不要添加原文中没有的信息"
     return "请直接输出分析内容，不要客套开场白。"
