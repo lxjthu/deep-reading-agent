@@ -60,7 +60,7 @@ function getAvailableDimsFromSteps(papers: Paper[], selectedIds: Set<string>): D
 }
 
 export function CompareView({ mode, apiKey }: CompareViewProps) {
-  const { papers, loading, error } = useCompareData(mode)
+  const { papers, loading, error, refetch } = useCompareData(mode)
 
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set())
   const [activePill, setActivePill] = useState<string>('all')
@@ -276,6 +276,8 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
               onExpandFull={expandFull}
               onCollapseToPreview={collapseToPreview}
               mode={mode}
+              apiKey={apiKey}
+              onRefresh={refetch}
             />
           ))
         )}

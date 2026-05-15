@@ -679,3 +679,320 @@
   .compare-root .answer-card { min-width: 300px; max-width: 300px; }
   .compare-root .action-bar { padding: 10px 14px; }
 }
+
+/* Card mode buttons */
+.compare-root .compare-card-mode-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.compare-root .compare-mode-btn {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-medium);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+  font-family: var(--font-body);
+}
+
+.compare-root .compare-mode-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.compare-root .compare-mode-btn-exit {
+  background: rgba(159, 18, 57, 0.06);
+  border-color: rgba(159, 18, 57, 0.2);
+  color: var(--accent-coral);
+}
+
+.compare-root .compare-mode-btn-exit:hover {
+  background: rgba(159, 18, 57, 0.12);
+}
+
+.compare-root .compare-edited-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(180, 83, 9, 0.1);
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+
+/* Edit area */
+.compare-root .compare-edit-area {
+  padding: 14px;
+}
+
+.compare-root .compare-edit-top-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  justify-content: flex-start;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.compare-root .compare-edit-textarea {
+  width: 100%;
+  min-height: 300px;
+  padding: 10px;
+  border: 1px solid var(--border-medium);
+  border-radius: 6px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  resize: vertical;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.compare-root .compare-edit-textarea:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(22, 101, 52, 0.1);
+}
+
+.compare-root .compare-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+
+/* Annotation area */
+.compare-root .compare-annotate-wrapper {
+  position: relative;
+}
+
+.compare-root .compare-annotate-area {
+  position: relative;
+}
+
+.compare-root .compare-highlight {
+  position: relative;
+}
+
+.compare-root .compare-highlight:hover {
+  opacity: 0.8;
+}
+
+/* Annotation popup */
+.compare-root .compare-annotation-popup {
+  position: absolute;
+  z-index: 100;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  min-width: 220px;
+  max-width: 320px;
+  transform: translateX(-50%);
+}
+
+.compare-root .compare-annotation-popup-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: var(--bg-warm);
+  border-radius: 4px;
+  line-height: 1.5;
+  max-height: 60px;
+  overflow-y: auto;
+}
+
+.compare-root .compare-annotation-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  resize: vertical;
+  min-height: 40px;
+  box-sizing: border-box;
+}
+
+.compare-root .compare-annotation-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+.compare-root .compare-annotation-colors {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.compare-root .compare-color-dot {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.compare-root .compare-color-dot.selected {
+  border-color: var(--text-primary);
+}
+
+.compare-root .compare-annotation-popup-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+/* Annotations list */
+.compare-root .compare-annotations-list {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-light);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.compare-root .compare-annotation-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+}
+
+.compare-root .compare-annotation-item:last-child {
+  border-bottom: none;
+}
+
+.compare-root .compare-annotation-color-bar {
+  width: 4px;
+  height: 20px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.compare-root .compare-annotation-item-text {
+  flex: 1;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.compare-root .compare-annotation-item-edit {
+  font-size: 11px;
+  color: var(--accent-primary);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+}
+
+.compare-root .compare-annotation-item-edit:hover {
+  background: rgba(22, 101, 52, 0.06);
+}
+
+.compare-root .compare-annotation-item-delete {
+  font-size: 11px;
+  color: var(--accent-coral);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+}
+
+.compare-root .compare-annotation-item-delete:hover {
+  background: rgba(159, 18, 57, 0.06);
+}
+
+.compare-root .compare-annotation-popup-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* AI summary area */
+.compare-root .compare-ai-area {
+  display: flex;
+  flex-direction: column;
+}
+
+.compare-root .compare-ai-toggle {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-light);
+  padding: 0 14px;
+}
+
+.compare-root .compare-ai-toggle-btn {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  font-family: var(--font-body);
+}
+
+.compare-root .compare-ai-toggle-btn:hover {
+  color: var(--text-secondary);
+}
+
+.compare-root .compare-ai-toggle-btn.active {
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+.compare-root .compare-ai-summaries {
+  padding: 10px 14px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.compare-root .compare-ai-summary-item {
+  padding: 8px 10px;
+  background: var(--bg-warm);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.compare-root .compare-ai-summary-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.compare-root .compare-ai-summary-source {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.compare-root .compare-ai-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
