@@ -184,6 +184,8 @@ async def build_compare_response(
                 long_dim_set_map[dim_name] = set_name
 
     for bib_id, items in bib_entries_items.items():
+        if bib_id not in bib_entries:
+            continue
         bib = bib_entries[bib_id]
         paper = {
             "id": bib.id,
