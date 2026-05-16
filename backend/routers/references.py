@@ -708,8 +708,8 @@ def write_trace_outputs(
         for col in df.columns:
             if pd.api.types.is_string_dtype(df[col]):
                 df[col] = df[col].apply(_clean_for_excel)
-    df_base.to_excel(refs_excel_path, index=False)
-    df_citations.to_excel(refs_with_citations_path, index=False)
+    df_base.to_excel(refs_excel_path, index=False, engine="openpyxl")
+    df_citations.to_excel(refs_with_citations_path, index=False, engine="openpyxl")
     report_md_path.write_text("".join(markdown_lines), encoding="utf-8")
     report_json_path.write_text(json.dumps(references, ensure_ascii=False, indent=2), encoding="utf-8")
 

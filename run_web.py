@@ -2,12 +2,21 @@
 """
 Deep Reading Agent - Web Edition Launcher
 Entry point for standalone distribution (PyInstaller).
+
+启动流程：
+  1. 确定数据目录（解压目录/data）
+  2. 创建子目录 + 空的 .env
+  3. 建表（Base.metadata.create_all）
+  4. 自动 seed admin 账户（admin / admin12345）
+  5. 启动 uvicorn，前端静态文件由 FastAPI FileResponse 托管
+  6. 3 秒后自动打开浏览器
 """
 import os
 import sys
 import webbrowser
 import time
 import threading
+import asyncio
 from pathlib import Path
 
 if getattr(sys, 'frozen', False):
@@ -20,49 +29,89 @@ else:
 sys.path.insert(0, str(BUNDLE_ROOT))
 sys.path.insert(0, str(BUNDLE_ROOT / "backend"))
 
-if sys.platform == 'win32':
-    DATA_DIR = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / 'DeepReadingAgent'
-else:
-    DATA_DIR = Path.home() / '.local' / 'share' / 'DeepReadingAgent'
+DATA_DIR = EXE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 for sub in ['_uploads', 'deep_reading_results', 'logs', 'db']:
     (DATA_DIR / sub).mkdir(exist_ok=True)
 
 env_file = DATA_DIR / '.env'
-env_example = BUNDLE_ROOT / '.env.example'
-if not env_file.exists() and env_example.exists():
-    import shutil
-    shutil.copy2(env_example, env_file)
-    print("=" * 50)
-    print("  [首次运行] 已创建配置文件")
-    print("=" * 50)
-    print(f"  配置文件: {env_file}")
-    print()
-    print("  请用记事本打开该文件，将 DEEPSEEK_API_KEY=sk-xxx")
-    print("  中的 sk-xxx 替换为你的 API 密钥")
-    print("  获取密钥: https://platform.deepseek.com/")
-    print()
-    input("  配置完成后按回车键启动...")
+if not env_file.exists():
+    env_file.write_text(
+        "# Deep Reading Agent 配置文件\n"
+        "# Web 模式下无需在此填写 DEEPSEEK_API_KEY，在浏览器登录后设置即可。\n"
+        "# 获取密钥: https://platform.deepseek.com/\n",
+        encoding='utf-8',
+    )
 
 from dotenv import load_dotenv
-load_dotenv(str(env_file))
+load_dotenv(str(env_file), override=False)
 
 db_path = DATA_DIR / 'db' / 'app.sqlite'
-os.environ['DATABASE_URL'] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
-os.environ['DEEP_READING_DATA_DIR'] = str(DATA_DIR)
-os.environ['UPLOAD_DIR'] = str(DATA_DIR / '_uploads')
-os.environ['RESULTS_DIR'] = str(DATA_DIR / 'deep_reading_results')
+os.environ.setdefault('DATABASE_URL', f"sqlite+aiosqlite:///{db_path.as_posix()}")
+os.environ.setdefault('DEEP_READING_DATA_DIR', str(DATA_DIR))
+os.environ.setdefault('UPLOAD_DIR', str(DATA_DIR / '_uploads'))
+os.environ.setdefault('UPLOAD_ROOT_DIR', str(DATA_DIR / '_uploads'))
+os.environ.setdefault('RESULTS_DIR', str(DATA_DIR / 'deep_reading_results'))
+os.environ.setdefault('RESULTS_ROOT_DIR', str(DATA_DIR / 'deep_reading_results'))
 
-print("=" * 50)
-print("  Deep Reading Agent 正在启动...")
-print("=" * 50)
-print(f"  数据目录: {DATA_DIR}")
-print(f"  数据库:   {db_path}")
-print(f"  前端地址: http://localhost:8000")
-print("=" * 50)
-print("  按 Ctrl+C 可停止服务")
-print("=" * 50)
+print("=" * 55)
+print("  Deep Reading Agent  学术论文深度精读系统")
+print("=" * 55)
+print(f"  数据目录 : {DATA_DIR}")
+print(f"  数据库   : {db_path}")
+print(f"  访问地址 : http://localhost:8000")
+print(f"  管理员账号: admin / admin12345")
+print("=" * 55)
+print("  按 Ctrl+C 停止服务")
+print("=" * 55)
 print()
+
+
+def _init_db():
+    from db.base import Base
+    from db import models
+    from sqlalchemy import create_engine
+    sync_url = os.environ['DATABASE_URL'].replace('+aiosqlite', '')
+    engine = create_engine(sync_url)
+    Base.metadata.create_all(bind=engine)
+    engine.dispose()
+    print("[startup] 数据库初始化完成")
+
+
+def _seed_admin():
+    from passlib.context import CryptContext
+    from sqlalchemy import select
+    from db import AsyncSessionLocal
+    from db.models import User
+
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+    async def _do():
+        async with AsyncSessionLocal() as session:
+            existing = (
+                await session.execute(select(User).where(User.username == "admin"))
+            ).scalar_one_or_none()
+            if existing is not None:
+                print("[startup] 管理员账户已存在")
+                return
+            user = User(
+                username="admin",
+                password_hash=pwd_context.hash("admin12345"),
+                role="admin",
+                is_active=1,
+                token_version=0,
+                created_at=__import__('datetime').datetime.now(__import__('datetime').timezone.utc).replace(tzinfo=None),
+            )
+            session.add(user)
+            await session.commit()
+            print("[startup] 已创建管理员账户 admin / admin12345")
+
+    asyncio.run(_do())
+
+
+_init_db()
+_seed_admin()
+
 
 def open_browser():
     time.sleep(3)

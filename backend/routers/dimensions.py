@@ -27,6 +27,21 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+async def _activate_dimension_set(
+    db: AsyncSession, user_id: int, dimension_set: DimensionSet
+) -> None:
+    await db.execute(
+        update(DimensionSet)
+        .where(
+            DimensionSet.owner_user_id == user_id,
+            DimensionSet.id != dimension_set.id,
+        )
+        .values(is_default=0)
+    )
+    dimension_set.is_default = 1
+    dimension_set.updated_at = _utcnow()
+
+
 async def _get_user_set(db: AsyncSession, set_id: int, user_id: int) -> DimensionSet:
     ds = (
         await db.execute(
@@ -776,6 +791,7 @@ async def import_template(
     )
     db.add(ds)
     await db.flush()
+    await _activate_dimension_set(db, user.id, ds)
 
     # 复制维度
     items = (
@@ -931,6 +947,7 @@ async def save_generated_template(
     )
     db.add(ds)
     await db.flush()
+    await _activate_dimension_set(db, user.id, ds)
 
     for idx, dim in enumerate(body.dimensions):
         dim_key = f"ai_{re.sub(r'[^\w]', '_', dim.get('dim_name', ''))[:20]}_{idx}"
@@ -1037,6 +1054,7 @@ async def confirm_import(
     )
     db.add(ds)
     await db.flush()
+    await _activate_dimension_set(db, user.id, ds)
 
     for idx, dim in enumerate(body.dimensions):
         db.add(

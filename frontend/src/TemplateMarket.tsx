@@ -148,6 +148,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
       if (res.ok) {
         const data = await res.json()
         setMessage({ type: 'ok', text: `已导入「${data.name}」，共 ${data.dim_count} 个维度。前往「长文本精读」Tab 的维度集合下拉框即可使用。` })
+        void loadUserSets()
       } else {
         const err = await res.json().catch(() => null)
         setMessage({ type: 'err', text: err?.detail || '导入失败' })
@@ -380,6 +381,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
       if (res.ok) {
         const data = await res.json()
         setMessage({ type: 'ok', text: `已导入「${data.name}」，共 ${data.dim_count} 个维度。前往「长文本精读」Tab 的维度集合下拉框即可使用。` })
+        void loadUserSets()
         setPanel('list')
         setImportPreview(null)
         setImportFile(null)

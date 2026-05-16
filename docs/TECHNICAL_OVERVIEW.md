@@ -146,6 +146,16 @@
 - 鉴权预览
 - 鉴权下载
 
+### 2.11 Windows 打包版
+
+- 打包入口：`run_web.py`，打包脚本：`build_web_dist.py`，产物：`dist/DeepReadingAgent-Web.zip`
+- 打包版使用单端口架构：FastAPI 在 `localhost:8000` 同时提供 `/api/*` 和 React SPA 静态文件
+- 用户可写数据位于 exe 同级 `data/`：`db/app.sqlite`、`_uploads/`、`deep_reading_results/`、`logs/`
+- PyInstaller 必须显式包含运行时导入链路：`extractor`、`parsers`、`smart_literature_filter`、`services.*`、`pdfminer.high_level`、`python_multipart`、`httpx`
+- PDF 相关子模块通过 `--collect-submodules` 收集：`pdfminer`、`pdfplumber`、`pypdf`、`PyPDF2`、`fitz`
+- Excel 读写统一使用 `openpyxl`：筛选导出、参考文献导出、文献库读取筛选产物均显式指定 `engine="openpyxl"`；`xlsxwriter` 是 pandas 可选 warning，不是当前强依赖
+- 每次代码改动完成后默认重新运行 `python build_web_dist.py`，并启动打包后的 exe 做 `/health` 冒烟测试
+
 ## 3. 当前架构总览
 
 系统可以简化理解为 4 层：
@@ -1151,7 +1161,7 @@ export_20260506_username.dra
 
 ## 6.7 对比页承载（v2.0 React 组件）
 
-三个对比 Tab 已从 iframe 迁移为 React 组件：
+三个对比 Tab 已从旧 iframe/demo HTML 迁移为 React 组件。当前生产入口只保留 React 组件与后端真实数据接口，`frontend/public/compare_*.html` 和 `backend/compare_demo_server.py` 已从代码树移除，避免进入打包产物。
 
 - `frontend/src/components/CompareView.tsx` — 对比综述主组件（替代 iframe）
 - `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
@@ -1163,14 +1173,7 @@ export_20260506_username.dra
 - `frontend/src/hooks/useCompareData.ts` — 对比数据加载 Hook
 - `frontend/src/hooks/useSynthesisStream.ts` — AI 综述 SSE 流式 Hook
 
-旧 demo HTML 页面保留作参考：
-
-- `frontend/public/compare_long.html`
-- `frontend/public/compare_7step.html`
-- `frontend/public/compare_4step.html`
-- `frontend/public/compare_index.html` — 通过 `backend/compare_demo_server.py`（端口 8001）访问
-
-后端新增端点：
+后端生产端点：
 
 - `GET /api/compare/reading-data` — 聚合用户精读数据（返回与 demo JSON 同构的数据）
 - `POST /api/compare/synthesis-stream` — AI 综述 SSE 流式端点
@@ -1179,102 +1182,6 @@ export_20260506_username.dra
 
 - 三个对比 Tab 直接渲染 `<CompareView mode="long|quant|qual" apiKey={...} />`
 - 对比页全屏布局，不受普通 Tab 布局挤压
-
-### 6.7.1 `compare_7step.html`
-
-职责：
-
-- 七步对比
-- 支持跨步骤累计选题
-- 生成 AI 综述
-
-关键状态变量：
-
-- `allReports`
-  - 全部七步报告
-- `selectedStep`
-  - 当前查看的步骤
-- `selectedPapers`
-  - 当前勾选的文献
-- `selectedSubQuestions`
-  - 所有已选问题集合
-
-关键函数：
-
-- `loadReports()`
-  - 加载可对比报告
-- `renderComparisonTable()`
-  - 渲染当前步骤表格
-- `togglePaper(...)`
-  - 勾选/取消文献
-- `toggleSubQuestion(...)`
-  - 勾选/取消单个问题
-- `toggleAllSubQuestions(...)`
-  - 当前步骤全选
-- `clearAllSelectedQuestions()`
-  - 全部取消
-- `updateUI()`
-  - 刷新表格、按钮和选择摘要
-- `getCurrentApiKey()`
-  - 按当前用户读取对应的 API Key
-
-最近修改：
-
-- 删除了旧的“跨步骤模式”按钮
-- 改成真实的跨步骤累计选择
-- `AI 综述` 按钮启用条件改为：
-  - 至少 2 篇文献
-  - 至少 1 个问题
-
-### 6.7.2 `compare_4step.html`
-
-职责：
-
-- 四步对比
-- 优先读取后端结构化结果
-- 支持跨步骤累计选择与综述
-
-关键状态变量与函数：
-
-- 与 `compare_7step.html` 基本同构
-- 额外重点在：
-  - `getPaperSubQuestions(...)`
-    - 优先从结构化接口返回的数据中取子问题
-
-最近修改：
-
-- 修复了旧四步法报告子问题读取不出来的问题
-- 综述选择交互与七步法统一
-
-### 6.7.3 `compare_long.html`
-
-职责：
-
-- 长文本多维度对比
-
-关键状态变量：
-
-- `allReports`
-- `selectedDims`
-- `selectedPapers`
-- `allDimensions`
-
-关键函数：
-
-- `extractDimensions(...)`
-  - 解析长文本维度
-- `loadReports()`
-  - 加载可对比报告
-- `togglePaper(...)`
-  - 勾选/取消文献
-- `toggleDim(...)`
-  - 勾选/取消维度
-- `updateUI()`
-  - 刷新按钮和对比区域
-- `renderComparisonTable()`
-  - 渲染维度对比表
-- `getCurrentApiKey()`
-  - 读取当前账号对应的 API Key
 
 ## 6.8 提示词管理页
 
@@ -1363,7 +1270,7 @@ export_20260506_username.dra
   4. 串行逐维度调用 `deepseek-v4-flash`，每维度独立 prompt
   5. `build_gbt7714_references()` — 新增，生成 GB/T 7714 参考文献目录
   6. `persist_synthesis_result()` — 新增，保存为 `synthesis_md` Artifact
-- 前端三个 compare_*.html 均已改为调用新端点
+- 前端 `CompareView` / `SynthesisModal` 调用新端点
 - 旧的 `/analyze` 和 `/analyze_long` 端点不受影响，仍供「对比分析」按钮使用
 
 ## 7.6 文献库与历史
@@ -1406,7 +1313,8 @@ export_20260506_username.dra
 
 - `backend/routers/compare.py`
 - `backend/scripts/backfill_reading_items.py`
-- `frontend/public/compare_4step.html`
+- `frontend/src/hooks/useCompareData.ts`
+- `frontend/src/components/CompareView.tsx`
 
 当前结果：
 
@@ -1422,8 +1330,8 @@ export_20260506_username.dra
 
 落点文件：
 
-- `frontend/public/compare_7step.html`
-- `frontend/public/compare_4step.html`
+- `frontend/src/components/CompareView.tsx`
+- `frontend/src/components/compare/SynthesisModal.tsx`
 
 当前结果：
 
@@ -1456,9 +1364,8 @@ export_20260506_username.dra
 落点文件：
 
 - `frontend/src/App.tsx`
-- `frontend/public/compare_long.html`
-- `frontend/public/compare_7step.html`
-- `frontend/public/compare_4step.html`
+- `frontend/src/components/CompareView.tsx`
+- `frontend/src/components/compare/SynthesisModal.tsx`
 
 当前结果：
 
@@ -1632,12 +1539,12 @@ Bug 修复：
 - LongTab 精读结果按 group_name 分组渲染维度
 - 自定义维度集不再被强制追加系统默认维度
 
-### 8.12 对比综述页面 v2.0 Redesign Demo
+### 8.12 对比综述页面 v2.0 Redesign Demo（历史记录）
 
 改动目标：
 
 - 对三个对比页面（长文本/四步/七步）进行视觉和交互的彻底重构，打造学术优雅、现代精致的文献对比工作台
-- 设计独立于主应用的 demo 后端服务，使用静态 JSON 数据驱动，不依赖生产数据库
+- 曾设计独立于主应用的 demo 后端服务，使用静态 JSON 数据驱动，不依赖生产数据库
 - 建立完整的设计规范文档（色彩/字体/布局/组件/动画/Markdown 渲染），供后续正式实现参考
 
 设计规范文档：
@@ -1651,28 +1558,19 @@ Bug 修复：
   - 动画微交互规范
   - 编码规范（UTF-8 强制要求）
 
-独立 demo 后端：
-
-- `backend/compare_demo_server.py` — 端口 8001，FastAPI 应用
-  - `GET /api/compare-demo/long` → 读取 `docs/compare-long-demo-data.json`
-  - `GET /api/compare-demo/qual` → 读取 `docs/compare-qual-demo-data.json`
-  - `GET /api/compare-demo/quant` → 读取 `docs/compare-quant-demo-data.json`
-  - 同时静态服务三个 HTML 页面和入口页
-  - 启动命令：`python backend/compare_demo_server.py`
-
-Demo 数据文件：
+Demo 数据文件（仅作设计样例/回归参考，不进入前端打包）：
 
 - `docs/compare-long-demo-data.json` — 长文本精读，3 篇文献（土地整治、AI企业生产率、电子支付），每篇含 10 个分析维度
 - `docs/compare-qual-demo-data.json` — 四步精读，2 篇文献（土地整治、生态颜值），4 个步骤共 20+ 子问题
 - `docs/compare-quant-demo-data.json` — 七步精读，3 篇文献（土地整治、生态产品、灌溉公地），7 个步骤共 27+ 子问题
 
-落点文件：
+历史落点文件：
 
-- `backend/compare_demo_server.py` — 独立 demo 后端（~80 行）
-- `frontend/public/compare_long.html` — 长文本对比 v2（维度式，~350 行）
-- `frontend/public/compare_4step.html` — 四步对比 v2（步骤式，~900 行）
-- `frontend/public/compare_7step.html` — 七步对比 v2（步骤式，~750 行）
-- `frontend/public/compare_index.html` — demo 入口导航页（~100 行）
+- `backend/compare_demo_server.py` — 已移除
+- `frontend/public/compare_long.html` — 已移除
+- `frontend/public/compare_4step.html` — 已移除
+- `frontend/public/compare_7step.html` — 已移除
+- `frontend/public/compare_index.html` — 已移除
 - `docs/compare-design-spec.md` — v2.0 设计规范
 - `docs/compare-long-demo-data.json` / `compare-qual-demo-data.json` / `compare-quant-demo-data.json`
 
@@ -1709,11 +1607,10 @@ v2 页面核心架构（与 v1 对比）：
 
 当前状态：
 
-- 三个 demo 页面功能完整，可通过 `python backend/compare_demo_server.py` 启动体验
 - **v2.0 React 组件已正式集成到主应用**（2026-05-14），替换了 iframe 承载方案
 - 三个对比 Tab 均使用 `CompareView` 组件，从生产 API 加载真实精读数据
 - AI 综述通过 `SynthesisModal` 组件调用 SSE 流式端点
-- 旧 demo HTML 文件保留作为独立 demo 和交互参考
+- 旧 demo HTML 与 8001 demo 后端已从代码树移除，避免混入 `frontend/dist` 和 PyInstaller 包
 
 ### 8.13 AI 文献综述模块
 
@@ -1721,16 +1618,15 @@ v2 页面核心架构（与 v1 对比）：
 
 - 新增独立的 AI 文献综述端点，使用 deepseek-v4-flash 按维度串行生成高质量综述
 - 支持二次引用（利用已提取的 BibReference 数据）和 GB/T 7714 参考文献目录
-- 前端改造现有「AI 综述」按钮调用新端点，不破坏旧对比功能
+- 前端通过 `SynthesisModal` 调用新端点，不破坏旧对比功能
 - SSE 流式返回，每维度生成后立即推送，避免多维度长耗时超时
 - 二次引用过滤改用 DeepSeek 识别正文实际引用的文献，避免参考文献目录膨胀
 
 落点文件：
 
 - `backend/routers/compare.py`（新增约 500 行：请求模型、辅助函数、SSE 端点、二次引用过滤）
-- `frontend/public/compare_7step.html`（btnSynthesis 改调 `/api/compare/synthesis`，SSE 流式读取）
-- `frontend/public/compare_4step.html`（btnSynthesis 改调 `/api/compare/synthesis`，SSE 流式读取）
-- `frontend/public/compare_long.html`（btnSynthesis 改调 `/api/compare/synthesis_long`，SSE 流式读取）
+- `frontend/src/components/compare/SynthesisModal.tsx`（选择维度/步骤并展示 SSE 输出）
+- `frontend/src/hooks/useSynthesisStream.ts`（SSE 流式读取）
 - `frontend/vite.config.ts`（Vite proxy timeout 从 60s 调至 600s）
 
 新增/修改函数：

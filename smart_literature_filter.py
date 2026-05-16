@@ -203,7 +203,7 @@ def main():
     if 'Year_Num' in df.columns:
         df = df.drop(columns=['Year_Num'])
         
-    df.to_excel(args.output, index=False)
+    df.to_excel(args.output, index=False, engine="openpyxl")
     logger.info(f"Exported summary to {args.output}")
     print(f"Success! Processed {len(df)} papers. Check {args.output}")
 

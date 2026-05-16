@@ -633,83 +633,27 @@ Key functions/endpoints:
 | `downloadWithAuth(...)` | 鉴权下载 | 下载失败、返回 401 |
 | `openPreviewWithAuth(...)` | 鉴权预览 | 预览报 `Not authenticated` |
 
-## 3.7 `frontend/public/compare_7step.html`
+## 3.7 `frontend/src/components/CompareView.tsx` 与 `frontend/src/components/compare/`
 
 文件：
 
-- [compare_7step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_7step.html)
+- [CompareView.tsx](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/src/components/CompareView.tsx)
+- [compare/](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/src/components/compare)
+- [useCompareData.ts](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/src/hooks/useCompareData.ts)
+- [useSynthesisStream.ts](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/src/hooks/useSynthesisStream.ts)
 
-| 函数 / 变量 | 作用 | 什么时候优先看 |
+| 组件 / Hook | 作用 | 什么时候优先看 |
 |---|---|---|
-| `allReports` | 全部可对比七步报告 | 数据源问题 |
-| `selectedStep` | 当前查看步骤 | 步骤切换问题 |
-| `selectedPapers` | 当前已选文献 | 文献勾选问题 |
-| `selectedSubQuestions` | 当前累计已选问题集合 | 跨步骤累计选择问题 |
-| `getCurrentApiKey()` | 按当前用户读取 API Key | compare 综述串号 |
-| `parseFrontmatter(...)` | 解析 Markdown frontmatter | 标题/作者/年份显示问题 |
-| `parseStepContent(...)` | 从报告中拆某一步的子问题内容 | 七步表格内容缺失 |
-| `loadReports()` | 拉取可对比报告 | 页面“加载失败” |
-| `parseQuestionKey(...)` | 解析“步骤 + 子问题”复合 key | 跨步骤累计选择定位错误 |
-| `buildPaperMeta(...)` | 统一渲染文献标题、作者、年份 | 表头信息显示异常 |
-| `renderEmptyState(...)` | 渲染空状态占位 | 初始页或无选择时展示异常 |
-| `pruneSelectedQuestions()` | 清理当前已失效的选题 key | 历史选择残留 |
-| `updateSelectAllCheckbox()` | 同步当前步骤“全选”勾选状态 | 全选框状态不对 |
-| `togglePaper(...)` | 勾选/取消文献 | 文献选择状态异常 |
-| `selectStep(...)` | 切换步骤 | 步骤切换不刷新 |
-| `updateUI()` | 刷新按钮和表格状态 | AI 综述按钮不亮 |
-| `renderComparisonTable()` | 渲染对比表格 | 表格显示问题 |
-| `toggleAllSubQuestions(...)` | 当前步骤全选 | 全选逻辑问题 |
-| `toggleSubQuestion(...)` | 勾选/取消单个问题 | 单项选择问题 |
-| `clearAllSelectedQuestions()` | 清空所有累计选择 | “全部取消”无效 |
+| `CompareView` | 对比综述主组件，按 `mode` 加载长文本/七步/四步数据 | 对比页整体空白、模式切换或布局问题 |
+| `useCompareData(...)` | 调用 `/api/compare/reading-data` 聚合用户精读结果 | 对比页没有文献或维度 |
+| `PaperSelector` | 文献选择 | 文献勾选状态异常 |
+| `DimNavigation` | 维度/步骤导航与选择 | 维度列表或步骤切换异常 |
+| `AccordionPanel` | 分组展示对比内容 | 折叠/展开和层级显示异常 |
+| `AnswerCard` | 展示单篇回答，支持编辑、点评、AI 总结 | 卡片内容、批注、编辑保存异常 |
+| `SynthesisModal` | AI 综述弹窗 | 综述按钮、已选项、流式输出异常 |
+| `useSynthesisStream(...)` | 调用 `/api/compare/synthesis-stream` 并解析 SSE | 综述流式响应或完成事件异常 |
 
-## 3.8 `frontend/public/compare_4step.html`
-
-文件：
-
-- [compare_4step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_4step.html)
-
-| 函数 / 变量 | 作用 | 什么时候优先看 |
-|---|---|---|
-| `getCurrentApiKey()` | 按用户读取 API Key | 四步综述串号 |
-| `parseFrontmatter(...)` | 解析 Markdown frontmatter | 标题/作者/年份显示问题 |
-| `loadReports()` | 拉取可对比四步报告，并在内部读取后端结构化结果 | 页面无数据或结构化内容未注入 |
-| `parseQuestionKey(...)` | 解析“步骤 + 子问题”复合 key | 跨步骤累计选择定位错误 |
-| `getPaperSubQuestions(...)` | 优先用结构化结果，否则回退 Markdown 解析 | 子问题丢失 |
-| `buildPaperMeta(...)` | 统一渲染文献标题、作者、年份 | 表头信息显示异常 |
-| `renderEmptyState(...)` | 渲染空状态占位 | 初始页或无选择时展示异常 |
-| `pruneSelectedQuestions()` | 清理当前已失效的选题 key | 历史选择残留 |
-| `updateSelectionSummary()` | 刷新已选文献数和问题数 | 顶部摘要不更新 |
-| `updateSelectAllCheckbox()` | 同步当前步骤“全选”勾选状态 | 全选框状态不对 |
-| `selectStep(...)` | 切换步骤 | 步骤切换不刷新 |
-| `updateUI()` | 刷新按钮和表格状态 | AI 综述按钮不亮 |
-| `renderComparisonTable()` | 渲染四步对比表格 | 表格显示问题 |
-| `togglePaper(...)` | 文献选择 | 文献勾选状态异常 |
-| `toggleAllSubQuestions(...)` | 当前步骤全选 | 全选逻辑问题 |
-| `toggleSubQuestion(...)` | 单个问题选择 | 单项选择问题 |
-| `clearAllSelectedQuestions()` | 清空所有累计选择 | “全部取消”无效 |
-
-## 3.9 `frontend/public/compare_long.html`
-
-文件：
-
-- [compare_long.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_long.html)
-
-| 函数 / 变量 | 作用 | 什么时候优先看 |
-|---|---|---|
-| `selectedDims` | 当前已选维度集合 | 长文本多维对比问题 |
-| `allDimensions` | 当前所有可选维度 | 维度列表缺失 |
-| `getCurrentApiKey()` | 按用户读取 API Key | 长文本综述串号 |
-| `parseFrontmatter(...)` | 解析 Markdown frontmatter | 标题/作者/年份显示问题 |
-| `extractDimensions(...)` | 解析报告中的维度边界 | 某些报告维度读不出来 |
-| `getDimensionContent(...)` | 获取某个维度内容 | 表格内容缺失 |
-| `loadReports()` | 拉取可对比长文本报告 | 页面无数据 |
-| `deleteReport(...)` | 删除单篇长文本报告 | 删除失败 |
-| `togglePaper(...)` | 勾选/取消文献 | 文献选择状态异常 |
-| `toggleDim(...)` | 勾选/取消维度 | 维度选择状态异常 |
-| `updateUI()` | 刷新按钮和对比区域 | 选择后页面不更新 |
-| `renderComparisonTable()` | 渲染长文本对比表 | 长文本表格问题 |
-
-## 3.10 `frontend/src/TemplateMarket.tsx`
+## 3.8 `frontend/src/TemplateMarket.tsx`
 
 文件：
 
@@ -739,8 +683,8 @@ Key functions:
 | 新用户串用了旧账号 API Key | `App.tsx` 中的 `getApiKeyStorageKey(...)`、`handleSaveKey()`、`handleDeleteKey()` |
 | 上传 PDF 没匹配上题录 | `upload.py.upload_file(...)`、`db/utils.py.normalize_title_for_match(...)`、`reading.py.get_or_create_bib_entry(...)` |
 | 筛选结果没进文献库 | `filter.py.run_filter_task(...)`、`persist_filter_results(...)` |
-| 精读结果有 Markdown 但 compare 页读不出来 | `reading.py.persist_reading_items(...)`、`compare.py.build_structured_paper_data(...)`、`compare_4step.html.loadReports()`、`compare_4step.html.getPaperSubQuestions(...)` |
-| 对比页 AI 综述按钮不亮 | `compare_7step.html.updateUI()`、`compare_4step.html.updateUI()` |
+| 精读结果有 Markdown 但 compare 页读不出来 | `reading.py.persist_reading_items(...)`、`compare.py.build_structured_paper_data(...)`、`useCompareData(...)`、`CompareView` |
+| 对比页 AI 综述按钮不亮 | `CompareView`、`SynthesisModal`、`useSynthesisStream(...)` |
 | 历史记录预览报未认证 | `download.ts.openPreviewWithAuth(...)`、`history.py.preview_file(...)` |
 | 精读后文献库元数据未更新 | `reading.py._try_update_bib_metadata(...)`、`pdf_metadata_extract.py.extract_front_matter(...)`、`pdf_metadata_llm.py.extract_metadata_with_llm(...)` |
 | 提示词管理显示空或保存失败 | `prompt_service.py.ensure_builtin_prompt_templates(...)`、`get_prompt_payload(...)`、`prompts.py.get_prompt_item(...)` |

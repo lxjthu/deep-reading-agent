@@ -32,7 +32,6 @@ frontend/ (React 19 + Vite + Tailwind + Zustand)
   src/components/compare/ — 对比子组件（AnswerCard/AccordionPanel/PaperSelector/DimNavigation/SynthesisModal）
   src/store/auth.ts     — Zustand 登录态
   src/lib/api-fetch.ts  — 全局鉴权 fetch（自动 refresh token）
-  public/compare_*.html — 对比综述 demo 页面（独立 demo 参考，不再嵌入主应用）
 
 backend/ (FastAPI + SQLAlchemy 2.0 async + SQLite)
   main.py               — FastAPI 入口、路由注册、启动初始化

@@ -36,7 +36,7 @@ from db.models import User  # noqa: E402
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DEFAULT_USERNAME = "admin"
-DEFAULT_PASSWORD = "XIAojuan@0618wenxian"
+DEFAULT_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin12345")
 
 
 async def seed(username: str, password: str, reset_password: bool) -> int:

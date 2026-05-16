@@ -1,5 +1,7 @@
 # 对比综述页面设计方案 v2.0
 
+> 状态说明（2026-05-16）：本文件是对比综述 React 组件化改造的设计参考。早期 `frontend/public/compare_*.html` 和 `backend/compare_demo_server.py` demo 实现已移除，当前生产实现位于 `frontend/src/components/CompareView.tsx`、`frontend/src/components/compare/`、`frontend/src/hooks/useCompareData.ts` 和 `backend/routers/compare.py`。
+
 ## 1. 设计目标
 
 打造一个**学术优雅、现代精致**的文献对比工作台，彻底消除"AI 味"。核心体验：
@@ -58,18 +60,13 @@
   - `GET /api/compare/structured` 批量多文献
   - 数据包含：mode, section_type, parent_key, item_key, item_label, content
 
-### 3.2 Demo 数据源
-在开发和演示阶段，使用以下三个 JSON 文件作为后端数据库：
+### 3.2 历史 Demo 数据源
+早期开发和演示阶段曾使用以下三个 JSON 文件作为后端数据库；当前生产代码不再读取这些 demo 数据：
 - `docs/compare-long-demo-data.json` — 长文本精读 demo 数据
 - `docs/compare-qual-demo-data.json` — 四步精读 demo 数据
 - `docs/compare-quant-demo-data.json` — 七步精读 demo 数据
 
-独立后端服务 `backend/compare_demo_server.py`（端口 8001）提供三个 API 端点：
-- `GET /api/compare-demo/long`
-- `GET /api/compare-demo/qual`
-- `GET /api/compare-demo/quant`
-
-前端通过 `fetch` 调用这些端点获取数据。
+旧独立后端服务 `backend/compare_demo_server.py` 和 public HTML demo 页面已移除，避免混入 Web 打包产物。
 
 ### 3.2 数据转换
 ```
@@ -1011,14 +1008,14 @@ button, .step-pill, .dimension-header {
 
 | 文件 | 说明 |
 |------|------|
-| `frontend/public/compare_7step.html` | 七步精读对比（基于本方案重构） |
-| `frontend/public/compare_4step.html` | 四步精读对比（基于本方案重构） |
-| `frontend/public/compare_long.html` | 长文本精读对比（基于本方案重构） |
-| `backend/routers/compare.py` | 后端接口（已存在，无需改动） |
-| `backend/compare_demo_server.py` | 独立 Demo 后端服务（端口 8001） |
-| `docs/compare-long-demo-data.json` | 长文本精读 demo 数据 |
-| `docs/compare-qual-demo-data.json` | 四步精读 demo 数据 |
-| `docs/compare-quant-demo-data.json` | 七步精读 demo 数据 |
+| `frontend/src/components/CompareView.tsx` | 生产对比综述主组件 |
+| `frontend/src/components/compare/` | 生产对比综述子组件 |
+| `frontend/src/hooks/useCompareData.ts` | 生产对比数据加载 Hook |
+| `frontend/src/hooks/useSynthesisStream.ts` | AI 综述 SSE Hook |
+| `backend/routers/compare.py` | 后端生产接口 |
+| `docs/compare-long-demo-data.json` | 历史设计样例数据，不进入运行时代码 |
+| `docs/compare-qual-demo-data.json` | 历史设计样例数据，不进入运行时代码 |
+| `docs/compare-quant-demo-data.json` | 历史设计样例数据，不进入运行时代码 |
 
 ---
 

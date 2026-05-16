@@ -1,12 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
+
+hiddenimports = ['extractor', 'parsers', 'smart_literature_filter', 'uvicorn', 'uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto', 'uvicorn.protocols', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'fastapi', 'sqlalchemy', 'sqlalchemy.dialects.sqlite', 'aiosqlite', 'passlib', 'passlib.handlers.bcrypt', 'bcrypt', 'jose', 'jose.jwt', 'apscheduler', 'apscheduler.schedulers.background', 'apscheduler.schedulers.asyncio', 'apscheduler.triggers.interval', 'email_validator', 'python_multipart', 'multipart', 'pdfplumber', 'pdfminer', 'pdfminer.high_level', 'pdfminer.layout', 'pdfminer.converter', 'pdfminer.pdfinterp', 'pdfminer.pdfpage', 'pdfminer.pdfdocument', 'pdfminer.psparser', 'pdfminer.pdftypes', 'pdfminer.cmapdb', 'pdfminer.encodingdb', 'pdfminer.image', 'pypdf', 'PyPDF2', 'fitz', 'openai', 'httpx', 'pandas', 'openpyxl', 'tqdm', 'yaml', 'json_repair', 'requests', 'dotenv', 'markdown', 'services.ai_template_generator', 'services.crossref_source', 'services.data_portability', 'services.deepseek_refs', 'services.document_parser', 'services.metadata_match_service', 'services.metadata_sources', 'services.openalex_source', 'services.pdf_metadata_extract', 'services.pdf_metadata_llm', 'services.queue_manager']
+hiddenimports += collect_submodules('pdfminer')
+hiddenimports += collect_submodules('pdfplumber')
+hiddenimports += collect_submodules('pypdf')
+hiddenimports += collect_submodules('PyPDF2')
+hiddenimports += collect_submodules('fitz')
+hiddenimports += collect_submodules('openpyxl')
 
 
 a = Analysis(
     ['run_web.py'],
-    pathex=[],
+    pathex=['backend'],
     binaries=[],
-    datas=[('frontend/dist', 'frontend/dist'), ('.env.example', '.'), ('prompts', 'prompts'), ('new_architecture', 'new_architecture'), ('backend', 'backend')],
-    hiddenimports=['uvicorn', 'uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto', 'uvicorn.protocols', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'fastapi', 'sqlalchemy', 'sqlalchemy.dialects.sqlite', 'aiosqlite', 'alembic', 'passlib', 'passlib.handlers.bcrypt', 'bcrypt', 'jose', 'jose.jwt', 'apscheduler', 'apscheduler.schedulers.background', 'apscheduler.triggers.interval', 'email_validator', 'pdfplumber', 'pypdf', 'fitz', 'openai', 'pandas', 'openpyxl', 'tqdm', 'yaml', 'json_repair', 'requests', 'dotenv', 'backend.main', 'backend.cleanup', 'backend.db', 'backend.db.models', 'backend.db.session', 'backend.db.utils', 'backend.dimension_seed', 'backend.prompt_service', 'backend.template_seed', 'backend.prompt_registry', 'backend.upload_storage', 'backend.auth', 'backend.auth.dependencies', 'backend.auth.security', 'backend.auth.schemas', 'backend.routers.admin', 'backend.routers.auth', 'backend.routers.upload', 'backend.routers.filter', 'backend.routers.reading', 'backend.routers.prompts', 'backend.routers.download', 'backend.routers.history', 'backend.routers.compare', 'backend.routers.deploy', 'backend.routers.library', 'backend.routers.references', 'backend.routers.data', 'backend.routers.dimensions', 'backend.services.queue_manager', 'backend.services.deepseek_refs', 'backend.services.data_portability', 'backend.services.metadata_match_service', 'backend.services.metadata_sources', 'backend.services.crossref_source', 'backend.services.openalex_source', 'backend.services.pdf_metadata_extract', 'backend.services.pdf_metadata_llm', 'backend.services.ai_template_generator', 'backend.utils.api_key', 'new_architecture.config', 'new_architecture.paper_cache', 'new_architecture.conversation_engine', 'new_architecture.analysis_dimensions'],
+    datas=[('frontend/dist', 'frontend/dist'), ('.env.example', '.'), ('prompts', 'prompts'), ('new_architecture', 'new_architecture'), ('backend', 'backend'), ('parsers.py', '.'), ('smart_literature_filter.py', '.'), ('extractor.py', '.')],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
