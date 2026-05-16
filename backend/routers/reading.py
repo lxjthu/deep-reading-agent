@@ -205,29 +205,46 @@ tasks = {}
 
 class LongContextRequest(BaseModel):
     file_id: str
-    analysis_dims: list[str]  # e.g. ["研究问题", "理论框架", "识别策略"]
+    analysis_dims: list[str]
     custom_question: Optional[str] = None
-    extraction_method: str = "full"  # full or preview
+    extraction_method: str = "full"
     api_key: Optional[str] = None
-    force_overwrite: bool = False
+    force_overwrite: Optional[bool] = None
+    conflict_resolution: Optional[str] = None
     dimension_set_id: Optional[int] = None
 
 
 class SimpleReadingRequest(BaseModel):
     file_id: str
     api_key: Optional[str] = None
-    force_overwrite: bool = False
+    force_overwrite: Optional[bool] = None
+    conflict_resolution: Optional[str] = None
 
 
 class BatchReadingRequest(BaseModel):
     file_ids: list[str]
-    mode: str  # long / quant / qual
+    mode: str
     analysis_dims: Optional[list[str]] = None
     custom_question: Optional[str] = None
     extraction_method: str = "full"
     api_key: Optional[str] = None
-    force_overwrite: bool = False
+    force_overwrite: Optional[bool] = None
+    conflict_resolution: Optional[str] = None
     dimension_set_id: Optional[int] = None
+
+
+class CheckConflictRequest(BaseModel):
+    file_id: str
+    mode: str
+    analysis_dims: Optional[list[str]] = None
+
+
+def resolve_conflict_mode(force_overwrite: Optional[bool], conflict_resolution: Optional[str], default: str = "check") -> str:
+    if conflict_resolution in ("overwrite", "new", "incremental"):
+        return conflict_resolution
+    if force_overwrite is True:
+        return "overwrite"
+    return default
 
 
 def utcnow_naive() -> datetime:
@@ -403,18 +420,95 @@ def check_reading_duplicate(bib_entry: BibEntry, force_overwrite: bool) -> Optio
     }
 
 
-async def cleanup_old_reading_data(db: AsyncSession, bib_entry: BibEntry) -> None:
-    old_job_ids = (
+@router.post("/check-conflict")
+async def check_conflict(
+    request: CheckConflictRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    file_record = await get_file_record(db, user, request.file_id)
+    ensure_readable_file_type(file_record)
+    bib_entry = await get_or_create_bib_entry(db, user, file_record)
+
+    job_type_map = {"long": "reading_long", "quant": "reading_quant", "qual": "reading_qual"}
+    job_type = job_type_map.get(request.mode)
+    if not job_type:
+        raise HTTPException(status_code=400, detail="mode 必须是 long/quant/qual")
+
+    existing_jobs = (
         await db.execute(
-            select(JobBibEntry.job_id).where(JobBibEntry.bib_entry_id == bib_entry.id)
+            select(Job)
+            .join(JobBibEntry, JobBibEntry.job_id == Job.id)
+            .where(
+                JobBibEntry.bib_entry_id == bib_entry.id,
+                Job.job_type == job_type,
+                Job.status == "success",
+            )
+            .order_by(Job.created_at.desc())
         )
     ).scalars().all()
 
+    if not existing_jobs:
+        return {"has_conflict": False}
+
+    latest = existing_jobs[0]
+    dimensions: list[str] = []
+    incremental_dims: list[str] = []
+
+    if request.analysis_dims and job_type == "reading_long":
+        existing_items = (
+            await db.execute(
+                select(ReadingItem)
+                .where(
+                    ReadingItem.job_id == latest.id,
+                    ReadingItem.section_type.in_(["dimension", "custom"]),
+                )
+                .order_by(ReadingItem.sort_order)
+            )
+        ).scalars().all()
+        dimensions = [it.item_label for it in existing_items]
+        existing_keys = {it.item_key for it in existing_items}
+        incremental_dims = [
+            d for d in request.analysis_dims
+            if LONG_DIMENSION_KEYS.get(d, f"long.{slugify_key_fragment(d)}") not in existing_keys
+            and d not in dimensions
+        ]
+
+    return {
+        "has_conflict": True,
+        "bib_entry": {
+            "id": bib_entry.id,
+            "title": bib_entry.title,
+            "reading_status": bib_entry.reading_status,
+        },
+        "existing_job": {
+            "job_id": latest.id,
+            "job_type": latest.job_type,
+            "created_at": latest.created_at.isoformat() if latest.created_at else None,
+            "dimensions": dimensions,
+            "mode_label": {
+                "reading_long": "长文本精读",
+                "reading_quant": "七步精读",
+                "reading_qual": "四步精读",
+            }.get(latest.job_type, latest.job_type),
+        },
+        "incremental_dims": incremental_dims,
+    }
+
+
+async def cleanup_old_reading_data(db: AsyncSession, bib_entry: BibEntry, job_type: str | None = None) -> None:
+    query = (
+        select(JobBibEntry.job_id)
+        .join(Job, Job.id == JobBibEntry.job_id)
+        .where(JobBibEntry.bib_entry_id == bib_entry.id)
+    )
+    if job_type is not None:
+        query = query.where(Job.job_type == job_type)
+    old_job_ids = (await db.execute(query)).scalars().all()
+
     if old_job_ids:
         old_artifacts = (
-            await db.execute(
-                select(Artifact).where(Artifact.job_id.in_(old_job_ids))
-            )
+            await db.execute(select(Artifact).where(Artifact.job_id.in_(old_job_ids)))
         ).scalars().all()
         for art in old_artifacts:
             if art.storage_path:
@@ -429,8 +523,17 @@ async def cleanup_old_reading_data(db: AsyncSession, bib_entry: BibEntry) -> Non
         await db.execute(delete(JobBibEntry).where(JobBibEntry.job_id.in_(old_job_ids)))
         await db.execute(delete(Job).where(Job.id.in_(old_job_ids)))
 
-    await db.execute(delete(ReadingItem).where(ReadingItem.bib_entry_id == bib_entry.id))
-    bib_entry.reading_status = "has_pdf"
+    remaining_jobs = (
+        await db.execute(
+            select(JobBibEntry.job_id)
+            .join(Job, Job.id == JobBibEntry.job_id)
+            .where(JobBibEntry.bib_entry_id == bib_entry.id)
+        )
+    ).scalars().all()
+
+    if not remaining_jobs:
+        await db.execute(delete(ReadingItem).where(ReadingItem.bib_entry_id == bib_entry.id))
+        bib_entry.reading_status = "has_pdf"
     await db.flush()
 
 
@@ -851,6 +954,35 @@ def _check_and_retry_empty_dimensions(
     return results
 
 
+async def _query_prev_reading_jobs(user_id: int, bib_entry_id: str, job_type: str) -> list[str]:
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(Job.id)
+                .join(JobBibEntry, JobBibEntry.job_id == Job.id)
+                .where(
+                    JobBibEntry.bib_entry_id == bib_entry_id,
+                    Job.job_type == job_type,
+                    Job.status == "success",
+                )
+                .order_by(Job.created_at.desc())
+                .limit(1)
+            )
+        ).scalars().all()
+        return list(rows)
+
+
+async def _query_prev_reading_items(job_id: str) -> list[ReadingItem]:
+    async with AsyncSessionLocal() as db:
+        return list(
+            (
+                await db.execute(
+                    select(ReadingItem).where(ReadingItem.job_id == job_id).order_by(ReadingItem.sort_order)
+                )
+            ).scalars().all()
+        )
+
+
 def run_long_context_task(
     task_id: str,
     user_id: int,
@@ -862,6 +994,7 @@ def run_long_context_task(
     prompt_overrides: dict[str, str],
     api_key: Optional[str] = None,
     dimension_set_id: Optional[int] = None,
+    conflict_resolution: Optional[str] = None,
 ):
     """Run long context analysis in background thread. api_key is REQUIRED."""
     try:
@@ -953,6 +1086,16 @@ def run_long_context_task(
             except Exception:
                 custom_dim_map = {}
 
+        prev_items: dict[str, str] = {}
+        if conflict_resolution == "incremental":
+            try:
+                prev_job_ids = asyncio.run(_query_prev_reading_jobs(user_id, bib_entry_id, "reading_long"))
+                if prev_job_ids:
+                    prev_ri = asyncio.run(_query_prev_reading_items(prev_job_ids[0]))
+                    prev_items = {it.item_key: it.content for it in prev_ri if it.section_type in ("dimension", "custom")}
+            except Exception:
+                prev_items = {}
+
         results = {}
         total_dims = len(analysis_dims)
         for i, dim_key in enumerate(analysis_dims):
@@ -977,6 +1120,12 @@ def run_long_context_task(
 
             tasks[task_id]["stage"] = f"分析维度 {i+1}/{total_dims}: {dim_key}..."
             tasks[task_id]["logs"].append(f"[{i+1}/{total_dims}] {dim_key}...")
+            
+            item_key_for_dim = LONG_DIMENSION_KEYS.get(dim_key, f"long.{slugify_key_fragment(dim_key)}")
+            if conflict_resolution == "incremental" and item_key_for_dim in prev_items:
+                results[dim_key] = prev_items[item_key_for_dim]
+                tasks[task_id]["logs"].append(f"⏭ {dim_key} 跳过（复用已有结果）")
+                continue
             
             try:
                 if mapped_key:
@@ -1440,11 +1589,21 @@ async def start_long_context(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
-    dup = check_reading_duplicate(bib_entry, request.force_overwrite)
-    if dup:
-        raise HTTPException(status_code=409, detail=dup)
-    if request.force_overwrite:
-        await cleanup_old_reading_data(db, bib_entry)
+    resolution = resolve_conflict_mode(request.force_overwrite, request.conflict_resolution)
+    if resolution == "overwrite":
+        await cleanup_old_reading_data(db, bib_entry, "reading_long")
+    elif resolution == "check":
+        existing = (
+            await db.execute(
+                select(Job).join(JobBibEntry, JobBibEntry.job_id == Job.id).where(
+                    JobBibEntry.bib_entry_id == bib_entry.id,
+                    Job.job_type == "reading_long",
+                    Job.status == "success",
+                ).limit(1)
+            )
+        ).scalars().first()
+        if existing:
+            raise HTTPException(status_code=409, detail={"detail": "already_read", "mode": "long"})
     prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="long")
     task_id = await create_reading_job(
         db,
@@ -1475,6 +1634,7 @@ async def start_long_context(
             prompt_overrides,
             request.api_key,
             request.dimension_set_id,
+            resolution,
         ),
         daemon=True
     )
@@ -1496,11 +1656,21 @@ async def start_quant(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
-    dup = check_reading_duplicate(bib_entry, request.force_overwrite)
-    if dup:
-        raise HTTPException(status_code=409, detail=dup)
-    if request.force_overwrite:
-        await cleanup_old_reading_data(db, bib_entry)
+    resolution = resolve_conflict_mode(request.force_overwrite, request.conflict_resolution)
+    if resolution == "overwrite":
+        await cleanup_old_reading_data(db, bib_entry, "reading_quant")
+    elif resolution == "check":
+        existing = (
+            await db.execute(
+                select(Job).join(JobBibEntry, JobBibEntry.job_id == Job.id).where(
+                    JobBibEntry.bib_entry_id == bib_entry.id,
+                    Job.job_type == "reading_quant",
+                    Job.status == "success",
+                ).limit(1)
+            )
+        ).scalars().first()
+        if existing:
+            raise HTTPException(status_code=409, detail={"detail": "already_read", "mode": "quant"})
     prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="quant")
     task_id = await create_reading_job(
         db,
@@ -1537,11 +1707,21 @@ async def start_qual(
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
     bib_entry = await get_or_create_bib_entry(db, user, file_record)
-    dup = check_reading_duplicate(bib_entry, request.force_overwrite)
-    if dup:
-        raise HTTPException(status_code=409, detail=dup)
-    if request.force_overwrite:
-        await cleanup_old_reading_data(db, bib_entry)
+    resolution = resolve_conflict_mode(request.force_overwrite, request.conflict_resolution)
+    if resolution == "overwrite":
+        await cleanup_old_reading_data(db, bib_entry, "reading_qual")
+    elif resolution == "check":
+        existing = (
+            await db.execute(
+                select(Job).join(JobBibEntry, JobBibEntry.job_id == Job.id).where(
+                    JobBibEntry.bib_entry_id == bib_entry.id,
+                    Job.job_type == "reading_qual",
+                    Job.status == "success",
+                ).limit(1)
+            )
+        ).scalars().first()
+        if existing:
+            raise HTTPException(status_code=409, detail={"detail": "already_read", "mode": "qual"})
     prompt_overrides = await get_effective_prompt_map(db, user_id=user.id, prompt_type="qual")
     task_id = await create_reading_job(
         db,
@@ -1596,8 +1776,12 @@ async def start_batch_reading(
                 batch_tasks.append({"file_id": file_id, "file_name": file_record.original_name, "task_id": None, "status": "skipped", "error": "文件路径未找到"})
                 continue
             bib_entry = await get_or_create_bib_entry(db, user, file_record)
-            if request.force_overwrite and bib_entry.reading_status in ("reading", "read"):
-                await cleanup_old_reading_data(db, bib_entry)
+            batch_resolution = resolve_conflict_mode(request.force_overwrite, request.conflict_resolution, default="overwrite")
+            if batch_resolution == "overwrite" and bib_entry.reading_status in ("reading", "read"):
+                await cleanup_old_reading_data(db, bib_entry, job_type)
+            elif batch_resolution == "check" and bib_entry.reading_status in ("reading", "read"):
+                batch_tasks.append({"file_id": file_id, "file_name": file_record.original_name, "task_id": None, "status": "skipped", "error": "已有同模式精读结果"})
+                continue
 
             params: dict = {}
             if request.mode == "long":
@@ -1620,7 +1804,7 @@ async def start_batch_reading(
             if request.mode == "long":
                 thread = threading.Thread(
                     target=run_long_context_task,
-                    args=(task_id, user.id, bib_entry.id, file_path, request.analysis_dims or [], request.custom_question, request.extraction_method, prompt_overrides, request.api_key, request.dimension_set_id),
+                    args=(task_id, user.id, bib_entry.id, file_path, request.analysis_dims or [], request.custom_question, request.extraction_method, prompt_overrides, request.api_key, request.dimension_set_id, batch_resolution),
                     daemon=True,
                 )
             elif request.mode == "quant":
@@ -1641,7 +1825,7 @@ async def start_batch_reading(
         except Exception as exc:
             batch_tasks.append({"file_id": file_id, "file_name": file_id, "task_id": None, "status": "error", "error": str(exc)[:200]})
 
-    return {"batch_id": batch_id, "tasks": batch_tasks}
+    return {"batch_id": batch_id, "tasks": batch_tasks, "skipped_count": sum(1 for t in batch_tasks if t.get("status") == "skipped")}
 
 
 @router.get("/batch/{batch_id}/status")

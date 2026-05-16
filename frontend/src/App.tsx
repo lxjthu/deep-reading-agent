@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import './index.css'
 import LibraryTab from './LibraryTab'
@@ -7,6 +7,7 @@ import TemplateMarket from './TemplateMarket'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import { useAuthStore } from './store/auth'
 import { CompareView } from './components/CompareView'
+import ConflictDialog from './components/ConflictDialog'
 
 // Tab definitions
 const TABS = [
@@ -1119,6 +1120,8 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [overIdx, setOverIdx] = useState<number | null>(null)
   const [batchFiles, setBatchFiles] = useState<File[]>([])
   const [showBatchPreview, setShowBatchPreview] = useState(false)
+  const [conflictInfo, setConflictInfo] = useState<any>(null)
+  const pendingFileIdRef = useRef<string | null>(null)
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -1351,6 +1354,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (!uploadData.success) throw new Error(uploadData.message)
 
       setStage('解析 PDF...'); addLog('✓ 文件上传成功')
+      pendingFileIdRef.current = uploadData.file_id
 
       const startRes = await fetch('/api/reading/long/start', {
         method: 'POST',
@@ -1358,20 +1362,27 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
         body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, dimension_set_id: dimensionSetId || undefined, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey })
       })
       if (startRes.status === 409) {
-        const err = await startRes.json()
-        const info = err.detail?.bib_entry
-        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
-        if (!ok) { setStage('已取消'); setIsRunning(false); return }
-        const retryRes = await fetch('/api/reading/long/start', {
+        const checkRes = await fetch('/api/reading/check-conflict', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, dimension_set_id: dimensionSetId || undefined, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+          body: JSON.stringify({
+            file_id: uploadData.file_id,
+            mode: 'long',
+            analysis_dims: dims,
+          }),
         })
-        const retryData = await retryRes.json()
-        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
-        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
-        await startTrackingTask(retryData.task_id)
-        return
+        const conflict = await checkRes.json()
+        if (conflict.has_conflict) {
+          setConflictInfo(conflict)
+          setStage('等待选择...')
+          setIsRunning(false)
+          return
+        }
+      }
+      if (!startRes.ok) {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || `启动失败 (${startRes.status})`
+        throw new Error(errMsg)
       }
       const startData = await startRes.json()
       const taskId = startData.task_id
@@ -1379,6 +1390,42 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       await startTrackingTask(taskId)
     } catch (error: any) {
       setStage('错误'); addLog(`❌ ${error.message}`)
+    }
+  }
+
+  const handleConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setConflictInfo(null)
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { setStage('未设置 API Key'); return }
+    const selectedDims = dims.length > 0 ? dims : ALL_DIMS
+    setIsRunning(true)
+    setStage('启动中...')
+    try {
+      const startRes = await fetch('/api/reading/long/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_id: pendingFileIdRef.current,
+          analysis_dims: selectedDims,
+          dimension_set_id: dimensionSetId || undefined,
+          custom_question: customQ || undefined,
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      if (startRes.ok) {
+        const data = await startRes.json()
+        startTrackingTask(data.task_id)
+      } else {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || '未知错误'
+        setStage(`启动失败: ${errMsg}`)
+        setIsRunning(false)
+      }
+    } catch (e: any) {
+      setStage(`错误: ${e.message}`)
+      setIsRunning(false)
     }
   }
 
@@ -1445,7 +1492,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
           custom_question: customQ || undefined,
           extraction_method: extraction,
           api_key: effectiveKey,
-          force_overwrite: true,
+          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -1781,6 +1828,14 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
           </div>
         )}
       </div>
+      {conflictInfo && (
+        <ConflictDialog
+          conflict={conflictInfo}
+          mode="long"
+          onResolve={handleConflictResolve}
+          onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+        />
+      )}
     </div>
   )
 }
@@ -1791,6 +1846,8 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [extraction, setExtraction] = useState('full')
   const [batchFiles, setBatchFiles] = useState<File[]>([])
   const [showBatchPreview, setShowBatchPreview] = useState(false)
+  const [conflictInfo, setConflictInfo] = useState<any>(null)
+  const pendingFileIdRef = useRef<string | null>(null)
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -1845,6 +1902,7 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
       }
       const uploadData = await uploadRes.json()
       if (!uploadData.success) throw new Error(uploadData.message)
+      pendingFileIdRef.current = uploadData.file_id
       setStage('解析 PDF...'); addLog('✓ 文件上传成功')
 
       const startRes = await fetch('/api/reading/quant/start', {
@@ -1852,25 +1910,64 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
         body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey })
       })
       if (startRes.status === 409) {
-        const err = await startRes.json()
-        const info = err.detail?.bib_entry
-        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
-        if (!ok) { setStage('已取消'); setIsRunning(false); return }
-        const retryRes = await fetch('/api/reading/quant/start', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+        const checkRes = await fetch('/api/reading/check-conflict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_id: uploadData.file_id,
+            mode: 'quant',
+          }),
         })
-        const retryData = await retryRes.json()
-        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
-        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
-        await startTrackingTask(retryData.task_id)
-        return
+        const conflict = await checkRes.json()
+        if (conflict.has_conflict) {
+          setConflictInfo(conflict)
+          setStage('等待选择...')
+          setIsRunning(false)
+          return
+        }
+      }
+      if (!startRes.ok) {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || `启动失败 (${startRes.status})`
+        throw new Error(errMsg)
       }
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
       await startTrackingTask(taskId)
     } catch (error: any) { setStage('错误'); addLog(`❌ ${error.message}`) }
+  }
+
+  const handleConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setConflictInfo(null)
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { setStage('未设置 API Key'); return }
+    setIsRunning(true)
+    setStage('启动中...')
+    try {
+      const startRes = await fetch('/api/reading/quant/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_id: pendingFileIdRef.current,
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      if (startRes.ok) {
+        const data = await startRes.json()
+        startTrackingTask(data.task_id)
+      } else {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || '未知错误'
+        setStage(`启动失败: ${errMsg}`)
+        setIsRunning(false)
+      }
+    } catch (e: any) {
+      setStage(`错误: ${e.message}`)
+      setIsRunning(false)
+    }
   }
 
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1925,7 +2022,7 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
           mode: 'quant',
           extraction_method: extraction,
           api_key: effectiveKey,
-          force_overwrite: true,
+          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -2107,6 +2204,14 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
             </div>
           </div>
         )}
+        {conflictInfo && (
+          <ConflictDialog
+            conflict={conflictInfo}
+            mode="quant"
+            onResolve={handleConflictResolve}
+            onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+          />
+        )}
       </div>
     </div>
   )
@@ -2118,6 +2223,8 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [extraction, setExtraction] = useState('full')
   const [batchFiles, setBatchFiles] = useState<File[]>([])
   const [showBatchPreview, setShowBatchPreview] = useState(false)
+  const [conflictInfo, setConflictInfo] = useState<any>(null)
+  const pendingFileIdRef = useRef<string | null>(null)
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -2169,6 +2276,7 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
       }
       const uploadData = await uploadRes.json()
       if (!uploadData.success) throw new Error(uploadData.message)
+      pendingFileIdRef.current = uploadData.file_id
       setStage('解析 PDF...'); addLog('✓ 文件上传成功')
 
       const startRes = await fetch('/api/reading/qual/start', {
@@ -2176,25 +2284,64 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
         body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey })
       })
       if (startRes.status === 409) {
-        const err = await startRes.json()
-        const info = err.detail?.bib_entry
-        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
-        if (!ok) { setStage('已取消'); setIsRunning(false); return }
-        const retryRes = await fetch('/api/reading/qual/start', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+        const checkRes = await fetch('/api/reading/check-conflict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_id: uploadData.file_id,
+            mode: 'qual',
+          }),
         })
-        const retryData = await retryRes.json()
-        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
-        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
-        await startTrackingTask(retryData.task_id)
-        return
+        const conflict = await checkRes.json()
+        if (conflict.has_conflict) {
+          setConflictInfo(conflict)
+          setStage('等待选择...')
+          setIsRunning(false)
+          return
+        }
+      }
+      if (!startRes.ok) {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || `启动失败 (${startRes.status})`
+        throw new Error(errMsg)
       }
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
       await startTrackingTask(taskId)
     } catch (error: any) { setStage('错误'); addLog(`❌ ${error.message}`) }
+  }
+
+  const handleConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setConflictInfo(null)
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { setStage('未设置 API Key'); return }
+    setIsRunning(true)
+    setStage('启动中...')
+    try {
+      const startRes = await fetch('/api/reading/qual/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_id: pendingFileIdRef.current,
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      if (startRes.ok) {
+        const data = await startRes.json()
+        startTrackingTask(data.task_id)
+      } else {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || '未知错误'
+        setStage(`启动失败: ${errMsg}`)
+        setIsRunning(false)
+      }
+    } catch (e: any) {
+      setStage(`错误: ${e.message}`)
+      setIsRunning(false)
+    }
   }
 
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2249,7 +2396,7 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
           mode: 'qual',
           extraction_method: extraction,
           api_key: effectiveKey,
-          force_overwrite: true,
+          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -2430,6 +2577,14 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
               </div>
             </div>
           </div>
+        )}
+        {conflictInfo && (
+          <ConflictDialog
+            conflict={conflictInfo}
+            mode="qual"
+            onResolve={handleConflictResolve}
+            onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+          />
         )}
       </div>
     </div>
