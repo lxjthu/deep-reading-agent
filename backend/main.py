@@ -137,8 +137,21 @@ app.include_router(dimensions.router, prefix="/api/dimensions", tags=["Dimension
 app.include_router(deploy.router, prefix="/api/deploy", tags=["Deploy"])
 
 
+def get_project_root():
+    """Get project root, compatible with PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS)
+    else:
+        return Path(__file__).parent.parent
+
+project_root = get_project_root()
+frontend_dist = project_root / "frontend" / "dist"
+
+
 @app.get("/")
 async def root():
+    if frontend_dist.exists():
+        return FileResponse(frontend_dist / "index.html", media_type="text/html")
     return {
         "message": "Deep Reading Agent API",
         "version": "3.0.0",
@@ -216,19 +229,7 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
         ws_manager.disconnect(task_id)
 
 
-# Mount frontend static files (for standalone distribution)
-def get_project_root():
-    """Get project root, compatible with PyInstaller."""
-    if getattr(sys, 'frozen', False):
-        # Running in PyInstaller bundle
-        return Path(sys._MEIPASS)
-    else:
-        return Path(__file__).parent.parent
-
-project_root = get_project_root()
-frontend_dist = project_root / "frontend" / "dist"
 if frontend_dist.exists():
-    # Mount at root, but API routes take precedence
     app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="static")
     print(f"[static] Serving frontend from {frontend_dist}")
 else:
