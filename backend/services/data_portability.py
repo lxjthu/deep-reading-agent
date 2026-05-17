@@ -32,8 +32,10 @@ from db.models import (
     File,
     Job,
     JobBibEntry,
+    Annotation,
     PromptTemplate,
     ReadingItem,
+    ReadingItemEdit,
     UploadBatch,
     User,
 )
@@ -42,7 +44,7 @@ from upload_storage import get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "007"
+CURRENT_SCHEMA_VERSION = "011"
 
 # FK forward order for export / import
 EXPORT_TABLE_ORDER = [
@@ -56,6 +58,8 @@ EXPORT_TABLE_ORDER = [
     BibFilterLink,
     JobBibEntry,
     ReadingItem,
+    ReadingItemEdit,
+    Annotation,
     Artifact,
     BibReference,
     BibReferenceCitation,
@@ -65,6 +69,8 @@ EXPORT_TABLE_ORDER = [
 IMPORT_CLEAR_ORDER = [
     BibReferenceCitation,
     BibReference,
+    Annotation,
+    ReadingItemEdit,
     ReadingItem,
     Artifact,
     JobBibEntry,
@@ -432,6 +438,25 @@ async def _deserialize_table(
                 if new_set_id is not None:
                     kwargs[col] = new_set_id
                     continue
+
+            if col == "reading_item_id" and id_map and model is ReadingItemEdit:
+                new_reading_item_id = id_map.get(("reading_items", value))
+                if new_reading_item_id is not None:
+                    kwargs[col] = new_reading_item_id
+                    continue
+
+            if col == "source_id" and id_map and model is Annotation:
+                source_type = row.get("source_type")
+                if source_type in ("compare_card", "ai_summary"):
+                    try:
+                        old_reading_item_id = int(value)
+                    except (TypeError, ValueError):
+                        old_reading_item_id = None
+                    if old_reading_item_id is not None:
+                        new_reading_item_id = id_map.get(("reading_items", old_reading_item_id))
+                        if new_reading_item_id is not None:
+                            kwargs[col] = str(new_reading_item_id)
+                            continue
 
             try:
                 col_type = _get_column_type(model, col)
