@@ -648,7 +648,7 @@ Key functions/endpoints:
 | `useCompareData(...)` | 调用 `/api/compare/reading-data` 聚合用户精读结果 | 对比页没有文献或维度 |
 | `PaperSelector` | 文献选择 | 文献勾选状态异常 |
 | `DimNavigation` | 维度/步骤导航与选择 | 维度列表或步骤切换异常 |
-| `AccordionPanel` | 分组展示对比内容 | 折叠/展开和层级显示异常 |
+| `AccordionPanel` | 分组展示对比内容，维度级模式按钮（编辑/点评/AI总结批量切换） | 折叠/展开、维度级按钮、卡片模式异常 |
 | `AnswerCard` | 展示单篇回答，支持编辑、点评、AI 总结 | 卡片内容、批注、编辑保存异常 |
 | `SynthesisModal` | AI 综述弹窗 | 综述按钮、已选项、流式输出异常 |
 | `useSynthesisStream(...)` | 调用 `/api/compare/synthesis-stream` 并解析 SSE | 综述流式响应或完成事件异常 |

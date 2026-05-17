@@ -25,7 +25,7 @@
 | 8 | AI 总结 API（POST /ai-summary） | `backend/routers/compare.py` | ✅ |
 | 9 | reading-data 响应扩展（含 edit / annotations） | `backend/routers/compare.py` | ✅ |
 | 10 | AnswerCard 模式状态机 + 三模式 UI | `frontend/src/components/compare/AnswerCard.tsx` | ✅ |
-| 11 | AccordionPanel 模式互斥管理 | `frontend/src/components/compare/AccordionPanel.tsx` | ✅ |
+| 11 | AccordionPanel 模式管理（维度级批量切换 + 单卡独立） | `frontend/src/components/compare/AccordionPanel.tsx` | ✅ |
 | 12 | CSS 样式（`.compare-root` 作用域） | `frontend/src/components/compare/compare.css` | ✅ |
 | 13 | CompareView 传递 apiKey / refetch | `frontend/src/components/CompareView.tsx` | ✅ |
 | 14 | useCompareData 类型扩展 | `frontend/src/hooks/useCompareData.ts` | ✅ |
@@ -257,24 +257,29 @@ interface AnswerCardProps {
 - `handleAiSummary` → `POST /api/compare/ai-summary` → 结果存入 `annotations`（`is_ai_generated=1`）→ **留在 AI 总结模式**并自动切到对照视图（`setAiDisplayMode('both')`）
 - 三种子显示模式通过 `AiDisplayMode` 切换
 
-### 5.2 AccordionPanel 模式互斥
+### 5.2 AccordionPanel 模式管理
 
 `frontend/src/components/compare/AccordionPanel.tsx`
 
-管理 `activeModeCard: string | null` 状态，确保同一时刻只有一张卡片处于非普通模式：
+管理 `cardModes: Record<string, CardMode>` 状态，每张卡片独立持有模式。支持两种模式切换入口：
+
+**单卡切换**：AnswerCard 内按钮触发 `onModeChange(paperId, mode)`，仅改变对应卡片的模式。
+
+**维度级批量切换**：维度 header 右侧三按钮（编辑/点评/AI总结，仅 `state === 'full'` 时可见）触发 `handleDimModeChange(targetMode)`，将所有卡片同时设为同一模式；再次点击退出。
 
 ```typescript
-const handleModeChange = (paperId: string, newMode: CardMode) => {
-  if (newMode === 'normal') {
-    setActiveModeCard(null)
-  } else {
-    setActiveModeCard(paperId)  // 自动将其他卡片切回 normal
-  }
+const handleDimModeChange = (targetMode: CardMode) => {
+  setCardModes((prev) => {
+    const allInTarget = papers.every((p) => prev[p.id] === targetMode)
+    if (allInTarget) return {}  // 退出
+    const next: Record<string, CardMode> = {}
+    for (const p of papers) next[p.id] = targetMode
+    return next
+  })
 }
 ```
 
-每张 AnswerCard 通过 `forcedMode` 计算实际显示模式：
-- `isActive ? cardModes[p.id] : 'normal'`
+`dimMode` 为计算属性：当所有活跃卡片模式一致时返回该模式（用于按钮高亮），否则返回 `'normal'`。每张 AnswerCard 的 `isActive` 由 `cardModes[paperId] !== 'normal'` 决定，不再限制为单卡活跃。
 
 ### 5.3 useCompareData 静默刷新机制
 
@@ -292,7 +297,7 @@ const fetchData = useCallback(async (silent = false) => {
 const refetch = useCallback(() => fetchData(true), [fetchData])
 ```
 
-**为什么需要静默刷新**：`CompareView` 在 `loading === true` 时渲染 loading 页面，会卸载所有 `AccordionPanel`，导致其 `activeModeCard` / `cardModes` 状态丢失。`refetch` 使用 `silent=true` 确保 `loading` 不变，组件树保持挂载。
+**为什么需要静默刷新**：`CompareView` 在 `loading === true` 时渲染 loading 页面，会卸载所有 `AccordionPanel`，导致其 `cardModes` 状态丢失。`refetch` 使用 `silent=true` 确保 `loading` 不变，组件树保持挂载。
 
 ### 5.4 CompareView 数据传递
 

@@ -727,6 +727,35 @@
   font-weight: 600;
 }
 
+.compare-root .compare-dim-mode-buttons {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.compare-root .compare-dim-mode-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  background: white;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.compare-root .compare-dim-mode-btn:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.compare-root .compare-dim-mode-btn.active {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
 /* Edit area */
 .compare-root .compare-edit-area {
   padding: 14px;

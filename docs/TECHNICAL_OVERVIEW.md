@@ -1165,7 +1165,7 @@ export_20260506_username.dra
 
 - `frontend/src/components/CompareView.tsx` — 对比综述主组件（替代 iframe）
 - `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
-- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开）
+- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开 + 维度级模式按钮）
 - `frontend/src/components/compare/PaperSelector.tsx` — 文献选择卡片
 - `frontend/src/components/compare/DimNavigation.tsx` — 维度/步骤导航胶囊
 - `frontend/src/components/compare/SynthesisModal.tsx` — AI 综述弹窗
@@ -1714,7 +1714,7 @@ v2 页面核心架构（与 v1 对比）：
 
 - `frontend/src/components/CompareView.tsx` — 对比综述主组件（新建）
 - `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
-- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开）
+- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开 + 维度级模式按钮）
 - `frontend/src/components/compare/PaperSelector.tsx` — 文献选择卡片
 - `frontend/src/components/compare/DimNavigation.tsx` — 维度/步骤导航胶囊
 - `frontend/src/components/compare/SynthesisModal.tsx` — AI 综述弹窗
@@ -1753,6 +1753,21 @@ v2 页面核心架构（与 v1 对比）：
 踩坑记录：
 
 - **默认超时过短**（2026-05-14）：`OpenAI()` 不传 `timeout` 时 httpx 默认 connect 5s，走 HTTP 代理做 TLS 握手时容易超时。`deepseek_refs.py` 的重试循环只处理空响应，不捕获超时异常，导致超时直接穿透到 `_try_extract_references` 被外层 `except Exception` 吞掉并静默失败。**教训：所有 OpenAI 客户端必须显式设置超时，重试循环必须捕获超时异常**。
+
+### 8.17 对比综述维度级模式按钮
+
+改动目标：
+
+- 在对比综述的每个维度 accordion header 右侧新增三按钮（编辑/点评/AI总结），点击后该维度所有卡片同时切换到对应显示模式
+- 移除原有的 `activeModeCard` 单卡活跃限制，允许同一维度内多张卡片同时处于非 normal 模式
+- 每张卡片的实际操作（保存编辑、创建点评、触发AI总结）仍为独立单卡行为
+
+落点文件：
+
+- `frontend/src/components/compare/AccordionPanel.tsx` — 移除 `activeModeCard`，新增 `handleDimModeChange` + `dimMode` 计算，header 增加维度级按钮
+- `frontend/src/components/compare/compare.css` — 新增 `.compare-dim-mode-buttons` / `.compare-dim-mode-btn` 样式
+
+设计文档：`docs/2026-05-17-dimension-mode-buttons-design.md`
 
 ## 9. 改代码时的推荐查找路径
 

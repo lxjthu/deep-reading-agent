@@ -101,25 +101,42 @@ export function AccordionPanel({
   onRefresh,
 }: AccordionPanelProps) {
   const isExpanded = state !== 'collapsed'
-  const [activeModeCard, setActiveModeCard] = useState<string | null>(null)
   const [cardModes, setCardModes] = useState<Record<string, CardMode>>({})
 
   const handleModeChange = useCallback(
     (paperId: string, newMode: CardMode) => {
       if (newMode === 'normal') {
-        setActiveModeCard(null)
         setCardModes((prev) => {
           const next = { ...prev }
           delete next[paperId]
           return next
         })
       } else {
-        setActiveModeCard(paperId)
         setCardModes((prev) => ({ ...prev, [paperId]: newMode }))
       }
     },
     [],
   )
+
+  const handleDimModeChange = useCallback(
+    (targetMode: CardMode) => {
+      setCardModes((prev) => {
+        const allInTarget = papers.every((p) => prev[p.id] === targetMode)
+        if (allInTarget) {
+          return {}
+        }
+        const next: Record<string, CardMode> = {}
+        for (const p of papers) {
+          next[p.id] = targetMode
+        }
+        return next
+      })
+    },
+    [papers],
+  )
+
+  const activeModes = new Set(Object.values(cardModes))
+  const dimMode: CardMode = activeModes.size === 1 ? ([...activeModes][0] as CardMode) : 'normal'
 
   return (
     <div className={`accordion-item${isExpanded ? ' expanded' : ''}`} data-dim-id={dimId}>
@@ -141,6 +158,29 @@ export function AccordionPanel({
           readOnly
         />
         <span className="accordion-label">{dimLabel}</span>
+        {state === 'full' && (
+          <div className="compare-dim-mode-buttons" onClick={(e) => e.stopPropagation()}>
+            {dimMode === 'normal' ? (
+              <>
+                <button className="compare-dim-mode-btn" onClick={() => handleDimModeChange('editing')}>
+                  编辑
+                </button>
+                <button className="compare-dim-mode-btn" onClick={() => handleDimModeChange('annotating')}>
+                  点评
+                </button>
+                {apiKey && (
+                  <button className="compare-dim-mode-btn" onClick={() => handleDimModeChange('ai_summarizing')}>
+                    AI总结
+                  </button>
+                )}
+              </>
+            ) : (
+              <button className="compare-dim-mode-btn active" onClick={() => handleDimModeChange(dimMode)}>
+                退出{dimMode === 'editing' ? '编辑' : dimMode === 'annotating' ? '点评' : 'AI总结'}
+              </button>
+            )}
+          </div>
+        )}
         <span className="accordion-arrow">▼</span>
       </div>
 
@@ -173,8 +213,8 @@ export function AccordionPanel({
               <div className="answer-cards-scroll">
                 {papers.map((p) => {
                   const dimData = getDimData(p, dimId, mode)
-                  const isActive = activeModeCard === p.id
-                  const currentMode = isActive ? (cardModes[p.id] || 'normal') : 'normal'
+                  const isActive = !!cardModes[p.id] && cardModes[p.id] !== 'normal'
+                  const currentMode = isActive ? cardModes[p.id] : 'normal'
                   return (
                     <AnswerCard
                       key={p.id}

@@ -425,14 +425,15 @@ PDF 结构复杂度：
 关键实现技巧：
 - 高亮渲染：将 Markdown 文本按 annotations 的 char_start/char_end 拆分，非高亮部分正常 md2html，高亮部分包裹 `<mark class="compare-annotation-highlight">`
 - 文字选择：监听 `mouseup` 事件，用 `window.getSelection()` 获取选中文本和位置
-- 模式互斥：AccordionPanel 管理 `activeModeCard` 状态，同一维度面板内只有一张卡片可进入非普通模式
+- 模式管理：AccordionPanel 管理 `cardModes` 状态，每张卡片独立持有模式；支持维度级批量切换（header 三按钮）和单卡独立切换
 - char_start/char_end 失效处理：如果存在 edit 覆盖，标注按 `selected_text` 做文本匹配而非偏移定位
 
 **4.3 `AccordionPanel.tsx`**
 
 - 新增 props：`apiKey`、`onModeChange` 回调
-- 管理 `activeModeCard: string | null`
-- 传递给 AnswerCard：`isActive`、`forcedMode`、`onModeChange`
+- 管理 `cardModes: Record<string, CardMode>`，每张卡片独立模式
+- 维度 header 三按钮（编辑/点评/AI总结）批量切换，单卡按钮独立切换
+- 传递给 AnswerCard：`isActive`（derived from cardModes）、`cardMode`、`onModeChange`
 
 **4.4 `compare.css`**
 
