@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-09
+> 最后更新：2026-05-17
 
 ---
 
@@ -67,6 +67,16 @@
 | [REFERENCE_CITATION_DEEPSEEK_FLASH_PLAN.md](REFERENCE_CITATION_DEEPSEEK_FLASH_PLAN.md) | 方案 | DeepSeek Flash 模型用于引用追踪 | 引用追踪模型选型 |
 | [COMPARE_SYNTHESIS_SELECTION_PLAN.md](COMPARE_SYNTHESIS_SELECTION_PLAN.md) | 方案 | 对比综述选择交互改进 | 对比页多选交互设计 |
 | [TESTSET_AND_P2_PLAN.md](TESTSET_AND_P2_PLAN.md) | 方案 | 测试集与 P2 规划 | 测试相关规划 |
+
+---
+
+## 优化与修复文档
+
+| 文档 | 类型 | 内容 | 何时查阅 |
+|------|------|------|----------|
+| [BATCH_AND_COMPARE_IMPROVEMENTS.md](BATCH_AND_COMPARE_IMPROVEMENTS.md) | 优化 | 批量精读冲突预检、进度恢复、元数据去重、对比维度聚合 | 理解 2026-05-17 批次优化的全貌 |
+| [SKIP_DUPLICATE_EXTRACTION.md](SKIP_DUPLICATE_EXTRACTION.md) | 优化 | 元数据提取去重 + 参考文献跳过已有记录 | 理解精读 LLM 调用优化 |
+| [BATCH_CONFLICT_CHECK_PLAN.md](BATCH_CONFLICT_CHECK_PLAN.md) | 方案 | 批量精读冲突预检方案设计 | 理解批量冲突检测的接口和交互设计 |
 
 ---
 
