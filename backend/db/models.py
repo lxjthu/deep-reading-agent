@@ -631,6 +631,7 @@ class DimensionSet(Base):
     is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_shared: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_available_for_reading: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.current_timestamp()

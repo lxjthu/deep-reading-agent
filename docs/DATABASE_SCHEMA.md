@@ -633,6 +633,7 @@ CREATE TABLE dimension_sets (
     is_default      INTEGER NOT NULL DEFAULT 0, -- 是否为用户当前激活的默认集合（每用户至多 1 个）
     is_system       INTEGER NOT NULL DEFAULT 0, -- 系统内置集合（不可删除、不可改名）
     is_shared       INTEGER NOT NULL DEFAULT 0, -- 是否共享给其他用户（0=私有 1=共享）
+    is_available_for_reading INTEGER NOT NULL DEFAULT 1, -- 是否显示在长文本精读集合下拉框
     sort_order      INTEGER NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at      DATETIME NOT NULL DEFAULT (datetime('now')),
@@ -649,6 +650,7 @@ CREATE INDEX idx_dim_sets_shared ON dimension_sets (is_shared);
 - `is_system=1`：系统内置的默认维度集，不可删除、不可改名，但可通过 `/reset` 端点恢复默认内容
 - `is_default=1`：用户当前激活的集合，启动精读时默认使用此集合的维度。每用户至多一个 `is_default=1`
 - `is_shared=1`：该集合已共享给其他用户，其他用户可浏览并基于此集合创建自己的副本。共享集合仍由 owner 管理
+- `is_available_for_reading=1`：显示在长文本精读页的维度集合下拉框；为 0 时集合保留在模板市场，但不参与当前精读选择
 - `name`：用户自定义集合名，系统集默认名为"默认维度集"
 
 **种子数据**：应用启动时自动为每个用户创建系统默认集合，并从 `ANALYSIS_DIMENSIONS` 填充 12+1 个维度条目。
@@ -975,6 +977,7 @@ class DimensionSet(Base):
     is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_shared: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_available_for_reading: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
@@ -1067,6 +1070,8 @@ backend/migrations/versions/
 ├── 008_add_dimension_shared_and_group.py  # dimension_sets 新增 is_shared，dimension_items 新增 group_name
 ├── 009_add_dimension_templates.py  # dimension_templates + template_items（系统预设维度模板）
 ├── 010_seed_dimension_templates.py  # 预设模板种子数据导入
+├── 011_add_edits_and_annotations.py  # reading_item_edits + annotations
+├── 012_add_dimension_set_reading_availability.py  # dimension_sets 新增 is_available_for_reading
 └── (后续新增字段时追加)
 ```
 

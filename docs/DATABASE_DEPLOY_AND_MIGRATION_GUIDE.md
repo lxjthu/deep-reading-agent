@@ -628,6 +628,10 @@ python -m alembic upgrade head
 - 先按 `DATABASE_SCHEMA.md` 设计数据库改动
 - 再落到 `models.py`
 - 再补 Alembic 迁移
+- 如果新增/修改用户数据表，必须同步检查 `backend/services/data_portability.py`：
+  - `CURRENT_SCHEMA_VERSION` 要与最新 migration 编号一致
+  - 新增用户数据表要加入 `.dra` 导出/导入顺序，或明确说明不导出的原因
+  - 涉及自增主键或跨表引用时，要补导入时的 id remap 逻辑
 - 再接后端任务闭环
 - 再接前端展示
 - 先在本机现有 PDF 数据上验证

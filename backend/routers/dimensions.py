@@ -67,6 +67,7 @@ class SetCreate(BaseModel):
     name: str
     description: Optional[str] = None
     clone_from_set_id: Optional[int] = None
+    is_available_for_reading: Optional[bool] = True
 
 
 class SetUpdate(BaseModel):
@@ -74,17 +75,21 @@ class SetUpdate(BaseModel):
     description: Optional[str] = None
 
 
+class SetAvailabilityUpdate(BaseModel):
+    is_available_for_reading: bool
+
+
 @router.get("/sets")
 async def list_sets(
+    available_only: bool = False,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    stmt = select(DimensionSet).where(DimensionSet.owner_user_id == user.id)
+    if available_only:
+        stmt = stmt.where(DimensionSet.is_available_for_reading == 1)
     rows = (
-        await db.execute(
-            select(DimensionSet)
-            .where(DimensionSet.owner_user_id == user.id)
-            .order_by(DimensionSet.sort_order, DimensionSet.id)
-        )
+        await db.execute(stmt.order_by(DimensionSet.sort_order, DimensionSet.id))
     ).scalars().all()
     result = []
     for ds in rows:
@@ -103,6 +108,7 @@ async def list_sets(
                 "is_default": bool(ds.is_default),
                 "is_system": bool(ds.is_system),
                 "is_shared": bool(ds.is_shared),
+                "is_available_for_reading": bool(ds.is_available_for_reading),
                 "item_count": count,
                 "sort_order": ds.sort_order,
             }
@@ -141,6 +147,7 @@ async def create_set(
         description=body.description,
         is_default=0,
         is_system=0,
+        is_available_for_reading=1 if body.is_available_for_reading is not False else 0,
         sort_order=max_order + 1,
     )
     db.add(ds)
@@ -164,6 +171,7 @@ async def create_set(
                     prompt_content=src.prompt_content,
                     default_question=src.default_question,
                     sort_order=src.sort_order,
+                    group_name=src.group_name,
                     is_builtin=0,
                 )
             )
@@ -201,6 +209,28 @@ async def update_set(
     ds.updated_at = _utcnow()
     await db.commit()
     return {"success": True}
+
+
+@router.patch("/sets/{set_id}/reading-availability")
+async def update_reading_availability(
+    set_id: int,
+    body: SetAvailabilityUpdate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ds = await _get_user_set(db, set_id, user.id)
+    if ds.is_system and not body.is_available_for_reading:
+        raise HTTPException(status_code=400, detail="系统默认集合不可移出长文本精读")
+    ds.is_available_for_reading = 1 if body.is_available_for_reading else 0
+    if not body.is_available_for_reading and ds.is_default:
+        ds.is_default = 0
+    ds.updated_at = _utcnow()
+    await db.commit()
+    return {
+        "id": ds.id,
+        "is_available_for_reading": bool(ds.is_available_for_reading),
+        "is_default": bool(ds.is_default),
+    }
 
 
 @router.delete("/sets/{set_id}")
@@ -336,6 +366,7 @@ async def import_shared(
         is_default=0,
         is_system=0,
         is_shared=0,
+        is_available_for_reading=1,
         sort_order=max_order + 1,
     )
     db.add(new_ds)
@@ -373,6 +404,8 @@ async def activate_set(
     db: AsyncSession = Depends(get_db),
 ):
     ds = await _get_user_set(db, set_id, user.id)
+    if not ds.is_available_for_reading:
+        ds.is_available_for_reading = 1
     await db.execute(
         update(DimensionSet)
         .where(DimensionSet.owner_user_id == user.id)
@@ -451,6 +484,7 @@ async def clone_set(
         description=ds.description,
         is_default=0,
         is_system=0,
+        is_available_for_reading=0,
         sort_order=max_order + 1,
     )
     db.add(new_ds)
@@ -473,6 +507,7 @@ async def clone_set(
                 prompt_content=item.prompt_content,
                 default_question=item.default_question,
                 sort_order=item.sort_order,
+                group_name=item.group_name,
                 is_builtin=0,
             )
         )
@@ -773,6 +808,7 @@ async def import_template(
         description=template.description,
         is_default=0,
         is_system=0,
+        is_available_for_reading=1,
     )
     db.add(ds)
     await db.flush()
@@ -928,6 +964,7 @@ async def save_generated_template(
         description=body.description,
         is_default=0,
         is_system=0,
+        is_available_for_reading=0,
     )
     db.add(ds)
     await db.flush()
@@ -1034,6 +1071,7 @@ async def confirm_import(
         description=body.description,
         is_default=0,
         is_system=0,
+        is_available_for_reading=0,
     )
     db.add(ds)
     await db.flush()

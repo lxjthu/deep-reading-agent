@@ -16,6 +16,7 @@ interface TemplateDetail {
   dim_count: number
   group_config: { groups: { name: string; order: number }[] } | null
   _source?: 'preset' | 'user'
+  is_available_for_reading?: boolean
   dimensions: {
     id: number
     dim_key: string
@@ -74,7 +75,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
   const [panel, setPanel] = useState<PanelView>('list')
 
   const [templates, setTemplates] = useState<Template[]>([])
-  const [userSets, setUserSets] = useState<{ id: number; name: string; description: string | null; item_count: number; is_system: boolean; is_default: boolean; is_shared: boolean }[]>([])
+  const [userSets, setUserSets] = useState<{ id: number; name: string; description: string | null; item_count: number; is_system: boolean; is_default: boolean; is_shared: boolean; is_available_for_reading: boolean }[]>([])
   const [sharedSets, setSharedSets] = useState<{ id: number; name: string; description: string | null; item_count: number; owner_name: string }[]>([])
   const [selectedCategory, setSelectedCategory] = useState('全部')
   const [importingId, setImportingId] = useState<number | null>(null)
@@ -171,7 +172,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
     setPanel('detail')
   }
 
-  const showUserSetDetail = async (setId: number, name: string, description: string | null) => {
+  const showUserSetDetail = async (setId: number, name: string, description: string | null, isAvailableForReading: boolean) => {
     setDetailLoading(true)
     setDetailTarget(null)
     try {
@@ -186,6 +187,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
           dim_count: items.length,
           group_config: null,
           _source: 'user',
+          is_available_for_reading: isAvailableForReading,
           dimensions: items.map((it: any) => ({
             id: it.id,
             dim_key: it.dim_key || '',
@@ -217,6 +219,31 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
       } else {
         const err = await res.json().catch(() => null)
         setMessage({ type: 'err', text: err?.detail || '复制失败' })
+      }
+    } catch {
+      setMessage({ type: 'err', text: '网络错误' })
+    }
+    setImportingId(null)
+  }
+
+  const setReadingAvailability = async (setId: number, available: boolean) => {
+    setImportingId(setId)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/dimensions/sets/${setId}/reading-availability`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_available_for_reading: available }),
+      })
+      if (res.ok) {
+        setMessage({ type: 'ok', text: available ? '已导入到长文本精读下拉框' : '已从长文本精读下拉框移出' })
+        void loadUserSets()
+        if (detailTarget?._source === 'user' && detailTarget.id === setId) {
+          setDetailTarget({ ...detailTarget, is_available_for_reading: available })
+        }
+      } else {
+        const err = await res.json().catch(() => null)
+        setMessage({ type: 'err', text: err?.detail || '操作失败' })
       }
     } catch {
       setMessage({ type: 'err', text: '网络错误' })
@@ -329,7 +356,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
       })
       if (res.ok) {
         const data = await res.json()
-        setMessage({ type: 'ok', text: `已保存「${data.name}」，共 ${data.dim_count} 个维度` })
+        setMessage({ type: 'ok', text: `已保存「${data.name}」，共 ${data.dim_count} 个维度。需要使用时请在模板市场点击「导入精读」。` })
         setPanel('list')
         setAiResult(null)
         setAiFile(null)
@@ -379,7 +406,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
       })
       if (res.ok) {
         const data = await res.json()
-        setMessage({ type: 'ok', text: `已导入「${data.name}」，共 ${data.dim_count} 个维度。前往「长文本精读」Tab 的维度集合下拉框即可使用。` })
+        setMessage({ type: 'ok', text: `已保存「${data.name}」，共 ${data.dim_count} 个维度。需要使用时请在模板市场点击「导入精读」。` })
         setPanel('list')
         setImportPreview(null)
         setImportFile(null)
@@ -422,6 +449,10 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
               </button>
               {detailTarget._source === 'user' && (
                 <>
+                  <button onClick={() => setReadingAvailability(detailTarget.id, !detailTarget.is_available_for_reading)} disabled={importingId === detailTarget.id}
+                    className={`rounded-lg border px-4 py-2 text-sm disabled:opacity-50 ${detailTarget.is_available_for_reading ? 'border-amber-200 text-amber-700 hover:bg-amber-50' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}>
+                    {detailTarget.is_available_for_reading ? '移出精读' : '导入精读'}
+                  </button>
                   <button onClick={() => toggleShare(detailTarget.id)} disabled={importingId === detailTarget.id}
                     className="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50">
                     共享
@@ -864,7 +895,11 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
             </div>
             <p className="mt-2 text-sm text-gray-600 line-clamp-2">{s.description || ''}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={() => showUserSetDetail(s.id, s.name, s.description)} className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-200">查看详情</button>
+              <button onClick={() => showUserSetDetail(s.id, s.name, s.description, s.is_available_for_reading)} className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-200">查看详情</button>
+              <button onClick={() => setReadingAvailability(s.id, !s.is_available_for_reading)} disabled={importingId === s.id}
+                className={`rounded-lg px-3 py-1.5 text-sm disabled:opacity-50 ${s.is_available_for_reading ? 'border border-amber-200 bg-white text-amber-700 hover:bg-amber-50' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
+                {importingId === s.id ? '处理中...' : s.is_available_for_reading ? '移出精读' : '导入精读'}
+              </button>
               <button onClick={() => cloneUserSet(s.id)} disabled={importingId === s.id}
                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700 disabled:opacity-50">
                 {importingId === s.id ? '处理中...' : '复制集合'}

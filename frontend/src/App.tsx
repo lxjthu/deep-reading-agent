@@ -7,6 +7,7 @@ import TemplateMarket from './TemplateMarket'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import { useAuthStore } from './store/auth'
 import { CompareView } from './components/CompareView'
+import ConflictDialog from './components/ConflictDialog'
 
 // Tab definitions
 const TABS = [
@@ -1119,6 +1120,8 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [overIdx, setOverIdx] = useState<number | null>(null)
   const [batchFiles, setBatchFiles] = useState<File[]>([])
   const [showBatchPreview, setShowBatchPreview] = useState(false)
+  const [conflictInfo, setConflictInfo] = useState<any>(null)
+  const pendingFileIdRef = useRef<string | null>(null)
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -1152,8 +1155,8 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
     if (res.ok) setDimensionItems(await res.json())
   }
 
-  const reloadSets = async () => {
-    const res = await fetch('/api/dimensions/sets')
+  const reloadSets = async (availableOnly = false) => {
+    const res = await fetch(availableOnly ? '/api/dimensions/sets?available_only=true' : '/api/dimensions/sets')
     if (res.ok) return await res.json()
     return []
   }
@@ -1161,9 +1164,9 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
   useEffect(() => {
     const fetchActiveSet = async () => {
       try {
-        const sets = await reloadSets()
+        const sets = await reloadSets(true)
         setDimSets(sets)
-        const active = sets.find((s: any) => s.is_default)
+        const active = sets.find((s: any) => s.is_default) || sets[0]
         if (!active) return
         setDimensionSetId(active.id)
         await reloadItems(active.id)
@@ -1189,8 +1192,43 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       setDims(items.slice(0, Math.min(3, items.length)).map((i: any) => i.dim_name))
     }
     await fetch('/api/dimensions/sets/' + setId + '/activate', { method: 'POST' })
-    const sets = await reloadSets()
+    const sets = await reloadSets(true)
     setDimSets(sets)
+  }
+
+  const currentDimSet = dimSets.find((s: any) => s.id === dimensionSetId)
+
+  const removeCurrentDimSetFromReading = async () => {
+    if (!dimensionSetId) return
+    if (currentDimSet?.is_system) {
+      setDimMessage('❌ 系统默认集合不能移出长文本精读')
+      setTimeout(() => setDimMessage(''), 2000)
+      return
+    }
+    const label = currentDimSet?.name || '当前集合'
+    if (!confirm(`确定将「${label}」移出长文本精读下拉框？集合仍会保留在模板市场，可随时重新导入。`)) return
+    try {
+      const res = await fetch(`/api/dimensions/sets/${dimensionSetId}/reading-availability`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_available_for_reading: false }),
+      })
+      if (!res.ok) throw new Error((await res.json()).detail || '移出失败')
+      const sets = await reloadSets(true)
+      setDimSets(sets)
+      const next = sets.find((s: any) => s.is_default) || sets[0]
+      if (next) {
+        await switchDimSet(next.id)
+      } else {
+        setDimensionSetId(null)
+        setDimensionItems([])
+        setDims([])
+      }
+      setDimMessage(`✓ 「${label}」已移回模板市场`)
+      setTimeout(() => setDimMessage(''), 2000)
+    } catch (e: unknown) {
+      setDimMessage(`❌ ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   const startEditDim = (item: any) => {
@@ -1299,6 +1337,28 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
     }
   }
 
+  const getCurrentDimItems = () => (
+    dimensionItems.length > 0
+      ? dimensionItems
+      : ALL_DIMS.map((name, i) => ({ id: -(i + 1), dim_name: name, is_builtin: true }))
+  )
+
+  const selectAllDims = () => {
+    setDims(getCurrentDimItems().map((item: any) => item.dim_name))
+  }
+
+  const clearAllDims = () => {
+    setDims([])
+  }
+
+  const getDimItemIndex = (target: any) => {
+    return dimensionItems.findIndex((item: any) => item.id === target.id)
+  }
+
+  const getDimDragClass = (idx: number) => (
+    `rounded transition-colors ${dragIdx !== null && dragIdx === idx ? 'opacity-40' : ''} ${overIdx !== null && overIdx === idx && dragIdx !== idx ? 'border-t-2 border-emerald-400' : ''}`
+  )
+
   const onDragEnd = async () => {
     if (dragIdx === null || overIdx === null || dragIdx === overIdx || !dimensionSetId) {
       setDragIdx(null); setOverIdx(null)
@@ -1351,6 +1411,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (!uploadData.success) throw new Error(uploadData.message)
 
       setStage('解析 PDF...'); addLog('✓ 文件上传成功')
+      pendingFileIdRef.current = uploadData.file_id
 
       const startRes = await fetch('/api/reading/long/start', {
         method: 'POST',
@@ -1358,20 +1419,27 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
         body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, dimension_set_id: dimensionSetId || undefined, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey })
       })
       if (startRes.status === 409) {
-        const err = await startRes.json()
-        const info = err.detail?.bib_entry
-        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
-        if (!ok) { setStage('已取消'); setIsRunning(false); return }
-        const retryRes = await fetch('/api/reading/long/start', {
+        const checkRes = await fetch('/api/reading/check-conflict', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: uploadData.file_id, analysis_dims: dims, dimension_set_id: dimensionSetId || undefined, custom_question: customQ || undefined, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+          body: JSON.stringify({
+            file_id: uploadData.file_id,
+            mode: 'long',
+            analysis_dims: dims,
+          }),
         })
-        const retryData = await retryRes.json()
-        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
-        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
-        await startTrackingTask(retryData.task_id)
-        return
+        const conflict = await checkRes.json()
+        if (conflict.has_conflict) {
+          setConflictInfo(conflict)
+          setStage('等待选择...')
+          setIsRunning(false)
+          return
+        }
+      }
+      if (!startRes.ok) {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || `启动失败 (${startRes.status})`
+        throw new Error(errMsg)
       }
       const startData = await startRes.json()
       const taskId = startData.task_id
@@ -1379,6 +1447,42 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       await startTrackingTask(taskId)
     } catch (error: any) {
       setStage('错误'); addLog(`❌ ${error.message}`)
+    }
+  }
+
+  const handleConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setConflictInfo(null)
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { setStage('未设置 API Key'); return }
+    const selectedDims = dims.length > 0 ? dims : ALL_DIMS
+    setIsRunning(true)
+    setStage('启动中...')
+    try {
+      const startRes = await fetch('/api/reading/long/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_id: pendingFileIdRef.current,
+          analysis_dims: selectedDims,
+          dimension_set_id: dimensionSetId || undefined,
+          custom_question: customQ || undefined,
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      if (startRes.ok) {
+        const data = await startRes.json()
+        startTrackingTask(data.task_id)
+      } else {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || '未知错误'
+        setStage(`启动失败: ${errMsg}`)
+        setIsRunning(false)
+      }
+    } catch (e: any) {
+      setStage(`错误: ${e.message}`)
+      setIsRunning(false)
     }
   }
 
@@ -1445,7 +1549,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
           custom_question: customQ || undefined,
           extraction_method: extraction,
           api_key: effectiveKey,
-          force_overwrite: true,
+          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -1505,15 +1609,25 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
 
           {dimSets.length > 1 && (
             <div className="mb-3">
-              <select
-                value={dimensionSetId ?? ''}
-                onChange={e => { if (e.target.value) switchDimSet(Number(e.target.value)) }}
-                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
-              >
-                {dimSets.map((s: any) => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.item_count} 维度){s.is_default ? ' ●' : ''}</option>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={dimensionSetId ?? ''}
+                  onChange={e => { if (e.target.value) switchDimSet(Number(e.target.value)) }}
+                  className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                >
+                  {dimSets.map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.item_count} 维度){s.is_default ? ' ●' : ''}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={removeCurrentDimSetFromReading}
+                  disabled={!dimensionSetId || currentDimSet?.is_system}
+                  className="shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="只从长文本精读下拉框移出，不删除集合"
+                >
+                  移出
+                </button>
+              </div>
             </div>
           )}
 
@@ -1527,8 +1641,16 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
 
           {dimMessage && <div className={`mb-2 text-xs ${dimMessage.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>{dimMessage}</div>}
 
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+              已选 {dims.length} / {getCurrentDimItems().length}
+            </span>
+            <button onClick={selectAllDims} className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">全选</button>
+            <button onClick={clearAllDims} className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">全不选</button>
+          </div>
+
           {(() => {
-            const allItems = dimensionItems.length > 0 ? dimensionItems : ALL_DIMS.map((name, i) => ({ id: -(i + 1), dim_name: name, is_builtin: true }))
+            const allItems = getCurrentDimItems()
             const hasGroups = dimensionItems.length > 0 && dimensionItems.some((it: any) => it.group_name)
             if (!hasGroups) {
               return (
@@ -1541,14 +1663,14 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
                       onDragOver={e => { e.preventDefault(); setOverIdx(idx) }}
                       onDragLeave={() => setOverIdx(null)}
                       onDrop={onDragEnd}
-                      className={`rounded transition-colors ${dragIdx !== null && dragIdx === idx ? 'opacity-40' : ''} ${overIdx !== null && overIdx === idx && dragIdx !== idx ? 'border-t-2 border-emerald-400' : ''}`}
+                      className={getDimDragClass(idx)}
                     >
                       <div className="flex items-center gap-1.5 p-1.5 hover:bg-gray-50 text-sm group cursor-grab active:cursor-grabbing">
                         <span className="text-gray-300 text-[10px] select-none">⠿</span>
                         <input type="checkbox" checked={dims.includes(item.dim_name)} onChange={() => toggleDim(item.dim_name)} className="rounded text-emerald-600 shrink-0" />
                         <span className="text-gray-700 flex-1 truncate">{item.dim_name}</span>
                         {dimensionItems.length > 0 && (
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          <div className="flex items-center gap-0.5 shrink-0">
                             <button onClick={() => startEditDim(item)} className="rounded px-1 py-0.5 text-[10px] text-blue-500 hover:bg-blue-50" title="编辑">✏</button>
                             <button onClick={() => deleteDim(item)} className="rounded px-1 py-0.5 text-[10px] text-red-400 hover:bg-red-50" title="删除">✕</button>
                           </div>
@@ -1584,12 +1706,23 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
                   <div key={group} className="rounded-lg border border-gray-200 p-2">
                     <div className="mb-1.5 text-xs font-medium text-gray-500">{group}</div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-0.5">
-                      {groupMap[group].map((item: any) => (
-                        <div key={item.id || item.dim_name}>
-                          <div className="flex items-center gap-1.5 p-1.5 hover:bg-gray-50 rounded text-sm group">
+                      {groupMap[group].map((item: any) => {
+                        const itemIdx = getDimItemIndex(item)
+                        return (
+                        <div
+                          key={item.id || item.dim_name}
+                          draggable={itemIdx >= 0}
+                          onDragStart={() => setDragIdx(itemIdx)}
+                          onDragOver={e => { e.preventDefault(); setOverIdx(itemIdx) }}
+                          onDragLeave={() => setOverIdx(null)}
+                          onDrop={onDragEnd}
+                          className={itemIdx >= 0 ? getDimDragClass(itemIdx) : 'rounded'}
+                        >
+                          <div className="flex items-center gap-1.5 p-1.5 hover:bg-gray-50 rounded text-sm group cursor-grab active:cursor-grabbing">
+                            <span className="text-gray-300 text-[10px] select-none">⠿</span>
                             <input type="checkbox" checked={dims.includes(item.dim_name)} onChange={() => toggleDim(item.dim_name)} className="rounded text-emerald-600 shrink-0" />
                             <span className="text-gray-700 flex-1 truncate">{item.dim_name}</span>
-                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <div className="flex items-center gap-0.5 shrink-0">
                               <button onClick={() => startEditDim(item)} className="rounded px-1 py-0.5 text-[10px] text-blue-500 hover:bg-blue-50" title="编辑">✏</button>
                               <button onClick={() => deleteDim(item)} className="rounded px-1 py-0.5 text-[10px] text-red-400 hover:bg-red-50" title="删除">✕</button>
                             </div>
@@ -1607,7 +1740,8 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
                             </div>
                           )}
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 ))}
@@ -1781,6 +1915,14 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
           </div>
         )}
       </div>
+      {conflictInfo && (
+        <ConflictDialog
+          conflict={conflictInfo}
+          mode="long"
+          onResolve={handleConflictResolve}
+          onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+        />
+      )}
     </div>
   )
 }
@@ -1791,6 +1933,8 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [extraction, setExtraction] = useState('full')
   const [batchFiles, setBatchFiles] = useState<File[]>([])
   const [showBatchPreview, setShowBatchPreview] = useState(false)
+  const [conflictInfo, setConflictInfo] = useState<any>(null)
+  const pendingFileIdRef = useRef<string | null>(null)
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -1845,6 +1989,7 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
       }
       const uploadData = await uploadRes.json()
       if (!uploadData.success) throw new Error(uploadData.message)
+      pendingFileIdRef.current = uploadData.file_id
       setStage('解析 PDF...'); addLog('✓ 文件上传成功')
 
       const startRes = await fetch('/api/reading/quant/start', {
@@ -1852,25 +1997,64 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
         body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey })
       })
       if (startRes.status === 409) {
-        const err = await startRes.json()
-        const info = err.detail?.bib_entry
-        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
-        if (!ok) { setStage('已取消'); setIsRunning(false); return }
-        const retryRes = await fetch('/api/reading/quant/start', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+        const checkRes = await fetch('/api/reading/check-conflict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_id: uploadData.file_id,
+            mode: 'quant',
+          }),
         })
-        const retryData = await retryRes.json()
-        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
-        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
-        await startTrackingTask(retryData.task_id)
-        return
+        const conflict = await checkRes.json()
+        if (conflict.has_conflict) {
+          setConflictInfo(conflict)
+          setStage('等待选择...')
+          setIsRunning(false)
+          return
+        }
+      }
+      if (!startRes.ok) {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || `启动失败 (${startRes.status})`
+        throw new Error(errMsg)
       }
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
       await startTrackingTask(taskId)
     } catch (error: any) { setStage('错误'); addLog(`❌ ${error.message}`) }
+  }
+
+  const handleConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setConflictInfo(null)
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { setStage('未设置 API Key'); return }
+    setIsRunning(true)
+    setStage('启动中...')
+    try {
+      const startRes = await fetch('/api/reading/quant/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_id: pendingFileIdRef.current,
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      if (startRes.ok) {
+        const data = await startRes.json()
+        startTrackingTask(data.task_id)
+      } else {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || '未知错误'
+        setStage(`启动失败: ${errMsg}`)
+        setIsRunning(false)
+      }
+    } catch (e: any) {
+      setStage(`错误: ${e.message}`)
+      setIsRunning(false)
+    }
   }
 
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1925,7 +2109,7 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
           mode: 'quant',
           extraction_method: extraction,
           api_key: effectiveKey,
-          force_overwrite: true,
+          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -2107,6 +2291,14 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
             </div>
           </div>
         )}
+        {conflictInfo && (
+          <ConflictDialog
+            conflict={conflictInfo}
+            mode="quant"
+            onResolve={handleConflictResolve}
+            onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+          />
+        )}
       </div>
     </div>
   )
@@ -2118,6 +2310,8 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [extraction, setExtraction] = useState('full')
   const [batchFiles, setBatchFiles] = useState<File[]>([])
   const [showBatchPreview, setShowBatchPreview] = useState(false)
+  const [conflictInfo, setConflictInfo] = useState<any>(null)
+  const pendingFileIdRef = useRef<string | null>(null)
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -2169,6 +2363,7 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
       }
       const uploadData = await uploadRes.json()
       if (!uploadData.success) throw new Error(uploadData.message)
+      pendingFileIdRef.current = uploadData.file_id
       setStage('解析 PDF...'); addLog('✓ 文件上传成功')
 
       const startRes = await fetch('/api/reading/qual/start', {
@@ -2176,25 +2371,64 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
         body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey })
       })
       if (startRes.status === 409) {
-        const err = await startRes.json()
-        const info = err.detail?.bib_entry
-        const ok = window.confirm(`该论文已经精读过（标题：${info?.title || '未知'}），是否覆盖？`)
-        if (!ok) { setStage('已取消'); setIsRunning(false); return }
-        const retryRes = await fetch('/api/reading/qual/start', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: uploadData.file_id, extraction_method: extraction, api_key: effectiveKey, force_overwrite: true })
+        const checkRes = await fetch('/api/reading/check-conflict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_id: uploadData.file_id,
+            mode: 'qual',
+          }),
         })
-        const retryData = await retryRes.json()
-        if (!retryData.task_id) throw new Error(retryData.detail || '启动失败')
-        addLog(`✓ 任务已创建（覆盖）: ${retryData.task_id}`)
-        await startTrackingTask(retryData.task_id)
-        return
+        const conflict = await checkRes.json()
+        if (conflict.has_conflict) {
+          setConflictInfo(conflict)
+          setStage('等待选择...')
+          setIsRunning(false)
+          return
+        }
+      }
+      if (!startRes.ok) {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || `启动失败 (${startRes.status})`
+        throw new Error(errMsg)
       }
       const startData = await startRes.json()
       const taskId = startData.task_id
       addLog(`✓ 任务已创建: ${taskId}`)
       await startTrackingTask(taskId)
     } catch (error: any) { setStage('错误'); addLog(`❌ ${error.message}`) }
+  }
+
+  const handleConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setConflictInfo(null)
+    const effectiveKey = promptForApiKey()
+    if (!effectiveKey) { setStage('未设置 API Key'); return }
+    setIsRunning(true)
+    setStage('启动中...')
+    try {
+      const startRes = await fetch('/api/reading/qual/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_id: pendingFileIdRef.current,
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      if (startRes.ok) {
+        const data = await startRes.json()
+        startTrackingTask(data.task_id)
+      } else {
+        const err = await startRes.json()
+        const errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail) || '未知错误'
+        setStage(`启动失败: ${errMsg}`)
+        setIsRunning(false)
+      }
+    } catch (e: any) {
+      setStage(`错误: ${e.message}`)
+      setIsRunning(false)
+    }
   }
 
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2249,7 +2483,7 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
           mode: 'qual',
           extraction_method: extraction,
           api_key: effectiveKey,
-          force_overwrite: true,
+          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -2430,6 +2664,14 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
               </div>
             </div>
           </div>
+        )}
+        {conflictInfo && (
+          <ConflictDialog
+            conflict={conflictInfo}
+            mode="qual"
+            onResolve={handleConflictResolve}
+            onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+          />
         )}
       </div>
     </div>

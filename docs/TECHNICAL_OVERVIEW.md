@@ -77,6 +77,14 @@
   - 提取字段：标题、作者、年份、期刊、DOI、卷、期、页码、摘要、关键词
   - 只补空字段不覆盖已有值，自动更新 `dedup_key` 和 `metadata_completeness`
   - **MD 文件元数据提取兼容**（2026-05-14）：`extract_front_matter()` 自动判断文件类型，MD 文件读取头部文本填充到与 PDF 相同的 dict 结构；元数据提取失败时仅记录警告不中断精读主流程
+- **精读结果多版本并存**（2026-05-16 新增，packaging 分支）
+  - 不同模式（七步/四步/长文本）精读结果互不覆盖，可并行存在
+  - 同模式重复精读时弹出 `ConflictDialog` 让用户选择：覆盖重跑 / 新增独立记录 / 增量补充（仅长文本）
+  - 长文本增量精读：复用已有维度结果，只分析新维度
+  - 后端用 `conflict_resolution` 参数（`overwrite`/`new`/`incremental`）替代旧的 `force_overwrite`
+  - 新增 `POST /api/reading/check-conflict` 端点，返回冲突详情和增量维度信息
+  - 对比综述默认取每个 bib_entry 的最新 job 结果
+  - 文献库折叠展示多条精读记录
 
 ### 2.5 对比分析与综述
 
@@ -506,18 +514,29 @@
 - 长文本 / 七步 / 四步精读
 - **批量文件夹精读**（2026-05-11 新增）
 - **精读过程中自动提取参考文献**（场景一实现）
+- **精读结果多版本并存**（2026-05-16 新增）
+  - 不同模式互不覆盖，同模式由用户选择覆盖/新增/增量
+  - `conflict_resolution` 参数（`overwrite`/`new`/`incremental`）替代 `force_overwrite`
 
 关键函数：
 
+- `resolve_conflict_mode(force_overwrite, conflict_resolution, default)`
+  - 将旧的 `force_overwrite` 和新的 `conflict_resolution` 统一为 `"overwrite"` / `"new"` / `"incremental"` / `"check"`
+- `check_conflict(request)` — **新增端点**
+  - 查询同 bib_entry + 同 mode 是否有成功 job，返回冲突详情和增量维度信息
+- `cleanup_old_reading_data(db, bib_entry, job_type)` — **改签名**
+  - 新增 `job_type` 参数，只清理同模式的旧 job，不同模式互不影响
 - `start_long_context(...)`
 - `start_quant(...)`
 - `start_qual(...)`
-  - 分别启动三类精读任务
+  - 分别启动三类精读任务，使用 `conflict_resolution` 处理冲突
 - `start_batch_reading(...)`
   - 批量精读入口，接收 `file_ids` + `mode`，循环创建 Job 并设 `batch_id`
 - `get_batch_status(...)`
   - 按 `batch_id` 聚合查询所有 job 状态，返回整体进度和每篇明细
-- `run_long_task(...)`
+- `run_long_context_task(...)`
+  - 后台线程执行长文本分析
+  - 支持 `conflict_resolution="incremental"` 增量模式：通过 `_query_prev_reading_jobs` 和 `_query_prev_reading_items` 获取已有结果，跳过已有维度
 - `run_quant_task(...)`
 - `run_qual_task(...)`
   - 后台线程执行分析
@@ -1136,7 +1155,7 @@ export_20260506_username.dra
 
 - `frontend/src/components/CompareView.tsx` — 对比综述主组件（替代 iframe）
 - `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
-- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开）
+- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开 + 维度级模式按钮）
 - `frontend/src/components/compare/PaperSelector.tsx` — 文献选择卡片
 - `frontend/src/components/compare/DimNavigation.tsx` — 维度/步骤导航胶囊
 - `frontend/src/components/compare/SynthesisModal.tsx` — AI 综述弹窗
@@ -1799,7 +1818,7 @@ v2 页面核心架构（与 v1 对比）：
 
 - `frontend/src/components/CompareView.tsx` — 对比综述主组件（新建）
 - `frontend/src/components/compare/AnswerCard.tsx` — 答案卡片（预览/完整两种模式）
-- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开）
+- `frontend/src/components/compare/AccordionPanel.tsx` — 维度折叠面板（三级展开 + 维度级模式按钮）
 - `frontend/src/components/compare/PaperSelector.tsx` — 文献选择卡片
 - `frontend/src/components/compare/DimNavigation.tsx` — 维度/步骤导航胶囊
 - `frontend/src/components/compare/SynthesisModal.tsx` — AI 综述弹窗
@@ -1838,6 +1857,21 @@ v2 页面核心架构（与 v1 对比）：
 踩坑记录：
 
 - **默认超时过短**（2026-05-14）：`OpenAI()` 不传 `timeout` 时 httpx 默认 connect 5s，走 HTTP 代理做 TLS 握手时容易超时。`deepseek_refs.py` 的重试循环只处理空响应，不捕获超时异常，导致超时直接穿透到 `_try_extract_references` 被外层 `except Exception` 吞掉并静默失败。**教训：所有 OpenAI 客户端必须显式设置超时，重试循环必须捕获超时异常**。
+
+### 8.17 对比综述维度级模式按钮
+
+改动目标：
+
+- 在对比综述的每个维度 accordion header 右侧新增三按钮（编辑/点评/AI总结），点击后该维度所有卡片同时切换到对应显示模式
+- 移除原有的 `activeModeCard` 单卡活跃限制，允许同一维度内多张卡片同时处于非 normal 模式
+- 每张卡片的实际操作（保存编辑、创建点评、触发AI总结）仍为独立单卡行为
+
+落点文件：
+
+- `frontend/src/components/compare/AccordionPanel.tsx` — 移除 `activeModeCard`，新增 `handleDimModeChange` + `dimMode` 计算，header 增加维度级按钮
+- `frontend/src/components/compare/compare.css` — 新增 `.compare-dim-mode-buttons` / `.compare-dim-mode-btn` 样式
+
+设计文档：`docs/2026-05-17-dimension-mode-buttons-design.md`
 
 ## 9. 改代码时的推荐查找路径
 

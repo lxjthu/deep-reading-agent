@@ -70,7 +70,11 @@ AI综述  → /synthesis 或 /synthesis_long → 串行逐维度 deepseek-v4-fla
 - **API Key**：Web 模式下前端传用户自己的 DeepSeek Key，后端不读 .env 兜底。Key 按用户名隔离存 localStorage。
 - **认证**：JWT（access + refresh token），401 时前端自动 refresh，失败跳登录页。
 - **提示词优先级**：用户覆盖 > 系统默认 > 文件兜底 > 代码硬编码。
-- **数据库变更**：必须同步 models.py + Alembic migration + DATABASE_SCHEMA.md。
+- **数据库变更**：必须同步 `backend/db/models.py` + Alembic migration + `docs/DATABASE_SCHEMA.md`。
+- **用户数据表变更**：凡是新增/修改与用户数据相关的表，必须同步检查 `backend/services/data_portability.py`：
+  - `CURRENT_SCHEMA_VERSION` 必须与最新 migration 编号一致；
+  - 新增用户数据表必须加入 `.dra` 导出/导入顺序，或在代码/文档中明确说明为什么排除；
+  - 涉及自增主键或跨表引用时，必须补充导入时的 id remap 逻辑。
 - **任务类型**：filter / reading_long / reading_quant / reading_qual / compare / synthesis / reference。
 - **产物类型**：filter_excel / reading_final / compare_md / synthesis_md / references_excel 等。
 - **角色**：admin / vip / normal，normal 用户数据 24h 过期自动清理。
@@ -98,6 +102,14 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 ```
 
 推送前确保：lint 通过、构建通过、本地功能正常。自动部署直接上线，无 staging 环境。
+
+## 开发工作流约束
+
+- 用户要求“先分析/先规划”时，必须先输出分析与实施规划，不得直接改代码。
+- 涉及数据库、导入导出、分支回灌、核心业务流程的改动，默认先规划，等用户确认后再实施。
+- 代码改完后先只做验证和简要说明；必须等用户本地测试成功后，才写技术文档、经验教训总结。
+- 技术文档、复盘、经验教训统一存放到 `docs/`，并同步更新 `docs/README.md` 或项目 README 的文档导航。
+- 不要在功能未验证前把文档写成“已完成”。
 
 **⚠️ 编辑大文件时（尤其 FastAPI router），替换完务必检查路由注册是否完整**：用 `python -c "from routers.xxx import router; [print(r.path) for r in router.routes]"` 验证所有端点都在。曾有替换 `apply_match` 时误将 `match_online` 路由定义连带删掉的事故。
 

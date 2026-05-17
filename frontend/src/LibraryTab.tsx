@@ -207,6 +207,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [listError, setListError] = useState('')
   const [detailError, setDetailError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
+  const [expandedTimeline, setExpandedTimeline] = useState(false)
 
   const selectedSummary = useMemo(
     () => entries.find((entry) => entry.id === selectedId) || null,
@@ -249,6 +250,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     setDetailLoading(true)
     setDetailError('')
     setSaveMessage('')
+    setExpandedTimeline(false)
     try {
       const response = await fetch(`/api/library/entries/${encodeURIComponent(entryId)}`)
       const data = await parseJsonOrThrow<LibraryEntryDetail>(response)
@@ -730,8 +732,11 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                       <div className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-sm text-gray-400">
                         这篇文献还没有关联的筛选、精读、对比或综述任务。
                       </div>
-                    ) : (
-                      detail.timeline.map((item) => (
+                    ) : (() => {
+                      const readingItems = detail.timeline.filter(t => t.job_type?.startsWith('reading_'))
+                      const otherItems = detail.timeline.filter(t => !t.job_type?.startsWith('reading_'))
+                      const displayedReading = expandedTimeline ? readingItems : readingItems.slice(0, 1)
+                      const renderItem = (item: LibraryTimelineItem) => (
                         <div key={item.job_id} className="rounded-xl border border-gray-200 bg-white p-4">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
@@ -744,7 +749,6 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                               {item.status}
                             </span>
                           </div>
-
                           <div className="mt-3 space-y-2">
                             {item.artifacts.length === 0 ? (
                               <div className="text-xs text-gray-400">该任务当前没有关联产物文件。</div>
@@ -778,8 +782,30 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                             )}
                           </div>
                         </div>
-                      ))
-                    )}
+                      )
+                      return (
+                        <>
+                          {displayedReading.map(renderItem)}
+                          {readingItems.length > 1 && !expandedTimeline && (
+                            <button
+                              onClick={() => setExpandedTimeline(true)}
+                              className="text-indigo-600 text-sm hover:underline mt-2"
+                            >
+                              查看更多 {readingItems.length - 1} 条精读记录
+                            </button>
+                          )}
+                          {expandedTimeline && readingItems.length > 1 && (
+                            <button
+                              onClick={() => setExpandedTimeline(false)}
+                              className="text-gray-500 text-sm hover:underline mt-2"
+                            >
+                              收起
+                            </button>
+                          )}
+                          {otherItems.map(renderItem)}
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
               </div>
