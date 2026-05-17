@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import AsyncSessionLocal, PROJECT_ROOT, get_db
-from db.models import Artifact, BibEntry, File, Job, JobBibEntry, ReadingItem, User
+from db.models import Artifact, BibEntry, BibReference, File, Job, JobBibEntry, ReadingItem, User
 from db.utils import compute_dedup_key, title_match_score
 from backend.routers.metadata_extractor import build_frontmatter
 from services.pdf_metadata_extract import extract_front_matter
@@ -644,6 +644,7 @@ async def _try_update_bib_metadata(
     file_path: str,
     original_name: str,
     api_key: Optional[str] = None,
+    metadata: Optional[dict] = None,
 ) -> list[str]:
     """从PDF前三页提取元数据并更新BibEntry。只补空字段，标题如果是文件名则替换。
     返回被更新的字段名列表。"""
@@ -651,15 +652,16 @@ async def _try_update_bib_metadata(
         from pathlib import Path
         from db.utils import compute_dedup_key
 
-        front_matter = extract_front_matter(file_path)
-        if not front_matter.get("page_1_full"):
-            return []
+        if metadata is None:
+            front_matter = extract_front_matter(file_path)
+            if not front_matter.get("page_1_full"):
+                return []
 
-        metadata = extract_metadata_with_llm(
-            front_matter,
-            original_name,
-            api_key=api_key,
-        )
+            metadata = extract_metadata_with_llm(
+                front_matter,
+                original_name,
+                api_key=api_key,
+            )
         if not metadata or metadata.get("confidence", 0) < 0.3:
             return []
 
@@ -822,11 +824,29 @@ def _try_extract_references(
     source_title: str,
     bib_entry_id: str,
     api_key: Optional[str] = None,
-) -> list[dict]:
-    """Try to extract references during reading. Returns artifact files on success, empty on failure."""
+) -> list[dict] | None:
+    """Try to extract references during reading.
+    Returns artifact files on success, empty list on failure, None if skipped (already exists)."""
     try:
         from routers.references import write_trace_outputs, persist_trace_success
         from services.deepseek_refs import extract_references_deepseek, trace_citations_deepseek
+
+        import asyncio
+        from db import AsyncSessionLocal
+
+        async def _has_existing_refs() -> bool:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(BibReference.id).where(
+                        BibReference.source_bib_entry_id == bib_entry_id
+                    ).limit(1)
+                )
+                return result.scalar_one_or_none() is not None
+
+        if asyncio.run(_has_existing_refs()):
+            logger = logging.getLogger(__name__)
+            logger.info("References already exist for bib_entry %s, skipping extraction", bib_entry_id)
+            return None
 
         references = extract_references_deepseek(file_path, api_key=api_key)
         if not references:
@@ -846,7 +866,6 @@ def _try_extract_references(
         artifact_files = write_trace_outputs(user_id, task_id, source_title, references)
 
         ref_task_id = str(uuid.uuid4())
-        import asyncio
         asyncio.run(_create_ref_trace_job_and_persist(
             ref_task_id, user_id, bib_entry_id, references, artifact_files,
         ))
@@ -1198,7 +1217,7 @@ def run_long_context_task(
         
         # Update BibEntry with extracted metadata
         try:
-            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
         except Exception as exc:
@@ -1232,7 +1251,9 @@ def run_long_context_task(
         ref_artifacts = _try_extract_references(
             file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
-        if ref_artifacts:
+        if ref_artifacts is None:
+            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
+        elif ref_artifacts:
             tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
         else:
             tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
@@ -1360,7 +1381,7 @@ def run_quant_task(
         
         # Update BibEntry with extracted metadata
         try:
-            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
         except Exception as exc:
@@ -1384,7 +1405,9 @@ def run_quant_task(
         ref_artifacts = _try_extract_references(
             file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
-        if ref_artifacts:
+        if ref_artifacts is None:
+            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
+        elif ref_artifacts:
             tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
         else:
             tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
@@ -1512,7 +1535,7 @@ def run_qual_task(
         
         # Update BibEntry with extracted metadata
         try:
-            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key))
+            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
         except Exception as exc:
@@ -1536,7 +1559,9 @@ def run_qual_task(
         ref_artifacts = _try_extract_references(
             file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
         )
-        if ref_artifacts:
+        if ref_artifacts is None:
+            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
+        elif ref_artifacts:
             tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
         else:
             tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
