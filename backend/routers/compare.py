@@ -326,32 +326,32 @@ async def get_reading_data(
                 ReadingItem.owner_user_id == user.id,
                 ReadingItem.mode == mode,
             )
-            .order_by(ReadingItem.bib_entry_id, ReadingItem.sort_order.asc(), ReadingItem.id.asc())
+            .order_by(ReadingItem.bib_entry_id, ReadingItem.created_at.desc(), ReadingItem.sort_order.asc(), ReadingItem.id.asc())
         )
     ).scalars().all()
 
     if not all_items:
         return {"mode": mode, "label": {"long": "长文本精读", "quant": "七步精读", "qual": "四步精读"}.get(mode, ""), "papers": []}
 
-    job_created_at: dict[str, datetime] = {}
-    for item in all_items:
-        if item.job_id not in job_created_at:
-            job_created_at[item.job_id] = item.created_at
-
-    latest_job_per_bib: dict[str, str] = {}
+    seen_keys: dict[str, set[str]] = {}
+    deduped_items: list[ReadingItem] = []
     for item in all_items:
         bib = item.bib_entry_id
-        cur = latest_job_per_bib.get(bib)
-        if cur is None or job_created_at.get(item.job_id, datetime.min) > job_created_at.get(cur, datetime.min):
-            latest_job_per_bib[bib] = item.job_id
-
-    filtered_items = [item for item in all_items if item.job_id == latest_job_per_bib.get(item.bib_entry_id)]
+        key = item.item_key
+        if bib not in seen_keys:
+            seen_keys[bib] = set()
+        if key in seen_keys[bib]:
+            continue
+        seen_keys[bib].add(key)
+        deduped_items.append(item)
 
     bib_entries_items: dict[str, list[ReadingItem]] = {}
     bib_ids: set[str] = set()
-    for item in filtered_items:
+    for item in deduped_items:
         bib_entries_items.setdefault(item.bib_entry_id, []).append(item)
         bib_ids.add(item.bib_entry_id)
+    for bib in bib_entries_items:
+        bib_entries_items[bib].sort(key=lambda it: (it.sort_order, it.id))
 
     bib_rows = (
         await db.execute(
