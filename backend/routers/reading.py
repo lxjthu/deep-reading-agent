@@ -239,6 +239,12 @@ class CheckConflictRequest(BaseModel):
     analysis_dims: Optional[list[str]] = None
 
 
+class BatchCheckConflictRequest(BaseModel):
+    file_ids: list[str]
+    mode: str
+    analysis_dims: Optional[list[str]] = None
+
+
 def resolve_conflict_mode(force_overwrite: Optional[bool], conflict_resolution: Optional[str], default: str = "check") -> str:
     if conflict_resolution in ("overwrite", "new", "incremental"):
         return conflict_resolution
@@ -1770,6 +1776,98 @@ async def start_qual(
     return {"task_id": task_id, "status": "queued"}
 
 
+@router.post("/batch/check-conflict")
+async def batch_check_conflict(
+    request: BatchCheckConflictRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.file_ids:
+        raise HTTPException(status_code=400, detail="file_ids 不能为空。")
+    if len(request.file_ids) > 50:
+        raise HTTPException(status_code=400, detail="单次最多检查 50 个文件。")
+
+    job_type_map = {"long": "reading_long", "quant": "reading_quant", "qual": "reading_qual"}
+    job_type = job_type_map.get(request.mode)
+    if not job_type:
+        raise HTTPException(status_code=400, detail="mode 必须是 long/quant/qual")
+
+    conflicts = []
+    for file_id in request.file_ids:
+        try:
+            file_record = await get_file_record(db, user, file_id)
+            ensure_readable_file_type(file_record)
+            bib_entry = await get_or_create_bib_entry(db, user, file_record)
+
+            existing_jobs = (
+                await db.execute(
+                    select(Job)
+                    .join(JobBibEntry, JobBibEntry.job_id == Job.id)
+                    .where(
+                        JobBibEntry.bib_entry_id == bib_entry.id,
+                        Job.job_type == job_type,
+                        Job.status == "success",
+                    )
+                    .order_by(Job.created_at.desc())
+                )
+            ).scalars().all()
+
+            if not existing_jobs:
+                conflicts.append({"file_id": file_id, "file_name": file_record.original_name, "has_conflict": False})
+                continue
+
+            latest = existing_jobs[0]
+            dimensions: list[str] = []
+            incremental_dims: list[str] = []
+
+            if request.analysis_dims and job_type == "reading_long":
+                existing_items = (
+                    await db.execute(
+                        select(ReadingItem)
+                        .where(
+                            ReadingItem.job_id == latest.id,
+                            ReadingItem.section_type.in_(["dimension", "custom"]),
+                        )
+                        .order_by(ReadingItem.sort_order)
+                    )
+                ).scalars().all()
+                dimensions = [it.item_label for it in existing_items]
+                existing_keys = {it.item_key for it in existing_items}
+                incremental_dims = [
+                    d for d in request.analysis_dims
+                    if LONG_DIMENSION_KEYS.get(d, f"long.{slugify_key_fragment(d)}") not in existing_keys
+                    and d not in dimensions
+                ]
+
+            conflicts.append({
+                "file_id": file_id,
+                "file_name": file_record.original_name,
+                "has_conflict": True,
+                "bib_entry": {
+                    "id": bib_entry.id,
+                    "title": bib_entry.title,
+                    "reading_status": bib_entry.reading_status,
+                },
+                "existing_job": {
+                    "job_id": latest.id,
+                    "job_type": latest.job_type,
+                    "created_at": latest.created_at.isoformat() if latest.created_at else None,
+                    "dimensions": dimensions,
+                    "mode_label": {
+                        "reading_long": "长文本精读",
+                        "reading_quant": "七步精读",
+                        "reading_qual": "四步精读",
+                    }.get(latest.job_type, latest.job_type),
+                },
+                "incremental_dims": incremental_dims,
+            })
+        except Exception:
+            conflicts.append({"file_id": file_id, "file_name": file_id, "has_conflict": False})
+
+    conflict_count = sum(1 for c in conflicts if c.get("has_conflict"))
+    return {"conflicts": conflicts, "total": len(conflicts), "conflict_count": conflict_count}
+
+
 @router.post("/batch/start")
 async def start_batch_reading(
     request: BatchReadingRequest,
@@ -1801,7 +1899,7 @@ async def start_batch_reading(
                 batch_tasks.append({"file_id": file_id, "file_name": file_record.original_name, "task_id": None, "status": "skipped", "error": "文件路径未找到"})
                 continue
             bib_entry = await get_or_create_bib_entry(db, user, file_record)
-            batch_resolution = resolve_conflict_mode(request.force_overwrite, request.conflict_resolution, default="overwrite")
+            batch_resolution = resolve_conflict_mode(request.force_overwrite, request.conflict_resolution, default="check")
             if batch_resolution == "overwrite" and bib_entry.reading_status in ("reading", "read"):
                 await cleanup_old_reading_data(db, bib_entry, job_type)
             elif batch_resolution == "check" and bib_entry.reading_status in ("reading", "read"):

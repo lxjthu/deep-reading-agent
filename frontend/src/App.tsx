@@ -8,6 +8,7 @@ import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import { useAuthStore } from './store/auth'
 import { CompareView } from './components/CompareView'
 import ConflictDialog from './components/ConflictDialog'
+import BatchConflictDialog from './components/BatchConflictDialog'
 
 // Tab definitions
 const TABS = [
@@ -679,6 +680,18 @@ interface BatchState {
   isBatchRunning: boolean
 }
 
+function persistBatchId(batchId: string | null) {
+  if (batchId) {
+    localStorage.setItem('dra_batch_task_id', batchId)
+  } else {
+    localStorage.removeItem('dra_batch_task_id')
+  }
+}
+
+function restoreBatchId(): string | null {
+  return localStorage.getItem('dra_batch_task_id')
+}
+
 function useBatchReadingTracker() {
   const [state, setState] = useState<BatchState>({
     batchId: null, total: 0, completed: 0, failed: 0, running: 0, queued: 0, tasks: [], isBatchRunning: false,
@@ -694,12 +707,14 @@ function useBatchReadingTracker() {
 
   const resetBatch = () => {
     stopPolling()
+    persistBatchId(null)
     setState({
       batchId: null, total: 0, completed: 0, failed: 0, running: 0, queued: 0, tasks: [], isBatchRunning: false,
     })
   }
 
   const startBatchTracking = (batchId: string) => {
+    persistBatchId(batchId)
     setState(prev => ({ ...prev, batchId, isBatchRunning: true }))
     const poll = async () => {
       try {
@@ -716,7 +731,10 @@ function useBatchReadingTracker() {
           tasks: data.tasks,
           isBatchRunning: !allDone,
         }))
-        if (allDone) stopPolling()
+        if (allDone) {
+          stopPolling()
+          persistBatchId(null)
+        }
       } catch {
         stopPolling()
         setState(prev => ({ ...prev, isBatchRunning: false }))
@@ -727,7 +745,14 @@ function useBatchReadingTracker() {
     pollRef.current = window.setInterval(() => void poll(), 2000)
   }
 
-  useEffect(() => () => stopPolling(), [])
+  useEffect(() => {
+    const savedBatchId = restoreBatchId()
+    if (savedBatchId) {
+      startBatchTracking(savedBatchId)
+    }
+    return () => stopPolling()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return { ...state, startBatchTracking, resetBatch }
 }
@@ -1122,6 +1147,9 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [showBatchPreview, setShowBatchPreview] = useState(false)
   const [conflictInfo, setConflictInfo] = useState<any>(null)
   const pendingFileIdRef = useRef<string | null>(null)
+  const [batchConflictInfo, setBatchConflictInfo] = useState<any>(null)
+  const pendingBatchFileIdsRef = useRef<string[]>([])
+  const pendingBatchKeyRef = useRef<string>('')
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -1537,7 +1565,22 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       }
       addLog(`✓ ${fileIds.length} 个文件上传成功`)
 
-      setStage('启动批量精读...')
+      setStage('检查冲突...')
+      const checkRes = await fetch('/api/reading/batch/check-conflict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_ids: fileIds, mode: 'long', analysis_dims: dims }),
+      })
+      const checkData = await checkRes.json()
+      if (checkData.conflict_count > 0) {
+        setBatchConflictInfo(checkData)
+        pendingBatchFileIdsRef.current = fileIds
+        pendingBatchKeyRef.current = effectiveKey
+        setStage('等待选择...')
+        setIsRunning(false)
+        return
+      }
+
       const startRes = await fetch('/api/reading/batch/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1549,7 +1592,6 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
           custom_question: customQ || undefined,
           extraction_method: extraction,
           api_key: effectiveKey,
-          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -1559,6 +1601,43 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
       addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
       if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
+      setShowBatchPreview(false)
+      batchTracker.startBatchTracking(startData.batch_id)
+    } catch (error: any) {
+      setStage('错误'); addLog(`❌ ${error.message}`)
+      setIsRunning(false)
+    }
+  }
+
+  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setBatchConflictInfo(null)
+    const fileIds = pendingBatchFileIdsRef.current
+    const effectiveKey = pendingBatchKeyRef.current
+    setIsRunning(true)
+    setStage('启动批量精读...')
+    try {
+      const startRes = await fetch('/api/reading/batch/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_ids: fileIds,
+          mode: 'long',
+          analysis_dims: dims,
+          dimension_set_id: dimensionSetId || undefined,
+          custom_question: customQ || undefined,
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      const startData = await startRes.json()
+      if (!startRes.ok || !startData.batch_id) throw new Error(startData.detail || '启动批量精读失败')
+      const queuedCount = (startData.tasks || []).filter((t: any) => t.status === 'queued').length
+      const errorCount = (startData.tasks || []).filter((t: any) => t.status === 'error').length
+      if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
+      addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
+      if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
+      if ((startData.skipped_count || 0) > 0) addLog(`ℹ ${startData.skipped_count} 个文件已有结果已跳过`)
       setShowBatchPreview(false)
       batchTracker.startBatchTracking(startData.batch_id)
     } catch (error: any) {
@@ -1923,6 +2002,15 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
           onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
         />
       )}
+      {batchConflictInfo && (
+        <BatchConflictDialog
+          conflicts={batchConflictInfo.conflicts.filter((c: any) => c.has_conflict)}
+          noConflictCount={batchConflictInfo.total - batchConflictInfo.conflict_count}
+          mode="long"
+          onResolve={handleBatchConflictResolve}
+          onCancel={() => { setBatchConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+        />
+      )}
     </div>
   )
 }
@@ -1935,6 +2023,9 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [showBatchPreview, setShowBatchPreview] = useState(false)
   const [conflictInfo, setConflictInfo] = useState<any>(null)
   const pendingFileIdRef = useRef<string | null>(null)
+  const [batchConflictInfo, setBatchConflictInfo] = useState<any>(null)
+  const pendingBatchFileIdsRef = useRef<string[]>([])
+  const pendingBatchKeyRef = useRef<string>('')
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -2100,6 +2191,22 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (failedUploads.length > 0) addLog(`⚠ ${failedUploads.length} 个文件上传失败`)
       addLog(`✓ ${fileIds.length} 个文件上传成功`)
 
+      setStage('检查冲突...')
+      const checkRes = await fetch('/api/reading/batch/check-conflict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_ids: fileIds, mode: 'quant' }),
+      })
+      const checkData = await checkRes.json()
+      if (checkData.conflict_count > 0) {
+        setBatchConflictInfo(checkData)
+        pendingBatchFileIdsRef.current = fileIds
+        pendingBatchKeyRef.current = effectiveKey
+        setStage('等待选择...')
+        setIsRunning(false)
+        return
+      }
+
       setStage('启动批量精读...')
       const startRes = await fetch('/api/reading/batch/start', {
         method: 'POST',
@@ -2109,7 +2216,6 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
           mode: 'quant',
           extraction_method: extraction,
           api_key: effectiveKey,
-          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -2119,6 +2225,40 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
       addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
       if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
+      setShowBatchPreview(false)
+      batchTracker.startBatchTracking(startData.batch_id)
+    } catch (error: any) {
+      setStage('错误'); addLog(`❌ ${error.message}`)
+      setIsRunning(false)
+    }
+  }
+
+  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setBatchConflictInfo(null)
+    const fileIds = pendingBatchFileIdsRef.current
+    const effectiveKey = pendingBatchKeyRef.current
+    setIsRunning(true)
+    setStage('启动批量精读...')
+    try {
+      const startRes = await fetch('/api/reading/batch/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_ids: fileIds,
+          mode: 'quant',
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      const startData = await startRes.json()
+      if (!startRes.ok || !startData.batch_id) throw new Error(startData.detail || '启动批量精读失败')
+      const queuedCount = (startData.tasks || []).filter((t: any) => t.status === 'queued').length
+      const errorCount = (startData.tasks || []).filter((t: any) => t.status === 'error').length
+      if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
+      addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
+      if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
+      if ((startData.skipped_count || 0) > 0) addLog(`ℹ ${startData.skipped_count} 个文件已有结果已跳过`)
       setShowBatchPreview(false)
       batchTracker.startBatchTracking(startData.batch_id)
     } catch (error: any) {
@@ -2299,6 +2439,15 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
             onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
           />
         )}
+        {batchConflictInfo && (
+          <BatchConflictDialog
+            conflicts={batchConflictInfo.conflicts.filter((c: any) => c.has_conflict)}
+            noConflictCount={batchConflictInfo.total - batchConflictInfo.conflict_count}
+            mode="quant"
+            onResolve={handleBatchConflictResolve}
+            onCancel={() => { setBatchConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+          />
+        )}
       </div>
     </div>
   )
@@ -2312,6 +2461,9 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [showBatchPreview, setShowBatchPreview] = useState(false)
   const [conflictInfo, setConflictInfo] = useState<any>(null)
   const pendingFileIdRef = useRef<string | null>(null)
+  const [batchConflictInfo, setBatchConflictInfo] = useState<any>(null)
+  const pendingBatchFileIdsRef = useRef<string[]>([])
+  const pendingBatchKeyRef = useRef<string>('')
   const batchTracker = useBatchReadingTracker()
   const {
     cancelTask,
@@ -2474,6 +2626,22 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (failedUploads.length > 0) addLog(`⚠ ${failedUploads.length} 个文件上传失败`)
       addLog(`✓ ${fileIds.length} 个文件上传成功`)
 
+      setStage('检查冲突...')
+      const checkRes = await fetch('/api/reading/batch/check-conflict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_ids: fileIds, mode: 'qual' }),
+      })
+      const checkData = await checkRes.json()
+      if (checkData.conflict_count > 0) {
+        setBatchConflictInfo(checkData)
+        pendingBatchFileIdsRef.current = fileIds
+        pendingBatchKeyRef.current = effectiveKey
+        setStage('等待选择...')
+        setIsRunning(false)
+        return
+      }
+
       setStage('启动批量精读...')
       const startRes = await fetch('/api/reading/batch/start', {
         method: 'POST',
@@ -2483,7 +2651,6 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
           mode: 'qual',
           extraction_method: extraction,
           api_key: effectiveKey,
-          conflict_resolution: 'overwrite',
         }),
       })
       const startData = await startRes.json()
@@ -2493,6 +2660,40 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
       addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
       if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
+      setShowBatchPreview(false)
+      batchTracker.startBatchTracking(startData.batch_id)
+    } catch (error: any) {
+      setStage('错误'); addLog(`❌ ${error.message}`)
+      setIsRunning(false)
+    }
+  }
+
+  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+    setBatchConflictInfo(null)
+    const fileIds = pendingBatchFileIdsRef.current
+    const effectiveKey = pendingBatchKeyRef.current
+    setIsRunning(true)
+    setStage('启动批量精读...')
+    try {
+      const startRes = await fetch('/api/reading/batch/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_ids: fileIds,
+          mode: 'qual',
+          extraction_method: extraction,
+          api_key: effectiveKey,
+          conflict_resolution: resolution,
+        }),
+      })
+      const startData = await startRes.json()
+      if (!startRes.ok || !startData.batch_id) throw new Error(startData.detail || '启动批量精读失败')
+      const queuedCount = (startData.tasks || []).filter((t: any) => t.status === 'queued').length
+      const errorCount = (startData.tasks || []).filter((t: any) => t.status === 'error').length
+      if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
+      addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
+      if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
+      if ((startData.skipped_count || 0) > 0) addLog(`ℹ ${startData.skipped_count} 个文件已有结果已跳过`)
       setShowBatchPreview(false)
       batchTracker.startBatchTracking(startData.batch_id)
     } catch (error: any) {
@@ -2671,6 +2872,15 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
             mode="qual"
             onResolve={handleConflictResolve}
             onCancel={() => { setConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
+          />
+        )}
+        {batchConflictInfo && (
+          <BatchConflictDialog
+            conflicts={batchConflictInfo.conflicts.filter((c: any) => c.has_conflict)}
+            noConflictCount={batchConflictInfo.total - batchConflictInfo.conflict_count}
+            mode="qual"
+            onResolve={handleBatchConflictResolve}
+            onCancel={() => { setBatchConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
           />
         )}
       </div>
