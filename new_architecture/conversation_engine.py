@@ -80,7 +80,11 @@ class ConversationEngine:
         if override:
             return override
 
-        base_dir = Path(__file__).resolve().parents[1]
+        import sys as _sys
+        if getattr(_sys, "frozen", False):
+            base_dir = Path(_sys._MEIPASS)
+        else:
+            base_dir = Path(__file__).resolve().parents[1]
         prompt_path = base_dir / "prompts" / "long" / f"{dimension}.md"
         if prompt_path.exists():
             content = prompt_path.read_text(encoding="utf-8").strip()

@@ -154,6 +154,7 @@
 - PyInstaller 必须显式包含运行时导入链路：`extractor`、`parsers`、`smart_literature_filter`、`services.*`、`pdfminer.high_level`、`python_multipart`、`httpx`
 - PDF 相关子模块通过 `--collect-submodules` 收集：`pdfminer`、`pdfplumber`、`pypdf`、`PyPDF2`、`fitz`
 - Excel 读写统一使用 `openpyxl`：筛选导出、参考文献导出、文献库读取筛选产物均显式指定 `engine="openpyxl"`；`xlsxwriter` 是 pandas 可选 warning，不是当前强依赖
+- **PyInstaller 打包后路径解析**：`sys.frozen=True` 时 `Path(__file__).resolve().parents[N]` 不再指向项目根目录（指向 exe 所在目录的上级），必须改用 `Path(sys._MEIPASS)` 获取 `_internal` 目录。受影响文件：`prompt_registry.py`、`db/session.py`、`new_architecture/conversation_engine.py`。新增任何通过 `__file__` 计算路径的代码时，必须同步处理 `sys.frozen` 分支
 - 每次代码改动完成后默认重新运行 `python build_web_dist.py`，并启动打包后的 exe 做 `/health` 冒烟测试
 
 ## 3. 当前架构总览
@@ -1768,6 +1769,27 @@ v2 页面核心架构（与 v1 对比）：
 - `frontend/src/components/compare/compare.css` — 新增 `.compare-dim-mode-buttons` / `.compare-dim-mode-btn` 样式
 
 设计文档：`docs/2026-05-17-dimension-mode-buttons-design.md`
+
+### 8.18 PyInstaller 打包后提示词路径修复
+
+改动目标：
+
+- 修复打包版所有提示词回退到 `get_builtin_fallback()` 简短兜底文本的问题（如"请直接输出分析内容，不要客套开场白"），导致打包版精读质量与 dev 版差距巨大
+
+根因：
+
+- PyInstaller 打包后 `Path(__file__).resolve().parents[N]` 不再指向项目根目录，而是指向 exe 所在目录的上级。`prompt_registry.py` 用 `PROJECT_ROOT / "prompts/..."` 查找提示词文件时找不到，全部回退到代码内硬编码的简短兜底文本
+- `build_web_dist.py` 通过 `--add-data=prompts;prompts` 将提示词 md 文件打包到了 `_internal/prompts/`，而 `sys._MEIPASS` 正好指向 `_internal/`
+
+落点文件：
+
+- `backend/prompt_registry.py` — `PROJECT_ROOT` 在 `sys.frozen` 时改用 `Path(sys._MEIPASS)`
+- `backend/db/session.py` — 同上，`PROJECT_ROOT` 在 `sys.frozen` 时改用 `Path(sys._MEIPASS)`
+- `new_architecture/conversation_engine.py` — `_load_dimension_prompt()` 中 `base_dir` 在 `sys.frozen` 时改用 `Path(sys._MEIPASS)`
+
+踩坑记录：
+
+- **`__file__` 路径在 frozen 环境不可靠**（2026-05-18）：PyInstaller onedir 模式下，`_internal/backend/prompt_registry.py` 的 `parents[1]` 会解析到 `_internal` 的父级（exe 所在目录），而 `prompts/` 在 `_internal/prompts/` 中。正确做法是用 `sys._MEIPASS` 获取 PyInstaller 解压的临时目录。**教训：任何通过 `__file__` 计算 `PROJECT_ROOT` 的代码，打包后都必须用 `sys._MEIPASS` 替代，并加 `getattr(sys, "frozen", False)` 分支判断**
 
 ## 9. 改代码时的推荐查找路径
 
