@@ -34,6 +34,13 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 for sub in ['_uploads', 'deep_reading_results', 'logs', 'db']:
     (DATA_DIR / sub).mkdir(exist_ok=True)
 
+if getattr(sys, 'frozen', False):
+    LOG_FILE = DATA_DIR / 'logs' / 'startup.log'
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _log = open(LOG_FILE, 'a', encoding='utf-8')
+    sys.stdout = _log
+    sys.stderr = _log
+
 env_file = DATA_DIR / '.env'
 if not env_file.exists():
     env_file.write_text(

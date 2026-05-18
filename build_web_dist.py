@@ -179,6 +179,7 @@ def build_executable():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onedir",
+        "--noconsole",
         f"--name={EXE_NAME}",
         "--clean",
         "--noconfirm",
@@ -198,19 +199,17 @@ def build_executable():
 def create_launcher():
     bat_content = r"""@echo off
 chcp 65001 >nul 2>&1
-title Deep Reading Agent
 
 echo ======================================================
 echo   Deep Reading Agent  学术论文深度精读系统
 echo ======================================================
 echo.
+echo   正在启动服务，浏览器将自动打开...
+echo   访问地址: http://localhost:8000
+echo   关闭服务请在浏览器中点击"退出"按钮
+echo.
 
-DeepReadingAgent\DeepReadingAgent.exe
-if %errorlevel% neq 0 (
-    echo.
-    echo [错误] 程序异常退出，错误代码: %errorlevel%
-)
-pause
+start "" DeepReadingAgent\DeepReadingAgent.exe
 """
     bat_path = DIST_DIR / "启动DeepReadingAgent.bat"
     bat_path.parent.mkdir(parents=True, exist_ok=True)
