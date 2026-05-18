@@ -18,6 +18,7 @@
 | P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
 | P7 | P13 Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
 | P8 | 长文本精读维度用户化 | **规划完成**，待实施 | 无 | [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md) | 用户可创建多个命名维度集合，增删改维度+提示词，一键恢复默认。涉及 `dimension_sets` + `dimension_items` 两张新表。 |
+| P9 | 前端 ESLint 规则分级治理 | 已发现规则基线问题，待规划实施 | 前端主要功能稳定后 | 无 | 当前 `npm run lint` 被大量规则阻断，需区分真正错误、可维护性警告和 React Compiler 建议类规则，避免 lint 作为上线门禁时误伤。 |
 
 ## 2. 各事项说明
 
@@ -332,6 +333,26 @@ PDF 结构复杂度：
 
 - 仍有交互和元数据链路在迭代
 - 现在启动 E2E 容易反复推翻测试用例
+
+### 2.9 前端 ESLint 规则分级治理
+
+**状态：已发现规则基线问题，待规划实施。**
+
+背景：
+
+- 当前 `frontend/eslint.config.js` 启用了 `@eslint/js`、`typescript-eslint`、`eslint-plugin-react-hooks`、`react-refresh` 的 recommended 配置。
+- `npm run lint` 会被大量既有代码阻断，已观察到约 150 个 error / 5 个 warning。
+- 主要集中在 `react-hooks/set-state-in-effect`、`@typescript-eslint/no-explicit-any`、`no-unused-vars`、`react-refresh/only-export-components`、`preserve-caught-error` 等规则。
+- 其中一部分更像规则分级或框架演进带来的基线问题，不应在数据库迁移、业务功能上线等分支中顺手大范围修改。
+
+未来治理方向：
+
+1. 先盘点规则来源与风险等级，把规则分成三类：必须阻断构建的真实错误、应逐步修复的可维护性问题、暂不适合当前代码库的建议类规则。
+2. 短期将 React Compiler/React Hooks 建议类规则降为 warning 或局部关闭，保留语法错误、未定义变量、明显类型错误等高价值 error。
+3. 中期单独开 `codex/frontend-lint-baseline` 分支，分批清理 `any`、未使用变量、异常处理等低风险问题。
+4. 长期恢复更严格的 lint 门禁，并在 CI/上线前明确区分 `lint:strict` 与 `lint:baseline`，避免未来规则升级再次阻断全项目。
+
+不在当前 PostgreSQL/Redis 迁移分支处理，避免污染数据库迁移 diff。
 
 ## 3. 建议实施顺序
 
