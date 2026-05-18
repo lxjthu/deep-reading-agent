@@ -5,12 +5,30 @@ import os
 import subprocess
 import hmac
 import hashlib
-from fastapi import APIRouter, HTTPException, Header, Request
+import threading
+import time
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
+
+from auth.dependencies import current_user
+from db.models import User
 
 router = APIRouter()
 
 DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET")
 DEPLOY_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deploy.sh")
+
+
+def is_packaged_app() -> bool:
+    return os.environ.get("DRA_PACKAGED_APP") == "1"
+
+
+def local_shutdown_allowed() -> bool:
+    return is_packaged_app() and os.environ.get("DRA_ALLOW_LOCAL_SHUTDOWN") == "1"
+
+
+def shutdown_process_later() -> None:
+    time.sleep(0.5)
+    os._exit(0)
 
 
 def verify_signature(payload: bytes, signature: str) -> bool:
@@ -56,3 +74,19 @@ async def deploy(request: Request, x_hub_signature_256: str = Header(None)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Deploy failed: {str(e)}")
+
+
+@router.get("/runtime")
+async def runtime_info():
+    return {
+        "packaged": is_packaged_app(),
+        "can_shutdown": local_shutdown_allowed(),
+    }
+
+
+@router.post("/shutdown")
+async def shutdown_app(user: User = Depends(current_user)):
+    if not local_shutdown_allowed():
+        raise HTTPException(status_code=403, detail="Local shutdown is disabled")
+    threading.Thread(target=shutdown_process_later, daemon=True).start()
+    return {"status": "shutting_down", "user": user.username}

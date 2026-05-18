@@ -73,6 +73,7 @@ function App() {
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<Record<string, unknown> | null>(null)
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null)
+  const [canShutdownApp, setCanShutdownApp] = useState(false)
 
   useEffect(() => {
     const storageKey = getApiKeyStorageKey(user?.username)
@@ -89,6 +90,21 @@ function App() {
   useEffect(() => {
     setActiveTab(getInitialTab(location.pathname, location.search))
   }, [location.pathname, location.search])
+
+  useEffect(() => {
+    let ignore = false
+    fetch('/api/deploy/runtime')
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (!ignore) setCanShutdownApp(Boolean(data?.can_shutdown))
+      })
+      .catch(() => {
+        if (!ignore) setCanShutdownApp(false)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId)
@@ -146,6 +162,25 @@ function App() {
   }
 
   const accessToken = useAuthStore((state) => state.accessToken)
+
+  const handleShutdownApp = async () => {
+    const confirmed = window.confirm('确定要退出 Deep Reading Agent 吗？本地服务会停止，当前浏览器页面将无法继续使用。')
+    if (!confirmed) return
+    setShowUserMenu(false)
+    try {
+      const response = await fetch('/api/deploy/shutdown', {
+        method: 'POST',
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.detail || `退出失败（HTTP ${response.status}）`)
+      }
+      window.alert('Deep Reading Agent 正在退出。可以关闭这个浏览器页面。')
+    } catch (err: any) {
+      window.alert(err.message || '退出应用失败')
+    }
+  }
 
   const handleExport = async () => {
     const confirmed = window.confirm(
@@ -317,6 +352,15 @@ function App() {
                       <span>退出登录</span>
                       <span>×</span>
                     </button>
+                    {canShutdownApp && (
+                      <button
+                        onClick={handleShutdownApp}
+                        className="flex w-full items-center justify-between rounded-lg bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
+                      >
+                        <span>退出应用</span>
+                        <span>⏻</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

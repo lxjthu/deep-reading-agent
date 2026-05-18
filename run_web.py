@@ -53,6 +53,8 @@ os.environ.setdefault('UPLOAD_DIR', str(DATA_DIR / '_uploads'))
 os.environ.setdefault('UPLOAD_ROOT_DIR', str(DATA_DIR / '_uploads'))
 os.environ.setdefault('RESULTS_DIR', str(DATA_DIR / 'deep_reading_results'))
 os.environ.setdefault('RESULTS_ROOT_DIR', str(DATA_DIR / 'deep_reading_results'))
+os.environ.setdefault('DRA_PACKAGED_APP', '1')
+os.environ.setdefault('DRA_ALLOW_LOCAL_SHUTDOWN', '1')
 
 print("=" * 55)
 print("  Deep Reading Agent  学术论文深度精读系统")
