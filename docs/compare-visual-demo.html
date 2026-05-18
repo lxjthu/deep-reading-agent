@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>对比分析 - 视觉效果展示</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.x/marked.min.js"></script>
+  <style>
+    :root {
+      /* 背景层 */
+      --bg-canvas: #f7f5f2;
+      --bg-surface: #ffffff;
+      --bg-surface-elevated: #ffffff;
+      --bg-hover: #f0ede8;
+      --bg-selected: #e8f0ec;
+
+      /* 文字层 */
+      --text-primary: #1c1917;
+      --text-secondary: #57534e;
+      --text-tertiary: #a8a29e;
+      --text-inverse: #ffffff;
+
+      /* 强调色 */
+      --accent-primary: #166534;
+      --accent-primary-hover: #14532d;
+      --accent-gold: #b45309;
+      --accent-coral: #9f1239;
+
+      /* 边框 */
+      --border-light: #e7e5e4;
+      --border-medium: #d6d3d1;
+      --border-focus: #166534;
+
+      /* 阴影 */
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+
+      /* 字体 */
+      --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', serif;
+      --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+      /* 字号 */
+      --text-xs: 11px;
+      --text-sm: 13px;
+      --text-base: 14px;
+      --text-lg: 16px;
+      --text-xl: 20px;
+      --text-2xl: 24px;
+
+      /* 间距 */
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-10: 40px;
+
+      /* 圆角 */
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+
+      /* 层级 */
+      --z-header: 100;
+      --z-paper-bar: 99;
+      --z-step-nav: 98;
+      --z-action-bar: 97;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg-canvas);
+      color: var(--text-primary);
+      user-select: text;
+      -webkit-user-select: text;
+      overflow-x: hidden;
+    }
+
+    /* 顶栏 */
+    .header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-light);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 var(--space-6);
+      z-index: var(--z-header);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-3);
+    }
+
+    .header-title {
+      font-family: var(--font-serif);
+      font-size: var(--text-xl);
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .header-subtitle {
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+    }
+
+    .header-btn {
+      padding: 8px 20px;
+      background: var(--accent-primary);
+      color: white;
+      border: none;
+      border-radius: var(--radius-md);
+      font-size: var(--text-sm);
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .header-btn:hover {
+      background: var(--accent-primary-hover);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .header-btn:disabled {
+      background: var(--text-tertiary);
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    /* 文献选择栏 */
+    .paper-bar {
+      position: fixed;
+      top: 56px;
+      left: 0;
+      right: 0;
+      min-height: 72px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-light);
+      padding: var(--space-4) var(--space-6);
+      display: flex;
+      gap: var(--space-3);
+      overflow-x: auto;
+      z-index: var(--z-paper-bar);
+      scrollbar-width: thin;
+    }
+
+    .paper-bar::-webkit-scrollbar {
+      height: 4px;
+    }
+
+    .paper-bar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .paper-bar::-webkit-scrollbar-thumb {
+      background: var(--border-medium);
+      border-radius: 2px;
+    }
+
+    .paper-card {
+      flex: 0 0 auto;
+      min-width: 200px;
+      max-width: 280px;
+      padding: var(--space-3) var(--space-4);
+      border-radius: var(--radius-md);
+      border: 2px solid transparent;
+      background: var(--bg-canvas);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .paper-card:hover {
+      background: var(--bg-hover);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .paper-card.selected {
+      border-color: var(--accent-primary);
+      background: var(--bg-selected);
+      animation: selectPulse 0.3s ease;
+    }
+
+    @keyframes selectPulse {
+      0% { box-shadow: 0 0 0 0 rgba(22, 101, 52, 0.2); }
+      70% { box-shadow: 0 0 0 6px rgba(22, 101, 52, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(22, 101, 52, 0); }
+    }
+
+    .paper-card-title {
+      font-size: var(--text-sm);
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .paper-card-author {
+      font-size: var(--text-xs);
+      color: var(--text-tertiary);
+      margin-top: var(--space-1);
+    }
+
+    .paper-card-check {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 18px;
+      height: 18px;
+      background: var(--accent-primary);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 10px;
+      opacity: 0;
+      transform: scale(0);
+      transition: all 0.2s ease;
+    }
+
+    .paper-card.selected .paper-card-check {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    /* 步骤导航 */
+    .step-nav {
+      position: fixed;
+      top: 128px;
+      left: 0;
+      right: 0;
+      height: 52px;
+      background: var(--bg-canvas);
+      border-bottom: 1px solid var(--border-light);
+      padding: 0 var(--space-6);
+      display: flex;
+      gap: var(--space-2);
+      align-items: center;
+      overflow-x: auto;
+      z-index: var(--z-step-nav);
+      scrollbar-width: none;
+    }
+
+    .step-nav::-webkit-scrollbar {
+      display: none;
+    }
+
+    .step-pill {
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: var(--text-sm);
+      border: 1px solid var(--border-medium);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+
+    .step-pill:hover {
+      background: var(--bg-hover);
+    }
+
+    .step-pill.active {
+      background: var(--accent-primary);
+      color: white;
+      border-color: transparent;
+      font-weight: 500;
+    }
+
+    /* 操作栏 */
+    .action-bar {
+      position: fixed;
+      top: 180px;
+      left: 0;
+      right: 0;
+      height: 48px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-light);
+      padding: 0 var(--space-6);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: var(--z-action-bar);
+    }
+
+    .action-bar-left {
+      display: flex;
+      gap: var(--space-4);
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+    }
+
+    .action-bar-right {
+      display: flex;
+      gap: var(--space-3);
+    }
+
+    .action-btn {
+      padding: 4px 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: var(--text-sm);
+      cursor: pointer;
+      border-radius: var(--radius-sm);
+      transition: all 0.15s ease;
+    }
+
+    .action-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    /* 主内容区 */
+    .main-content {
+      margin-top: 228px;
+      padding: var(--space-5) var(--space-6);
+      min-height: calc(100vh - 228px);
+    }
+
+    /* 维度列表 */
+    .dimension-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .dimension-item {
+      background: var(--bg-surface);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-light);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      animation: fadeInUp 0.4s ease-out both;
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .dimension-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 var(--space-5);
+      height: 52px;
+      cursor: pointer;
+      user-select: none;
+      transition: background-color 0.15s ease;
+    }
+
+    .dimension-header:hover {
+      background: var(--bg-hover);
+    }
+
+    .dimension-header-left {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .dimension-checkbox {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border-medium);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+
+    .dimension-checkbox:hover {
+      border-color: var(--accent-primary);
+    }
+
+    .dimension-checkbox.checked {
+      background: var(--accent-primary);
+      border-color: var(--accent-primary);
+      animation: checkPop 0.2s ease;
+    }
+
+    @keyframes checkPop {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+      100% { transform: scale(1); }
+    }
+
+    .dimension-checkbox.checked::after {
+      content: "✓";
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .dimension-number {
+      font-size: var(--text-xs);
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+      min-width: 24px;
+    }
+
+    .dimension-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .dimension-arrow {
+      transition: transform 0.25s ease;
+      color: var(--text-tertiary);
+      font-size: var(--text-sm);
+    }
+
+    .dimension-item.expanded .dimension-arrow {
+      transform: rotate(90deg);
+    }
+
+    .dimension-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      background: var(--bg-canvas);
+      border-top: 1px solid transparent;
+    }
+
+    .dimension-item.expanded .dimension-body {
+      max-height: 800px;
+      border-top-color: var(--border-light);
+    }
+
+    .paper-cards-container {
+      display: flex;
+      gap: var(--space-4);
+      padding: var(--space-4) var(--space-5) var(--space-5);
+      overflow-x: auto;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+      cursor: grab;
+    }
+
+    .paper-cards-container:active {
+      cursor: grabbing;
+    }
+
+    .paper-cards-container::-webkit-scrollbar {
+      height: 6px;
+    }
+
+    .paper-cards-container::-webkit-scrollbar-track {
+      background: transparent;
+      margin: 0 4px;
+    }
+
+    .paper-cards-container::-webkit-scrollbar-thumb {
+      background: var(--border-medium);
+      border-radius: 3px;
+    }
+
+    .paper-cards-container::-webkit-scrollbar-thumb:hover {
+      background: var(--text-tertiary);
+    }
+
+    /* 回答卡片 */
+    .answer-card {
+      flex: 0 0 auto;
+      width: 360px;
+      min-height: 200px;
+      max-height: 480px;
+      background: var(--bg-surface);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-light);
+      padding: var(--space-4);
+      overflow-y: auto;
+      user-select: text;
+      cursor: text;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+
+    .answer-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--border-medium);
+    }
+
+    .answer-card-header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-3);
+      padding-bottom: var(--space-3);
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .answer-card-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      background: var(--accent-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: var(--text-sm);
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .answer-card-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .answer-card-title {
+      font-size: var(--text-sm);
+      font-weight: 500;
+      color: var(--text-primary);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      line-height: 1.4;
+    }
+
+    .answer-card-author {
+      font-size: var(--text-xs);
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+
+    .answer-card-content {
+      font-size: var(--text-sm);
+      line-height: 1.75;
+      color: var(--text-secondary);
+      max-height: 360px;
+      overflow-y: auto;
+    }
+
+    /* Markdown 样式 */
+    .markdown-body p {
+      margin: 8px 0;
+      line-height: 1.75;
+    }
+
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3 {
+      font-size: var(--text-base);
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 12px 0 6px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .markdown-body h4,
+    .markdown-body h5,
+    .markdown-body h6 {
+      font-size: var(--text-sm);
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin: 8px 0 4px;
+    }
+
+    .markdown-body strong {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .markdown-body em {
+      font-style: italic;
+      color: var(--text-secondary);
+    }
+
+    .markdown-body blockquote {
+      margin: 10px 0;
+      padding: 10px 14px;
+      border-left: 3px solid var(--accent-gold);
+      background: rgba(180, 83, 9, 0.04);
+      border-radius: 0 6px 6px 0;
+      color: var(--text-secondary);
+    }
+
+    .markdown-body ul,
+    .markdown-body ol {
+      margin: 8px 0;
+      padding-left: 20px;
+    }
+
+    .markdown-body li {
+      margin: 4px 0;
+    }
+
+    .markdown-body li::marker {
+      color: var(--accent-primary);
+    }
+
+    .markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--text-xs);
+      margin: 10px 0;
+      border: 1px solid var(--border-medium);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .markdown-body th {
+      background: var(--bg-hover);
+      font-weight: 600;
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 2px solid var(--border-medium);
+    }
+
+    .markdown-body td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .markdown-body tr:nth-child(even) {
+      background: rgba(0,0,0,0.015);
+    }
+
+    .markdown-body code {
+      background: var(--bg-hover);
+      padding: 2px 5px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      color: var(--accent-coral);
+    }
+
+    .markdown-body pre {
+      background: #1c1917;
+      color: #e7e5e4;
+      padding: var(--space-3);
+      border-radius: var(--radius-md);
+      overflow-x: auto;
+      font-size: var(--text-xs);
+      line-height: 1.6;
+      margin: 10px 0;
+    }
+
+    .markdown-body pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+
+    .markdown-body hr {
+      border: none;
+      height: 1px;
+      background: var(--border-light);
+      margin: var(--space-4) 0;
+    }
+
+    .markdown-body a {
+      color: var(--accent-primary);
+      text-decoration: none;
+    }
+
+    .markdown-body a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <!-- 顶栏 -->
+  <header class="header">
+    <div class="header-left">
+      <span class="header-title">对比分析</span>
+      <span class="header-subtitle">七步精读 · 3 篇文献</span>
+    </div>
+    <button class="header-btn" id="aiSynthesisBtn" disabled>生成 AI 综述</button>
+  </header>
+
+  <!-- 文献选择栏 -->
+  <div class="paper-bar" id="paperBar">
+    <div class="paper-card selected" data-paper-id="paper1">
+      <div class="paper-card-check">✓</div>
+      <div class="paper-card-title">土地整治、农业新质生产力与耕地利用生态效率</div>
+      <div class="paper-card-author">朱乾隆 等</div>
+    </div>
+    <div class="paper-card selected" data-paper-id="paper2">
+      <div class="paper-card-check">✓</div>
+      <div class="paper-card-title">高标准农田建设对粮食产能的影响研究</div>
+      <div class="paper-card-author">张三 等</div>
+    </div>
+    <div class="paper-card" data-paper-id="paper3">
+      <div class="paper-card-check">✓</div>
+      <div class="paper-card-title">农业机械化与绿色生产效率提升路径分析</div>
+      <div class="paper-card-author">李四 等</div>
+    </div>
+  </div>
+
+  <!-- 步骤导航 -->
+  <div class="step-nav">
+    <button class="step-pill active">全部</button>
+    <button class="step-pill">①核心贡献</button>
+    <button class="step-pill">②理论框架</button>
+    <button class="step-pill">③方法论</button>
+    <button class="step-pill">④实证结果</button>
+    <button class="step-pill">⑤稳健性检验</button>
+    <button class="step-pill">⑥异质性分析</button>
+    <button class="step-pill">⑦政策启示</button>
+  </div>
+
+  <!-- 操作栏 -->
+  <div class="action-bar">
+    <div class="action-bar-left">
+      <span>当前步骤：核心贡献识别</span>
+      <span id="selectedCount">已选 0 个问题</span>
+    </div>
+    <div class="action-bar-right">
+      <button class="action-btn" id="selectAllBtn">当前步骤全选</button>
+      <button class="action-btn" id="clearBtn">清空选择</button>
+    </div>
+  </div>
+
+  <!-- 主内容区 -->
+  <main class="main-content">
+    <div class="dimension-list">
+      <!-- 维度 1 -->
+      <div class="dimension-item expanded" data-dimension="q1">
+        <div class="dimension-header">
+          <div class="dimension-header-left">
+            <div class="dimension-checkbox checked" data-qid="q1"></div>
+            <span class="dimension-number">1.1</span>
+            <span class="dimension-title">研究主题与核心结论</span>
+          </div>
+          <span class="dimension-arrow">▶</span>
+        </div>
+        <div class="dimension-body">
+          <div class="paper-cards-container">
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">土</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">土地整治、农业新质生产力与耕地利用生态效率</div>
+                  <div class="answer-card-author">朱乾隆 等 · 2025</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q1-p1"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">高</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">高标准农田建设对粮食产能的影响研究</div>
+                  <div class="answer-card-author">张三 等 · 2024</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q1-p2"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">农</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">农业机械化与绿色生产效率提升路径分析</div>
+                  <div class="answer-card-author">李四 等 · 2024</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q1-p3"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 维度 2 -->
+      <div class="dimension-item" data-dimension="q2">
+        <div class="dimension-header">
+          <div class="dimension-header-left">
+            <div class="dimension-checkbox" data-qid="q2"></div>
+            <span class="dimension-number">1.2</span>
+            <span class="dimension-title">问题意识</span>
+          </div>
+          <span class="dimension-arrow">▶</span>
+        </div>
+        <div class="dimension-body">
+          <div class="paper-cards-container">
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">土</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">土地整治、农业新质生产力与耕地利用生态效率</div>
+                  <div class="answer-card-author">朱乾隆 等 · 2025</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q2-p1"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">高</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">高标准农田建设对粮食产能的影响研究</div>
+                  <div class="answer-card-author">张三 等 · 2024</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q2-p2"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">农</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">农业机械化与绿色生产效率提升路径分析</div>
+                  <div class="answer-card-author">李四 等 · 2024</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q2-p3"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 维度 3 -->
+      <div class="dimension-item" data-dimension="q3">
+        <div class="dimension-header">
+          <div class="dimension-header-left">
+            <div class="dimension-checkbox" data-qid="q3"></div>
+            <span class="dimension-number">1.3</span>
+            <span class="dimension-title">重要性 (The "So What?" Question)</span>
+          </div>
+          <span class="dimension-arrow">▶</span>
+        </div>
+        <div class="dimension-body">
+          <div class="paper-cards-container">
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">土</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">土地整治、农业新质生产力与耕地利用生态效率</div>
+                  <div class="answer-card-author">朱乾隆 等 · 2025</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q3-p1"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">高</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">高标准农田建设对粮食产能的影响研究</div>
+                  <div class="answer-card-author">张三 等 · 2024</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q3-p2"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-avatar">农</div>
+                <div class="answer-card-info">
+                  <div class="answer-card-title">农业机械化与绿色生产效率提升路径分析</div>
+                  <div class="answer-card-author">李四 等 · 2024</div>
+                </div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q3-p3"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Demo 数据
+    const demoData = {
+      q1: {
+        p1: `本文利用2005-2022年中国31个省份的面板数据，采用连续型双重差分（DID）模型，实证检验了以高标准农田建设为代表的土地整治政策对耕地利用生态效率的因果效应。
+
+**核心结论是**：土地整治显著提升了耕地利用生态效率，且这一效应通过培育农业新质生产力（尤其是新质劳动对象）来实现，并在中西部、山地和粮食主产区更为突出。`,
+        p2: `基于2000-2020年省级面板数据，本文运用多期DID方法评估了高标准农田建设政策对粮食产能的影响。
+
+**核心发现**：高标准农田建设使粮食产量平均提升约**12.3%**，主要通过改善农田基础设施和推进规模化经营实现。异质性分析表明，政策效果在粮食主产区更为显著。`,
+        p3: `本文采用SBM-Undesirable模型测度了2010-2022年中国农业绿色生产效率，并运用空间杜宾模型分析了农业机械化对绿色生产效率的影响。
+
+**主要结论**：农业机械化水平每提升1%，绿色生产效率提高**0.35%**。中介效应分析表明，技术溢出和要素替代是主要传导机制。`
+      },
+      q2: {
+        p1: `- **科学问题**：土地整治（特别是高标准农田建设）能否以及如何影响耕地利用的生态效率？其中的作用机制是什么？
+- **实践与政策意义**：在保障粮食安全与推动农业绿色转型的双重目标下，传统的"改土增产"型土地整治是否具备生态效益？`,
+        p2: `- **核心问题**：高标准农田建设是否真正提升了粮食产能，还是仅改变了统计口径？
+- **现实关切**：在耕地红线约束下，如何通过存量耕地的质量提升来保障国家粮食安全？`,
+        p3: `- **研究问题**：农业机械化能否在提升生产效率的同时实现环境友好？
+- **时代背景**：在"双碳"目标下，农业领域的减排路径和技术选择是什么？`
+      },
+      q3: {
+        p1: `这个问题值得研究，因为：
+
+- **理论空白**：现有文献多关注土地整治的经济产出效应，鲜有研究将其与耕地利用生态效率因果关联。
+- **政策困境**：若不解决此问题，政策将缺乏科学依据来平衡"建设投入"与"绿色产出"。`,
+        p2: `该研究的重要性在于：
+
+- **数据稀缺性**：以往研究多使用县级或农场级数据，省级面板数据的系统性分析较少。
+- **政策评估需求**：高标准农田建设投资巨大（年均超千亿），亟需科学评估其真实效果。`,
+        p3: `研究的现实意义：
+
+- **理论创新**：将农业机械化与绿色生产效率纳入统一分析框架，拓展了农业环境经济学研究。
+- **政策参考**：为制定差异化的农业机械化推广政策提供了实证依据。`
+      }
+    };
+
+    // 渲染 Markdown 内容
+    function renderContent() {
+      Object.keys(demoData).forEach(qid => {
+        Object.keys(demoData[qid]).forEach(pid => {
+          const el = document.getElementById(`content-${qid}-${pid}`);
+          if (el) {
+            el.innerHTML = marked.parse(demoData[qid][pid]);
+          }
+        });
+      });
+    }
+
+    // 选中的问题
+    let selectedQuestions = new Set(['q1']);
+
+    // 更新选中计数
+    function updateSelectedCount() {
+      document.getElementById('selectedCount').textContent = `已选 ${selectedQuestions.size} 个问题`;
+      const aiBtn = document.getElementById('aiSynthesisBtn');
+      const selectedPapers = document.querySelectorAll('.paper-card.selected').length;
+      aiBtn.disabled = !(selectedPapers >= 2 && selectedQuestions.size >= 1);
+    }
+
+    // 维度头部点击展开/折叠
+    document.querySelectorAll('.dimension-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('.dimension-checkbox')) return;
+        const item = header.closest('.dimension-item');
+        item.classList.toggle('expanded');
+      });
+    });
+
+    // 复选框点击
+    document.querySelectorAll('.dimension-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const qid = checkbox.dataset.qid;
+        if (checkbox.classList.contains('checked')) {
+          checkbox.classList.remove('checked');
+          selectedQuestions.delete(qid);
+        } else {
+          checkbox.classList.add('checked');
+          selectedQuestions.add(qid);
+        }
+        updateSelectedCount();
+      });
+    });
+
+    // 文献卡片点击
+    document.querySelectorAll('.paper-card').forEach(card => {
+      card.addEventListener('click', () => {
+        card.classList.toggle('selected');
+        updateSelectedCount();
+      });
+    });
+
+    // 全选按钮
+    document.getElementById('selectAllBtn').addEventListener('click', () => {
+      document.querySelectorAll('.dimension-checkbox').forEach(cb => {
+        cb.classList.add('checked');
+        selectedQuestions.add(cb.dataset.qid);
+      });
+      updateSelectedCount();
+    });
+
+    // 清空按钮
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      document.querySelectorAll('.dimension-checkbox').forEach(cb => {
+        cb.classList.remove('checked');
+      });
+      selectedQuestions.clear();
+      updateSelectedCount();
+    });
+
+    // 步骤导航点击
+    document.querySelectorAll('.step-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('.step-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+      });
+    });
+
+    // 初始化
+    renderContent();
+    updateSelectedCount();
+  </script>
+</body>
+</html>

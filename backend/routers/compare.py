@@ -333,9 +333,23 @@ async def get_reading_data(
     if not all_items:
         return {"mode": mode, "label": {"long": "长文本精读", "quant": "七步精读", "qual": "四步精读"}.get(mode, ""), "papers": []}
 
+    job_created_at: dict[str, datetime] = {}
+    for item in all_items:
+        if item.job_id not in job_created_at:
+            job_created_at[item.job_id] = item.created_at
+
+    latest_job_per_bib: dict[str, str] = {}
+    for item in all_items:
+        bib = item.bib_entry_id
+        cur = latest_job_per_bib.get(bib)
+        if cur is None or job_created_at.get(item.job_id, datetime.min) > job_created_at.get(cur, datetime.min):
+            latest_job_per_bib[bib] = item.job_id
+
+    filtered_items = [item for item in all_items if item.job_id == latest_job_per_bib.get(item.bib_entry_id)]
+
     seen_keys: dict[str, set[str]] = {}
     deduped_items: list[ReadingItem] = []
-    for item in all_items:
+    for item in filtered_items:
         bib = item.bib_entry_id
         key = item.item_key
         if bib not in seen_keys:

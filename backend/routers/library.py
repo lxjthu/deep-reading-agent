@@ -125,7 +125,7 @@ def _load_abstract_translation_from_artifact(entry: BibEntry, artifact: Artifact
     import pandas as pd
 
     try:
-        df = pd.read_excel(target_path)
+        df = pd.read_excel(target_path, engine="openpyxl")
     except Exception:
         return None
 

@@ -506,7 +506,7 @@ def run_filter_task(
         for col in df_display.columns:
             if pd.api.types.is_string_dtype(df_display[col]):
                 df_display[col] = df_display[col].apply(_clean_for_excel)
-        df_display.to_excel(out_path, index=False)
+        df_display.to_excel(out_path, index=False, engine="openpyxl")
 
         async def finalize_success():
             async with AsyncSessionLocal() as db:

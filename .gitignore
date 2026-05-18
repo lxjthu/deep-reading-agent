@@ -1,6 +1,7 @@
 .env
 .venv/
 venv/
+.venv/
 __pycache__/
 *.pyc
 *.xlsx
@@ -54,5 +55,24 @@ dist/
 check_*.py
 export_*.py
 
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Local databases
+*.db
+*.sqlite
+
+# Temp scripts
+check_*.py
+export_*.py
+test_meta_prompt.py
+test_metadata_extraction.py
+test_papers_generation.py
+
 # Worktrees
 .worktrees/
+
+# .opencode
+.opencode/

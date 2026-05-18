@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import './index.css'
 import LibraryTab from './LibraryTab'
@@ -1197,7 +1197,6 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
         const active = sets.find((s: any) => s.is_default) || sets[0]
         if (!active) return
         setDimensionSetId(active.id)
-        await reloadItems(active.id)
         const itemsRes = await fetch(`/api/dimensions/sets/${active.id}/items`)
         if (!itemsRes.ok) return
         const items = await itemsRes.json()
@@ -1686,7 +1685,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
             </div>
           </div>
 
-          {dimSets.length > 1 && (
+          {dimSets.length > 0 && (
             <div className="mb-3">
               <div className="flex gap-2">
                 <select

@@ -13,11 +13,10 @@ from typing import Dict, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
-# Load .env from project root (parent of backend/)
-env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+env_path = os.environ.get('DEEP_READING_ENV', os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 load_dotenv(env_path)
 
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -31,9 +30,10 @@ from prompt_service import ensure_builtin_prompt_templates
 from template_seed import ensure_dimension_templates
 from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions
 
-# Create upload directory
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deep_reading_results")
+_UPLOAD_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
+_RESULTS_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deep_reading_results")
+UPLOAD_DIR = os.environ.get('UPLOAD_DIR', _UPLOAD_DIR_DEFAULT)
+RESULTS_DIR = os.environ.get('RESULTS_DIR', _RESULTS_DIR_DEFAULT)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -136,8 +136,21 @@ app.include_router(dimensions.router, prefix="/api/dimensions", tags=["Dimension
 app.include_router(deploy.router, prefix="/api/deploy", tags=["Deploy"])
 
 
+def get_project_root():
+    """Get project root, compatible with PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS)
+    else:
+        return Path(__file__).parent.parent
+
+project_root = get_project_root()
+frontend_dist = project_root / "frontend" / "dist"
+
+
 @app.get("/")
 async def root():
+    if frontend_dist.exists():
+        return FileResponse(frontend_dist / "index.html", media_type="text/html")
     return {
         "message": "Deep Reading Agent API",
         "version": "3.0.0",
@@ -215,11 +228,23 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
         ws_manager.disconnect(task_id)
 
 
+if frontend_dist.exists():
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        file_path = frontend_dist / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(frontend_dist / "index.html", media_type="text/html")
+    print(f"[static] Serving frontend from {frontend_dist}")
+else:
+    print(f"[static] Frontend dist not found at {frontend_dist}")
+
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8000,
-        reload=True,
+        reload=False,
         log_level="info"
     )

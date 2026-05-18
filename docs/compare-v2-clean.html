@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>长文本精读对比分析</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked@9.x/marked.min.js"></script>
+<style>
+:root {
+  --bg-canvas: #faf8f5;
+  --bg-card: #ffffff;
+  --bg-hover: #f5f2ee;
+  --bg-selected: rgba(22, 101, 52, 0.06);
+  --bg-warm: #f5efe8;
+
+  --text-primary: #2d2a26;
+  --text-secondary: #5c554d;
+  --text-tertiary: #9a9188;
+  --text-muted: #b5ada5;
+  --text-inverse: #ffffff;
+
+  --accent-green: #166534;
+  --green-hover: #14532d;
+  --accent-gold: #b45309;
+
+  --border-light: #ebe7e0;
+  --border-medium: #ddd8cf;
+
+  --shadow-sm: 0 1px 3px rgba(45, 42, 38, 0.05);
+  --shadow-md: 0 4px 12px rgba(45, 42, 38, 0.08);
+
+  --font-serif: 'Noto Serif SC', 'Songti SC', 'SimSun', serif;
+  --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  min-height: 100vh;
+  padding: 0;
+  line-height: 1.6;
+}
+
+.container {
+  width: 100%;
+  padding: 40px 60px;
+}
+
+/* 标题区域 */
+.header-section {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.header-title {
+  font-family: var(--font-serif);
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  letter-spacing: 1px;
+}
+
+.header-subtitle {
+  font-size: 16px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  max-width: 800px;
+}
+
+/* 维度选择区域 */
+.control-section {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 24px 32px;
+  margin-bottom: 24px;
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.control-row:last-child {
+  margin-bottom: 0;
+}
+
+.control-label {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.select-box {
+  padding: 10px 18px;
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  background: var(--bg-canvas);
+  font-size: 16px;
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  font-family: var(--font-sans);
+  min-width: 240px;
+}
+
+.select-box:focus {
+  border-color: var(--accent-green);
+}
+
+/* 文献选择 */
+.paper-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.paper-count {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  font-weight: 400;
+  background: var(--bg-warm);
+  padding: 4px 12px;
+  border-radius: 12px;
+}
+
+.paper-grid {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.paper-card {
+  padding: 16px 20px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border-light);
+  background: var(--bg-canvas);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 240px;
+  max-width: 320px;
+  flex: 0 0 auto;
+}
+
+.paper-card:hover {
+  border-color: var(--border-medium);
+  background: var(--bg-hover);
+}
+
+.paper-card.selected {
+  border-color: var(--accent-green);
+  background: var(--bg-selected);
+}
+
+.paper-card-title {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.5;
+}
+
+.paper-card-author {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-top: 6px;
+}
+
+/* 对比视图 */
+.compare-section {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 28px 32px;
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
+
+.compare-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.compare-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compare-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.btn-text {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  font-family: var(--font-sans);
+}
+
+.btn-text:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.btn-primary {
+  padding: 10px 28px;
+  background: var(--accent-green);
+  color: var(--text-inverse);
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font-sans);
+}
+
+.btn-primary:hover {
+  background: var(--green-hover);
+}
+
+.btn-primary:disabled {
+  background: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* 提示信息 */
+.hint-box {
+  margin-top: 20px;
+  padding: 14px 20px;
+  background: var(--bg-warm);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* 维度列表 */
+.dimension-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dimension-item {
+  background: var(--bg-canvas);
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.dimension-item:hover {
+  border-color: var(--border-medium);
+}
+
+.dimension-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s ease;
+}
+
+.dimension-header:hover {
+  background: var(--bg-hover);
+}
+
+.dimension-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.dimension-checkbox {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-medium);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.dimension-checkbox::after {
+  content: '';
+  width: 6px;
+  height: 10px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-0.5px, -0.5px);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.dimension-checkbox:hover {
+  border-color: var(--accent-green);
+}
+
+.dimension-checkbox.checked {
+  background: var(--accent-green);
+  border-color: var(--accent-green);
+}
+
+.dimension-checkbox.checked::after {
+  opacity: 1;
+}
+
+.dimension-title {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dimension-arrow {
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.dimension-item.expanded .dimension-arrow {
+  transform: rotate(90deg);
+}
+
+.dimension-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.35s ease;
+  border-top: 1px solid transparent;
+}
+
+.dimension-item.expanded .dimension-body {
+  max-height: 600px;
+  border-top-color: var(--border-light);
+}
+
+.paper-cards-container {
+  display: flex;
+  gap: 14px;
+  padding: 16px 20px 20px;
+  overflow-x: auto;
+}
+
+.paper-cards-container::-webkit-scrollbar { height: 5px; }
+.paper-cards-container::-webkit-scrollbar-track { background: transparent; }
+.paper-cards-container::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+
+.answer-card {
+  flex: 0 0 auto;
+  width: 380px;
+  min-height: 200px;
+  max-height: 450px;
+  background: var(--bg-card);
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  padding: 20px;
+  overflow-y: auto;
+  cursor: text;
+  transition: box-shadow 0.2s ease;
+}
+
+.answer-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.answer-card-header {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.answer-card-title {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.answer-card-author {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+.answer-card-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+
+/* Markdown */
+.markdown-body p { margin: 10px 0; line-height: 1.8; }
+.markdown-body strong { font-weight: 600; color: var(--text-primary); }
+.markdown-body em { font-style: italic; color: var(--text-secondary); }
+.markdown-body blockquote {
+  margin: 12px 0; padding: 12px 16px;
+  border-left: 3px solid var(--accent-gold);
+  background: rgba(180, 83, 9, 0.03);
+  border-radius: 0 6px 6px 0; color: var(--text-secondary);
+}
+.markdown-body ul, .markdown-body ol { margin: 10px 0; padding-left: 24px; }
+.markdown-body li { margin: 6px 0; }
+.markdown-body li::marker { color: var(--accent-green); }
+.markdown-body code {
+  background: var(--bg-hover); padding: 2px 6px; border-radius: 4px;
+  font-size: 13px; color: var(--accent-gold);
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- 标题区 -->
+  <div class="header-section">
+    <h1 class="header-title">长文本精读 对比分析</h1>
+    <p class="header-subtitle">
+      选择维度集合与文献，对比每篇论文在各维度上的分析结果。支持系统默认维度和用户自定义维度集合切换。
+    </p>
+  </div>
+
+  <!-- 控制区 -->
+  <div class="control-section">
+    <div class="control-row">
+      <span class="control-label">维度集合</span>
+      <select class="select-box">
+        <option>长文本精读默认维度</option>
+        <option>自定义维度集合 A</option>
+        <option>自定义维度集合 B</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- 文献选择 -->
+  <div class="control-section">
+    <div class="paper-section-title">
+      选择文献
+      <span class="paper-count" id="paperCount">2 / 3</span>
+    </div>
+    <div class="paper-grid" id="paperGrid">
+      <div class="paper-card selected" data-paper-id="paper1">
+        <div class="paper-card-title">土地整治、农业新质生产力与耕地利用生态效率</div>
+        <div class="paper-card-author">朱乾隆 等 · 2025</div>
+      </div>
+      <div class="paper-card selected" data-paper-id="paper2">
+        <div class="paper-card-title">高标准农田建设对粮食产能的影响研究</div>
+        <div class="paper-card-author">张三 等 · 2024</div>
+      </div>
+      <div class="paper-card" data-paper-id="paper3">
+        <div class="paper-card-title">农业机械化与绿色生产效率提升路径分析</div>
+        <div class="paper-card-author">李四 等 · 2024</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 对比视图 -->
+  <div class="compare-section">
+    <div class="compare-header">
+      <div class="compare-title">
+        对比视图
+        <span class="paper-count" id="dimCount">3 个维度</span>
+      </div>
+      <div class="compare-actions">
+        <button class="btn-text" id="clearBtn">全部取消</button>
+        <button class="btn-primary" id="aiSynthesisBtn" disabled>生成 AI 综述</button>
+      </div>
+    </div>
+
+    <div class="dimension-list">
+      <!-- 维度 1 -->
+      <div class="dimension-item expanded" data-dimension="q1">
+        <div class="dimension-header">
+          <div class="dimension-header-left">
+            <div class="dimension-checkbox checked" data-qid="q1"></div>
+            <span class="dimension-title">研究主题与核心结论</span>
+          </div>
+          <span class="dimension-arrow">▶</span>
+        </div>
+        <div class="dimension-body">
+          <div class="paper-cards-container">
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-title">土地整治、农业新质生产力与耕地利用生态效率</div>
+                <div class="answer-card-author">朱乾隆 等 · 2025</div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q1-p1"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-title">高标准农田建设对粮食产能的影响研究</div>
+                <div class="answer-card-author">张三 等 · 2024</div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q1-p2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 维度 2 -->
+      <div class="dimension-item" data-dimension="q2">
+        <div class="dimension-header">
+          <div class="dimension-header-left">
+            <div class="dimension-checkbox" data-qid="q2"></div>
+            <span class="dimension-title">问题意识</span>
+          </div>
+          <span class="dimension-arrow">▶</span>
+        </div>
+        <div class="dimension-body">
+          <div class="paper-cards-container">
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-title">土地整治、农业新质生产力与耕地利用生态效率</div>
+                <div class="answer-card-author">朱乾隆 等 · 2025</div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q2-p1"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-title">高标准农田建设对粮食产能的影响研究</div>
+                <div class="answer-card-author">张三 等 · 2024</div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q2-p2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 维度 3 -->
+      <div class="dimension-item" data-dimension="q3">
+        <div class="dimension-header">
+          <div class="dimension-header-left">
+            <div class="dimension-checkbox" data-qid="q3"></div>
+            <span class="dimension-title">重要性 (The "So What?" Question)</span>
+          </div>
+          <span class="dimension-arrow">▶</span>
+        </div>
+        <div class="dimension-body">
+          <div class="paper-cards-container">
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-title">土地整治、农业新质生产力与耕地利用生态效率</div>
+                <div class="answer-card-author">朱乾隆 等 · 2025</div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q3-p1"></div>
+            </div>
+            <div class="answer-card">
+              <div class="answer-card-header">
+                <div class="answer-card-title">高标准农田建设对粮食产能的影响研究</div>
+                <div class="answer-card-author">张三 等 · 2024</div>
+              </div>
+              <div class="answer-card-content markdown-body" id="content-q3-p2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hint-box">
+      AI 综述至少需要 2 篇文献，并至少选择 1 个维度
+    </div>
+  </div>
+</div>
+
+<script>
+const demoData = {
+  q1: {
+    p1: `本文利用2005-2022年中国31个省份的面板数据，采用**连续型双重差分（DID）模型**，实证检验了以高标准农田建设为代表的土地整治政策对耕地利用生态效率的因果效应。
+
+**核心结论是**：土地整治显著提升了耕地利用生态效率，且这一效应通过培育农业新质生产力（尤其是新质劳动对象）来实现，并在中西部、山地和粮食主产区更为突出。`,
+    p2: `基于2000-2020年省级面板数据，本文运用多期DID方法评估了高标准农田建设政策对粮食产能的影响。
+
+**核心发现**：高标准农田建设使粮食产量平均提升约**12.3%**，主要通过改善农田基础设施和推进规模化经营实现。`
+  },
+  q2: {
+    p1: `- **科学问题**：土地整治（特别是高标准农田建设）能否以及如何影响耕地利用的生态效率？其中的作用机制是什么？
+- **实践与政策意义**：在保障粮食安全与推动农业绿色转型的双重目标下，传统的"改土增产"型土地整治是否具备生态效益？`,
+    p2: `- **核心问题**：高标准农田建设是否真正提升了粮食产能，还是仅改变了统计口径？
+- **现实关切**：在耕地红线约束下，如何通过存量耕地的质量提升来保障国家粮食安全？`
+  },
+  q3: {
+    p1: `这个问题值得研究，因为：
+
+- **理论空白**：现有文献多关注土地整治的经济产出效应，鲜有研究将其与耕地利用生态效率因果关联。
+- **政策困境**：若不解决此问题，政策将缺乏科学依据来平衡"建设投入"与"绿色产出"。`,
+    p2: `该研究的重要性在于：
+
+- **数据稀缺性**：以往研究多使用县级或农场级数据，省级面板数据的系统性分析较少。
+- **政策评估需求**：高标准农田建设投资巨大（年均超千亿），亟需科学评估其真实效果。`
+  }
+};
+
+function renderContent() {
+  Object.keys(demoData).forEach(qid => {
+    Object.keys(demoData[qid]).forEach(pid => {
+      const el = document.getElementById(`content-${qid}-${pid}`);
+      if (el) el.innerHTML = marked.parse(demoData[qid][pid]);
+    });
+  });
+}
+
+let selectedQuestions = new Set(['q1']);
+let selectedPapers = new Set(['paper1', 'paper2']);
+
+function updateUI() {
+  document.getElementById('paperCount').textContent = `${selectedPapers.size} / 3`;
+  const dimCount = document.querySelectorAll('.dimension-checkbox.checked').length;
+  document.getElementById('dimCount').textContent = `${dimCount} 个维度`;
+
+  const aiBtn = document.getElementById('aiSynthesisBtn');
+  aiBtn.disabled = !(selectedPapers.size >= 2 && selectedQuestions.size >= 1);
+}
+
+document.querySelectorAll('.dimension-header').forEach(header => {
+  header.addEventListener('click', (e) => {
+    if (e.target.closest('.dimension-checkbox')) return;
+    const item = header.closest('.dimension-item');
+    item.classList.toggle('expanded');
+  });
+});
+
+document.querySelectorAll('.dimension-checkbox').forEach(checkbox => {
+  checkbox.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const qid = checkbox.dataset.qid;
+    if (checkbox.classList.contains('checked')) {
+      checkbox.classList.remove('checked');
+      selectedQuestions.delete(qid);
+    } else {
+      checkbox.classList.add('checked');
+      selectedQuestions.add(qid);
+    }
+    updateUI();
+  });
+});
+
+document.querySelectorAll('.paper-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const pid = card.dataset.paperId;
+    if (card.classList.contains('selected')) {
+      card.classList.remove('selected');
+      selectedPapers.delete(pid);
+    } else {
+      card.classList.add('selected');
+      selectedPapers.add(pid);
+    }
+    updateUI();
+  });
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  document.querySelectorAll('.dimension-checkbox').forEach(cb => cb.classList.remove('checked'));
+  selectedQuestions.clear();
+  updateUI();
+});
+
+renderContent();
+updateUI();
+</script>
+
+</body>
+</html>

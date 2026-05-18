@@ -10,8 +10,6 @@ from fastapi import APIRouter, HTTPException, Header, Request
 router = APIRouter()
 
 DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET")
-if not DEPLOY_SECRET:
-    raise RuntimeError("DEPLOY_SECRET environment variable is required. Set it in .env file.")
 DEPLOY_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deploy.sh")
 
 
@@ -36,6 +34,8 @@ async def deploy(request: Request, x_hub_signature_256: str = Header(None)):
     GitHub webhook endpoint for auto deployment.
     Triggered when online branch is pushed.
     """
+    if not DEPLOY_SECRET:
+        raise HTTPException(status_code=503, detail="DEPLOY_SECRET not configured")
     payload = await request.body()
 
     # Verify signature

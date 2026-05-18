@@ -35,11 +35,11 @@
 | 业务域 | 前端主入口 | 后端主入口 | 核心表 | 产物 |
 |---|---|---|---|---|
 | 认证 | `RootApp.tsx`、`auth.ts` | `routers/auth.py` | `users`、`invite_codes` | 无 |
-| API Key | `App.tsx`、`compare_*.html` | 大多数接口通过请求体传 `api_key`；仅 compare 支持环境变量兜底 | 浏览器本地存储，不入库 | 无 |
+| API Key | `App.tsx`、`CompareView` / `SynthesisModal` | 大多数接口通过请求体传 `api_key`；compare 相关生成接口也从 React 组件传入 | 浏览器本地存储，不入库 | 无 |
 | 上传 | `App.tsx` 中各上传页 | `routers/upload.py` | `files`、`bib_entries` | 用户文件 |
 | 筛选 | `FilterTab` | `routers/filter.py` | `jobs`、`bib_entries`、`bib_filter_links`、`artifacts` | `filter_excel` |
 | 精读 | `LongTab / QuantTab / QualTab` | `routers/reading.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `reading_final` |
-| 对比综述 | `compare_*.html` | `routers/compare.py`、`routers/history.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `compare_md`、`synthesis_md` |
+| 对比综述 | `CompareView` React 组件 | `routers/compare.py`、`routers/history.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `compare_md`、`synthesis_md` |
 | 文献库 | `LibraryTab.tsx` | `routers/library.py` | `bib_entries`、`bib_filter_links`、`job_bib_entries`、`artifacts` | 时间线产物 |
 | 维度模板市场 | `DimensionMarketTab` | `routers/dimensions.py` | `dimension_templates`、`template_items`、`dimension_sets`、`dimension_items` | 用户维度集 |
 | 提示词管理 | `PromptsTab` | `routers/prompts.py`、`prompt_service.py` | `prompt_templates` | 无 |
@@ -115,9 +115,8 @@
 文件：
 
 - [App.tsx](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/src/App.tsx)
-- [compare_long.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_long.html)
-- [compare_7step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_7step.html)
-- [compare_4step.html](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/public/compare_4step.html)
+- [CompareView.tsx](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/src/components/CompareView.tsx)
+- [SynthesisModal.tsx](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/frontend/src/components/compare/SynthesisModal.tsx)
 
 关键状态：
 
@@ -703,15 +702,14 @@ API Key 本身没有单独的后端管理接口。
 影响层：
 
 - 工作台主壳
-- 三个旧 compare 页面
+- 对比综述 React 组件
 - 本地浏览器存储
 
 相关文件：
 
 - `frontend/src/App.tsx`
-- `frontend/public/compare_long.html`
-- `frontend/public/compare_7step.html`
-- `frontend/public/compare_4step.html`
+- `frontend/src/components/CompareView.tsx`
+- `frontend/src/components/compare/SynthesisModal.tsx`
 
 不影响：
 
@@ -722,13 +720,13 @@ API Key 本身没有单独的后端管理接口。
 
 影响层：
 
-- compare 前端页面交互
+- compare React 前端交互
 - compare 后端请求参数
 
 相关文件：
 
-- `frontend/public/compare_7step.html`
-- `frontend/public/compare_4step.html`
+- `frontend/src/components/CompareView.tsx`
+- `frontend/src/components/compare/SynthesisModal.tsx`
 
 影响点：
 

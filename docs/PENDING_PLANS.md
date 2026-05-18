@@ -15,10 +15,11 @@
 | ~~P3.5~~ | ~~批量精读（文件夹上传）~~ | **已完成（2026-05-11）** | 无 | [实施计划](./superpowers/plans/2026-05-11-batch-folder-reading.md) | 三个 Tab 各有「上传文件夹」按钮，复用单篇精读逻辑，`POST /batch/start` + `GET /batch/{batch_id}/status`。修复了 `create_reading_job` 后缺少 `flush` 导致 `scalar_one()` 找不到新 Job 的 bug。 |
 
 | ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
-| P6 | 用户数据一键导出/导入 | **设计文档已完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | 方案 A：JSON + 文件打包为 .dra |
+| ~~P6~~ | ~~用户数据一键导出/导入~~ | **已完成（2026-05）** | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | JSON + 文件打包为 `.dra`，清空后导入策略。`data_portability.py` + `routers/data.py` 完整实现。 |
 | P7 | P13 Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
-| P8 | 长文本精读维度用户化 | **规划完成**，待实施 | 无 | [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md) | 用户可创建多个命名维度集合，增删改维度+提示词，一键恢复默认。涉及 `dimension_sets` + `dimension_items` 两张新表。 |
-| P9 | 前端 ESLint 规则分级治理 | 已发现规则基线问题，待规划实施 | 前端主要功能稳定后 | 无 | 当前 `npm run lint` 被大量规则阻断，需区分真正错误、可维护性警告和 React Compiler 建议类规则，避免 lint 作为上线门禁时误伤。 |
+| ~~P8~~ | ~~长文本精读维度用户化~~ | **已完成（2026-05）** | 无 | [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md) | 用户维度集合 + 模板市场 + AI 生成 + 文档导入 + 共享。`dimensions.py` 22 端点、`TemplateMarket.tsx`、4 张新表。 |
+| P9 | 对比页 AnswerCard 三按钮（编辑/点评/AI总结） | **设计完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-14-compare-card-actions-design.md) | AnswerCard 级三个按钮：编辑覆盖层+回退、点评模式高亮+全局点评库、AI总结模式三种子视图。新增 `reading_item_edits` + `annotations` 两张表。 |
+| P10 | 前端 ESLint 规则分级治理 | 已发现规则基线问题，待规划实施 | 前端主要功能稳定后 | 无 | 当前 `npm run lint` 被大量规则阻断，需区分真正错误、可维护性警告和 React Compiler 建议类规则，避免 lint 作为上线门禁时误伤。 |
 
 ## 2. 各事项说明
 
@@ -290,17 +291,11 @@ PDF 结构复杂度：
 
 ### 2.6 用户数据一键导出/导入
 
-**状态：设计文档已完成，待实施**
+**状态：已完成（2026-05）**
 
 设计文档：[2026-05-06-user-data-export-import-design.md](./superpowers/specs/2026-05-06-user-data-export-import-design.md)
 
-方案：JSON + 文件打包为 `.dra`（zip 格式），清空后导入策略。
-
-实施范围：
-
-1. **`backend/services/data_portability.py`**：导出打包 + 导入解包核心逻辑
-2. **`backend/routers/data.py`**：`POST /api/data/export` + `POST /api/data/import`
-3. **前端组件**：用户菜单中"导出我的数据"和"导入数据"入口 + 确认弹窗 + 进度展示
+方案：JSON + 文件打包为 `.dra`（zip 格式），清空后导入策略。已实施：`data_portability.py` + `routers/data.py` + 前端入口。
 
 ### 2.8 批量精读（文件夹上传）（P3.5）
 
@@ -322,6 +317,153 @@ PDF 结构复杂度：
 
 无需 Alembic 迁移（`batch_id` 字段已存在于 `jobs` 表）。
 
+### 2.9 对比页 AnswerCard 三按钮（P9）
+
+**状态：设计完成，待实施**
+
+设计文档：[2026-05-14-compare-card-actions-design.md](./superpowers/specs/2026-05-14-compare-card-actions-design.md)
+
+#### 功能概述
+
+在对比页（长文本/七步/四步）的每张 AnswerCard 上增加三个按钮：
+
+1. **编辑/保存**：直接编辑维度文本，保存为覆盖层（不破坏原始 AI 精读结果），支持回退到原始
+2. **点评**：进入点评模式后可选中文字高亮+写笔记，点评存入全局点评库
+3. **AI 总结**：进入 AI 总结模式后可选中文字点击 AI 总结，三种子视图切换（只显示总结/只显示原文/同时显示）
+
+#### 实施提示词（给明天的自己）
+
+##### Step 1：数据库层（先做）
+
+**1.1 新增两张表 — `backend/db/models.py`**
+
+- `ReadingItemEdit`：`reading_item_id`(FK+CASCADE) + `owner_user_id`(FK) + `edited_content`(TEXT) + `created_at` + `updated_at`，UNIQUE(item_id, owner_user_id)
+- `Annotation`：`id`(UUID TEXT PK) + `owner_user_id`(FK) + `source_type`(CHECK 'compare_card','ai_summary','library_note') + `source_id`(TEXT) + `bib_entry_id`(TEXT nullable) + `selected_text`(TEXT nullable) + `note`(TEXT NOT NULL) + `char_start`/`char_end`(INT nullable) + `is_ai_generated`(INT default 0) + `color`(TEXT nullable) + `created_at` + `updated_at`
+
+**1.2 Alembic 迁移脚本**
+
+- 文件：`backend/migrations/versions/012_add_edits_and_annotations.py`（编号接当前最新）
+- 创建两张表及索引
+
+**1.3 PromptTemplate CHECK 约束**
+
+- `models.py` 的 `PromptTemplate` 的 `prompt_type` CHECK 约束需加入 `'compare'`
+- 同步写 Alembic 迁移修改约束（或放在同一个迁移脚本里）
+
+**1.4 级联清理**
+
+- `cleanup.py` 的 `cleanup_expired()` 中增加：`reading_item_edits` 跟随 `reading_items` ON DELETE CASCADE 自动处理；`annotations` 按 `owner_user_id` 匹配过期用户清理
+- 数据导入导出 `data_portability.py`：导出/导入时包含这两张表
+
+##### Step 2：后端 API（再写路由）
+
+**2.1 编辑覆盖 API — 加在 `compare.py`**
+
+- `PUT /api/compare/reading-items/{item_id}/edit` — 权限校验：reading_item.owner_user_id == user.id
+- `DELETE /api/compare/reading-items/{item_id}/edit` — 同上
+
+**2.2 点评 CRUD API — 新建 `backend/routers/annotations.py`**
+
+独立 router，因为 annotations 是全局资源：
+
+- `POST /api/annotations` — 创建
+- `GET /api/annotations` — 查询（query: source_type?, source_id?, is_ai?, bib_entry_id?）
+- `PUT /api/annotations/{id}` — 更新
+- `DELETE /api/annotations/{id}` — 删除
+- 记得到 `main.py` 注册 router
+
+**2.3 AI 总结 API — 加在 `compare.py`**
+
+- `POST /api/compare/ai-summary` — 接收 `{ text, api_key, reading_item_id, bib_entry_id?, char_start?, char_end? }`
+- 从 `prompt_service.get_effective_prompt_map('compare')` 获取 `ai_summary` 提示词
+- 替换 `{selected_text}` 占位符
+- 调用 `deepseek-v4-flash`（复用 compare.py 中已有的 OpenAI client）
+- 创建 `annotations` 记录（`is_ai_generated=1`, `source_type='ai_summary'`）
+- 返回 `{ summary, annotation_id }`
+
+**2.4 修改现有 `GET /api/compare/reading-data`**
+
+在 `compare.py` 的 `get_reading_data()` 和 `build_compare_response()` 中：
+
+- 查询同一批 `reading_item_id` 的 `ReadingItemEdit`
+- 查询同一批 `reading_item_id` 的 `Annotation`（source_type IN ('compare_card', 'ai_summary')）
+- 在响应的每个维度项中增加 `edit: { edited_content } | null` 和 `annotations: [...]` 字段
+
+**⚠️ 改完 compare.py 务必验证路由完整性**：`python -c "from backend.routers.compare import router; [print(r.path) for r in router.routes]"`
+
+##### Step 3：提示词管理
+
+**3.1 `backend/prompt_registry.py`**
+
+- `PROMPT_REGISTRY` 新增 `"compare"` 类型，含 `"ai_summary"` 槽位
+- `PROMPT_TYPE_LABELS` 新增 `"compare": "对比分析"`
+
+**3.2 提示词文件**
+
+- 创建 `prompts/compare/ai_summary.md`，内容见设计文档 5.2 节
+
+**3.3 `prompt_service.py`**
+
+- `ensure_builtin_prompt_templates()` 会自动处理新槽位（幂等导入），无需额外改动
+
+##### Step 4：前端（最后做）
+
+**4.1 `useCompareData.ts`**
+
+- `DimItem` 接口增加 `edit?: { edited_content: string } | null`
+- `DimItem` 接口增加 `annotations?: Annotation[]`
+- 新增 `Annotation` 接口定义
+
+**4.2 `AnswerCard.tsx` — 核心改动，最大工作量**
+
+新增状态：`cardMode: 'normal' | 'editing' | 'annotating' | 'ai_summarizing'`、`aiDisplayMode`、编辑文本、选区状态等
+
+- 普通模式：右上角三个图标按钮（笔/气泡/闪电），有编辑覆盖时显示「已编辑」小标签
+- 编辑模式：内容变 textarea，底部「保存」「回退到原始」「取消」
+- 点评模式：渲染高亮标注（用 `<mark>` 包裹 selected_text 片段），mouseup 检测 Selection 弹出浮窗
+- AI 总结模式：顶部切换条（三个 radio/pill），选中文字后出现「总结」按钮
+
+关键实现技巧：
+- 高亮渲染：将 Markdown 文本按 annotations 的 char_start/char_end 拆分，非高亮部分正常 md2html，高亮部分包裹 `<mark class="compare-annotation-highlight">`
+- 文字选择：监听 `mouseup` 事件，用 `window.getSelection()` 获取选中文本和位置
+- 模式管理：AccordionPanel 管理 `cardModes` 状态，每张卡片独立持有模式；支持维度级批量切换（header 三按钮）和单卡独立切换
+- char_start/char_end 失效处理：如果存在 edit 覆盖，标注按 `selected_text` 做文本匹配而非偏移定位
+
+**4.3 `AccordionPanel.tsx`**
+
+- 新增 props：`apiKey`、`onModeChange` 回调
+- 管理 `cardModes: Record<string, CardMode>`，每张卡片独立模式
+- 维度 header 三按钮（编辑/点评/AI总结）批量切换，单卡按钮独立切换
+- 传递给 AnswerCard：`isActive`（derived from cardModes）、`cardMode`、`onModeChange`
+
+**4.4 `compare.css`**
+
+所有新样式在 `.compare-root` 作用域下：
+- `.compare-root .card-action-bar` — 按钮栏
+- `.compare-root .card-edit-area` — textarea
+- `.compare-root .compare-annotation-highlight` — 高亮
+- `.compare-root .annotation-popup` — 点评浮窗
+- `.compare-root .ai-display-switch` — AI 子视图切换条
+- `.compare-root .ai-summary-item` — 总结条目
+- keyframes 加 `compare-` 前缀
+
+**4.5 `App.tsx` PromptsTab**
+
+- `promptType` 选项增加 `compare`（类型下拉出现「对比分析」）
+
+#### 实施顺序
+
+1. `models.py` + Alembic 迁移（两张新表 + PromptTemplate CHECK 约束加 'compare'）
+2. `prompt_registry.py` + `prompts/compare/ai_summary.md`
+3. `compare.py`：修改 `get_reading_data` + 新增 edit 端点 + 新增 ai-summary 端点
+4. 新建 `annotations.py`：CRUD 端点 + `main.py` 注册 router
+5. `cleanup.py`：annotations 清理逻辑
+6. `data_portability.py`：导出/导入两张新表
+7. 前端 `useCompareData.ts`：扩展数据接口
+8. 前端 `AnswerCard.tsx` + `AccordionPanel.tsx` + `compare.css`
+9. 前端 `App.tsx` PromptsTab：新增 compare 类型
+10. 端到端测试 + router 完整性验证
+
 ### 2.7 P13 Playwright E2E + 部署验收
 
 目标：
@@ -334,7 +476,7 @@ PDF 结构复杂度：
 - 仍有交互和元数据链路在迭代
 - 现在启动 E2E 容易反复推翻测试用例
 
-### 2.9 前端 ESLint 规则分级治理
+### 2.10 前端 ESLint 规则分级治理
 
 **状态：已发现规则基线问题，待规划实施。**
 
@@ -364,7 +506,8 @@ PDF 结构复杂度：
 4. ~~`任务队列接入路由层 + 前端排队提示`~~（已完成 2026-05）
 5. `AI 综述模块重构`（P2 兜底 + P3 提示词 + P4 锚点，合并为独立模块，不侵入现有代码）
 6. `用户数据一键导出/导入`（设计已完成，实施工作量约 2-3 天）
-7. `P13 Playwright E2E + 部署验收`
+7. `对比页 AnswerCard 三按钮 — 编辑/点评/AI总结`（P9，设计完成，实施工作量约 2 天）
+8. `P13 Playwright E2E + 部署验收`
 
 ## 4. 待补充区域
 
