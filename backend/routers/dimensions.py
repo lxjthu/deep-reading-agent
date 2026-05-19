@@ -670,15 +670,15 @@ async def delete_item(
     ds, item = await _get_user_item(db, set_id, item_id, user.id)
     if ds.is_system and item.is_builtin:
         raise HTTPException(status_code=400, detail="系统集合中的内置维度不可删除，请使用恢复默认功能")
-    used = await db.execute(
+    used_count = (await db.execute(
         select(func.count()).select_from(ReadingItem).where(
             ReadingItem.owner_user_id == user.id,
             ReadingItem.mode == "long",
             ReadingItem.item_label == item.dim_name,
         )
-    )
-    if (used.scalar() or 0) > 0:
-        raise HTTPException(status_code=409, detail=f"维度「{item.dim_name}」已有 {used.scalar()} 条精读记录，无法删除")
+    )).scalar() or 0
+    if used_count > 0:
+        raise HTTPException(status_code=409, detail=f"维度「{item.dim_name}」已有 {used_count} 条精读记录，无法删除")
     await db.execute(delete(DimensionItem).where(DimensionItem.id == item_id))
     ds.updated_at = _utcnow()
     await db.commit()
@@ -877,11 +877,12 @@ async def generate_template(
     file_upload: Optional[UploadFile] = File(None),
     file_id: Optional[str] = Form(None),
     dim_count: int = Form(12),
+    force_regenerate: bool = Form(False),
     api_key: Optional[str] = Form(None),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    print(f"[generate] file_upload={file_upload}, file_id={file_id}, dim_count={dim_count}, api_key={'***' if api_key else None}")
+    print(f"[generate] file_upload={file_upload}, file_id={file_id}, dim_count={dim_count}, force_regenerate={force_regenerate}, api_key={'***' if api_key else None}")
     import traceback as _tb
     from services.ai_template_generator import generate_template_from_paper
 
@@ -928,8 +929,11 @@ async def generate_template(
         if not text or len(text.strip()) < 100:
             raise HTTPException(status_code=400, detail="无法从文件中提取有效文本（至少需要100字符）")
 
-        cache_key = hashlib.md5(text[:1000].encode()).hexdigest()
-        if cache_key in _generation_cache:
+        cache_payload = f"{user.id}:{dim_count}:".encode("utf-8") + text[:8000].encode(
+            "utf-8", errors="ignore"
+        )
+        cache_key = hashlib.sha256(cache_payload).hexdigest()
+        if not force_regenerate and cache_key in _generation_cache:
             return _generation_cache[cache_key]
 
         result = generate_template_from_paper(

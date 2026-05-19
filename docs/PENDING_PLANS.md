@@ -16,10 +16,13 @@
 
 | ~~P5~~ | ~~任务队列接入路由层 + 前端排队提示~~ | **已完成（2026-05）** | 无 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) P12.6 节 | `reading.py` 三个 start 函数已接入 enqueue、worker 首尾调用 mark_running/mark_completed、get_task_status 返回排队信息、前端 applyStatus 处理 queued + 三个 Tab 蓝色排队 UI。 |
 | ~~P6~~ | ~~用户数据一键导出/导入~~ | **已完成（2026-05）** | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | JSON + 文件打包为 `.dra`，清空后导入策略。`data_portability.py` + `routers/data.py` 完整实现。 |
-| P7 | P13 Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
+| P7 | Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
 | ~~P8~~ | ~~长文本精读维度用户化~~ | **已完成（2026-05）** | 无 | [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md) | 用户维度集合 + 模板市场 + AI 生成 + 文档导入 + 共享。`dimensions.py` 22 端点、`TemplateMarket.tsx`、4 张新表。 |
 | P9 | 对比页 AnswerCard 三按钮（编辑/点评/AI总结） | **设计完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-14-compare-card-actions-design.md) | AnswerCard 级三个按钮：编辑覆盖层+回退、点评模式高亮+全局点评库、AI总结模式三种子视图。新增 `reading_item_edits` + `annotations` 两张表。 |
 | P10 | 前端 ESLint 规则分级治理 | 已发现规则基线问题，待规划实施 | 前端主要功能稳定后 | 无 | 当前 `npm run lint` 被大量规则阻断，需区分真正错误、可维护性警告和 React Compiler 建议类规则，避免 lint 作为上线门禁时误伤。 |
+| P11 | Online 页面提供打包版下载 | 方案 B 已确定，待 online 分支实施 | OSS 打包产物已上传；服务器需配置 OSS 凭据 | 无 | 后端动态生成短期 OSS 签名 URL，前端按钮点击后请求后端获取下载链接；当前分支只记录方案，不在 packaging 直接实现。 |
+| P12 | 七步/四步小问题对比解析稳健性 | 已定位，待修复 | 无 | 无 | 2026-05-16 导出的 `.dra` 中 quant/qual 只有 step 没有 subquestion；模型输出从 `### **1. 标题**` 漂移到 `#### 1.1 标题`/`### 一、标题` 等格式，当前解析器未识别，导致对比页只能显示大维度。建议在 P9 大功能前处理。 |
+| P13 | 对比页 AI 总结选中文本未进入提示词 | 打包路径已修复，待重新打包与干净数据目录验证 | 无 | 无 | 旧打包产物运行时 `PROJECT_ROOT` 指错，找不到 `prompts/compare/ai_summary.md`，因此初始化时写入了缺少 `{selected_text}` 的 fallback 提示词；`426f8d2d` 已改为 frozen 环境使用 `sys._MEIPASS`。 |
 
 ## 2. 各事项说明
 
@@ -464,7 +467,7 @@ PDF 结构复杂度：
 9. 前端 `App.tsx` PromptsTab：新增 compare 类型
 10. 端到端测试 + router 完整性验证
 
-### 2.7 P13 Playwright E2E + 部署验收
+### 2.7 Playwright E2E + 部署验收
 
 目标：
 
@@ -496,6 +499,99 @@ PDF 结构复杂度：
 
 不在当前 PostgreSQL/Redis 迁移分支处理，避免污染数据库迁移 diff。
 
+### 2.11 Online 页面提供打包版下载
+
+**状态：方案 B 已确定，待 online 分支实施。**
+
+背景：
+
+- 当前 Windows 打包产物已上传到阿里云 OSS：`oss://lxj-pdf-upload/releases/DeepReadingAgent-Web-2026-05-18.zip`。
+- 私有 bucket 的签名 URL 有有效期，不适合把 7 天链接直接硬编码到 online 前端页面。
+- 若使用公共读固定链接，维护简单但会暴露下载入口，存在流量费用与转发风险。
+
+推荐方案：
+
+1. online 后端新增获取下载链接接口，例如 `GET /api/download-app/windows`。
+2. 服务器环境变量配置 OSS 信息与对象路径：
+   - `ALIYUN_OSS_ENDPOINT=https://oss-cn-wuhan-lr.aliyuncs.com`
+   - `ALIYUN_OSS_BUCKET=lxj-pdf-upload`
+   - `ALIYUN_OSS_APP_OBJECT=releases/DeepReadingAgent-Web-2026-05-18.zip`
+   - `ALIYUN_ACCESS_KEY_ID`
+   - `ALIYUN_ACCESS_KEY_SECRET`
+3. 后端接口即时生成短期签名 URL，建议有效期 1 小时到 24 小时。
+4. 前端 online 页面增加“下载 Windows 打包版”按钮，点击后请求该接口并跳转到返回的签名 URL。
+5. AccessKey 只放服务器环境变量，禁止进入前端 bundle、仓库文件或文档示例真实值。
+
+实施边界：
+
+- 当前 `packaging` 分支只记录方案，不直接实现 online 下载入口。
+- 后续切到 `online` 分支后再补后端接口、前端按钮与服务器环境变量配置。
+
+后续换包方式：
+
+- 上传新 zip 到 `releases/` 目录，文件名带版本或日期。
+- 更新服务器环境变量 `ALIYUN_OSS_APP_OBJECT` 指向新对象。
+- 无需修改前端静态链接，也无需每 7 天重新部署。
+
+### 2.12 七步/四步小问题对比解析稳健性
+
+**状态：已定位，待修复。**
+
+现象：
+
+- 导入 `export_20260510_test002.dra` 后，七步/四步对比页能显示小问题级卡片。
+- 导入 `export_20260516_test001.dra` 后，只能显示七步/四步的大 step 维度。
+
+已验证差异：
+
+- `export_20260510_test002.dra` 的 `reading_items` 中包含 `quant/qual` 的 `subquestion` 记录，例如 `quant.step1.q1`。
+- `export_20260516_test001.dra` 的 `reading_items` 中 `quant` 只有 49 条 `step`，`qual` 只有 20 条 `step`，没有任何 `subquestion`。
+
+根因：
+
+- 当前 `parse_markdown_numbered_sections()` 只识别很窄的标题格式：七步 `### **1. 标题**`，四步 `## 1. 标题`。
+- 2026-05-16 那批模型输出格式漂移为 `#### 1.1 标题`、`#### 1. 标题`、`### 一、标题`、`## Step 4: ...` 等，导致入库阶段没有拆出小问题。
+
+修复方向：
+
+1. 放宽后端小问题解析器，支持多种 Markdown 标题格式，并生成稳定 item_key。
+2. 对历史只有 `step` 的 `ReadingItem` 提供补齐逻辑：从 step content 重新拆出 `subquestion` 并入库。
+3. 强化七步/四步提示词格式要求，但不能只依赖模型严格遵守。
+
+优先级判断：
+
+- 该问题会影响新精读入库质量，也影响历史 `.dra` 修复，建议排在 P9 对比页大功能之前处理。
+
+### 2.13 对比页 AI 总结选中文本未进入提示词
+
+**状态：打包路径已修复，待重新打包与干净数据目录验证。**
+
+现象：
+
+- 对比页卡片进入 AI 总结模式后，选中文字并点击“AI总结”，DeepSeek 返回类似“请提供您需要总结的学术文本片段”的提示。
+- 说明前端交互能进入 AI 总结链路，但最终发给模型的 prompt 中没有包含实际选中文字。
+
+已验证：
+
+- 前端 `AnswerCard.tsx` 会把选中文字作为 `text` 字段 POST 到 `/api/compare/ai-summary`。
+- 后端 `compare.py` 会读取 `body["text"]`，并执行 `payload.effective_content.replace("{selected_text}", text)`。
+- 源码开发库 `db/app.sqlite` 中 `compare.ai_summary` 系统提示词包含 `{selected_text}`。
+- 打包产物数据目录 `dist/DeepReadingAgent/data/db/app.sqlite` 中同一条系统提示词缺少 `{selected_text}`，内容是旧 fallback：只要求总结“用户选中的学术文本片段”，但没有把片段插进去。
+
+根因：
+
+- 旧打包产物运行时 `PROJECT_ROOT` 指向错误位置，导致 `prompt_registry` 找不到已经打进包内的 `prompts/compare/ai_summary.md`。
+- 提示词文件找不到时，初始化逻辑走 `get_builtin_fallback()`，把缺少 `{selected_text}` 的旧 fallback 写入打包版数据库。
+- 这不是前端未发送选中文字；选中文字已经进入 `/api/compare/ai-summary` 请求，但错误提示词没有占位符，后端 `.replace("{selected_text}", text)` 无命中。
+- 新提交 `426f8d2d fix(packaging): use sys._MEIPASS for PROJECT_ROOT in frozen builds` 已将 frozen 环境下的资源根目录改为 `sys._MEIPASS`，应能正确读取包内 `prompts/`。
+
+验证方向：
+
+1. 用包含 `426f8d2d` 的代码重新执行 `python build_web_dist.py`。
+2. 使用干净的打包数据目录启动，确认新建的 `compare.ai_summary` 系统提示词来自 `prompts/compare/ai_summary.md` 且包含 `{selected_text}`。
+3. 在本地打包产物中登录、进入对比页、选中文字并执行 AI 总结，确认模型收到真实选中文本。
+4. 若需要兼容已经生成过错误提示词的旧数据目录，再单独评估一次性修复脚本或提示词重置入口。
+
 ## 3. 建议实施顺序
 
 建议后续按下面顺序推进：
@@ -504,10 +600,12 @@ PDF 结构复杂度：
 2. ~~`参考文献梳理标签页 + 引用关系入库`~~（已完成 2026-05）
 3. ~~`PDF 题录/元数据在线匹配增强`~~（已完成 2026-05-03）
 4. ~~`任务队列接入路由层 + 前端排队提示`~~（已完成 2026-05）
-5. `AI 综述模块重构`（P2 兜底 + P3 提示词 + P4 锚点，合并为独立模块，不侵入现有代码）
-6. `用户数据一键导出/导入`（设计已完成，实施工作量约 2-3 天）
-7. `对比页 AnswerCard 三按钮 — 编辑/点评/AI总结`（P9，设计完成，实施工作量约 2 天）
-8. `P13 Playwright E2E + 部署验收`
+5. `对比页 AI 总结选中文本未进入提示词`（P13，路径修复已提交，需重新打包并用干净数据目录验证）
+6. `七步/四步小问题对比解析稳健性`（P12，先修解析器和历史补齐，再做更大的对比页交互）
+7. `Online 页面提供打包版下载`（P11，切到 online 分支实施后端签名 URL 接口与前端下载按钮）
+8. `文献综述提示词纳入提示词管理`（P3，作为 AI 综述模块剩余项单独推进）
+9. `对比页 AnswerCard 三按钮 — 编辑/点评/AI总结`（P9，设计完成，实施工作量约 2 天）
+10. `Playwright E2E + 部署验收`（P7）
 
 ## 4. 待补充区域
 

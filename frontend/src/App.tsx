@@ -1337,7 +1337,11 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
     if (!confirm('确定删除维度「' + item.dim_name + '」？') || !dimensionSetId) return
     try {
       const res = await fetch(`/api/dimensions/sets/${dimensionSetId}/items/${item.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error((await res.json()).detail || '删除失败')
+      if (!res.ok) {
+        let detail = '删除失败'
+        try { detail = (await res.json()).detail || detail } catch {}
+        throw new Error(detail)
+      }
       setDims(prev => prev.filter(d => d !== item.dim_name))
       if (editingDim?.id === item.id) setEditingDim(null)
       await reloadItems(dimensionSetId)
@@ -1956,7 +1960,13 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
                      '○ 排队'}
                   </span>
                   {t.status === 'completed' && t.download_url && (
-                    <a href={`/api/download/${encodeURIComponent(t.download_url)}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline ml-2">下载</a>
+                    <button
+                      type="button"
+                      onClick={() => handleProtectedDownload(t.download_url, t.download_url.split('/').pop() || 'reading-report.md').catch(err => alert(err.message || '下载失败'))}
+                      className="text-blue-500 hover:underline ml-2"
+                    >
+                      下载
+                    </button>
                   )}
                 </div>
               ))}
@@ -2403,7 +2413,13 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
                      '○ 排队'}
                   </span>
                   {t.status === 'completed' && t.download_url && (
-                    <a href={`/api/download/${encodeURIComponent(t.download_url)}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline ml-2">下载</a>
+                    <button
+                      type="button"
+                      onClick={() => handleProtectedDownload(t.download_url, t.download_url.split('/').pop() || 'reading-report.md').catch(err => alert(err.message || '下载失败'))}
+                      className="text-blue-500 hover:underline ml-2"
+                    >
+                      下载
+                    </button>
                   )}
                 </div>
               ))}
@@ -2838,7 +2854,13 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
                      '○ 排队'}
                   </span>
                   {t.status === 'completed' && t.download_url && (
-                    <a href={`/api/download/${encodeURIComponent(t.download_url)}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline ml-2">下载</a>
+                    <button
+                      type="button"
+                      onClick={() => handleProtectedDownload(t.download_url, t.download_url.split('/').pop() || 'reading-report.md').catch(err => alert(err.message || '下载失败'))}
+                      className="text-blue-500 hover:underline ml-2"
+                    >
+                      下载
+                    </button>
                   )}
                 </div>
               ))}

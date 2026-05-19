@@ -88,6 +88,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
   const [aiDimCount, setAiDimCount] = useState(12)
   const [aiStep, setAiStep] = useState<'upload' | 'config' | 'generating' | 'preview'>('upload')
   const [aiResult, setAiResult] = useState<GeneratedResult | null>(null)
+  const [aiForceRegenerate, setAiForceRegenerate] = useState(false)
   const [aiSaving, setAiSaving] = useState(false)
 
   // Document import state
@@ -317,11 +318,13 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
   const startAiGeneration = async () => {
     if (!aiFile) return
     setAiStep('generating')
+    setAiResult(null)
     setMessage(null)
     try {
       const fd = new FormData()
       fd.append('file_upload', aiFile)
       fd.append('dim_count', String(aiDimCount))
+      fd.append('force_regenerate', aiForceRegenerate ? 'true' : 'false')
       if (apiKey) fd.append('api_key', apiKey)
       const res = await fetch('/api/dimensions/generate', {
         method: 'POST',
@@ -329,6 +332,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
       })
       if (res.ok) {
         setAiResult(await res.json())
+        setAiForceRegenerate(false)
         setAiStep('preview')
       } else {
         const err = await res.json().catch(() => null)
@@ -529,7 +533,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
             <div className="rounded-xl border-2 border-dashed border-gray-300 bg-white p-8 text-center cursor-pointer hover:border-emerald-400 transition-colors"
               onClick={() => aiFileRef.current?.click()}>
               <input ref={aiFileRef} type="file" accept=".pdf,.md,.txt,.markdown" className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) { setAiFile(f); setAiStep('config') } }} />
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) { setAiFile(f); setAiResult(null); setAiForceRegenerate(false); setAiStep('config') } }} />
               <div className="text-3xl mb-2">📄</div>
               <div className="text-sm text-gray-600">点击选择论文文件</div>
               <div className="text-xs text-gray-400 mt-1">支持 PDF / Markdown / TXT</div>
@@ -542,7 +546,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
             <div className="flex items-center gap-2 text-sm text-gray-700">
               <span>已选择：</span>
               <span className="font-medium text-gray-900">{aiFile?.name}</span>
-              <button onClick={() => { setAiFile(null); setAiStep('upload') }} className="text-xs text-red-500 hover:text-red-600">移除</button>
+              <button onClick={() => { setAiFile(null); setAiResult(null); setAiForceRegenerate(false); setAiStep('upload') }} className="text-xs text-red-500 hover:text-red-600">移除</button>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">期望维度数</label>
@@ -595,7 +599,7 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
                 {aiSaving ? '保存中...' : '保存为我的集合'}
               </button>
-              <button onClick={() => setAiStep('config')} className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 hover:bg-gray-200">
+              <button onClick={() => { setAiResult(null); setAiForceRegenerate(true); setAiStep('config') }} className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 hover:bg-gray-200">
                 重新生成
               </button>
             </div>

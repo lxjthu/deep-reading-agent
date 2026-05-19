@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-17
+> 最后更新：2026-05-19
 
 ---
 
@@ -45,6 +45,7 @@
 | [DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md](DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md) | 部署 | 数据库部署与迁移指南 | 服务器数据库迁移 |
 | [OPS_HEALTHCHECK_GUIDE.md](OPS_HEALTHCHECK_GUIDE.md) | 运维 | 服务器健康检查与自动恢复 | 线上故障排查 |
 | [TROUBLESHOOTING_SERVER_ERRORS.md](TROUBLESHOOTING_SERVER_ERRORS.md) | 排错 | 服务器报错排查记录（含修复方案） | **线上报错排查首选**：500错误、401错误、SQL错误等 |
+| [PACKAGING_DOWNLOAD_FILTER_REPORT_BUG.md](PACKAGING_DOWNLOAD_FILTER_REPORT_BUG.md) | 排错/修复 | 打包版产物下载、参考文献引用详情、模板市场 AI 生成等问题记录 | 排查 Windows 打包版和模板市场生成链路问题 |
 | [MIGRATION_PLAN_10PLUS_USERS.md](MIGRATION_PLAN_10PLUS_USERS.md) | 方案 | 10+ 并发用户迁移方案 | 并发扩容规划 |
 | [CONCURRENCY_ANALYSIS.md](CONCURRENCY_ANALYSIS.md) | 分析 | 多用户并发分析 | 性能瓶颈分析 |
 

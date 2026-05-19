@@ -127,6 +127,7 @@ PROMPT_CITE = """你是一个学术文献引用追踪专家。
 
 ## 约束
 - quote 必须是正文的精确子串（可以从 PDF 提取的文本中找到）
+- quote 尽量返回包含该引用的完整句子，不要只返回“张三（2020）”或“Smith (2020)”这类引用标记
 - 不确定则不输出，宁缺毋滥
 - confidence 范围 0.0-1.0
 - 如果某条参考文献在正文中没有引用，citations 为空数组"""
@@ -453,18 +454,26 @@ def trace_citations_deepseek(
         order = ref["reference_order"]
         raw_citations = trace_map.get(order, [])
         mapped = []
+        seen_citations: set[tuple[str, Optional[int]]] = set()
         for c in raw_citations:
             if (c.get("confidence") or 0) < 0.5:
                 continue
             quote = c.get("quote", "")
-            char_start = body_text.find(quote) if quote else -1
-            char_end = char_start + len(quote) if char_start >= 0 else -1
+            span = _find_quote_span(body_text, quote)
+            char_start, char_end = span if span is not None else (-1, -1)
+            dedup_key = (_normalize_for_match(quote), char_start if char_start >= 0 else None)
+            if dedup_key in seen_citations:
+                continue
+            seen_citations.add(dedup_key)
             para_info = _locate_paragraph(paragraphs, body_text, char_start)
+            excerpt = _build_citation_context(body_text, char_start, char_end)
+            if _looks_like_reference_entry(excerpt or quote):
+                continue
             mapped.append({
                 "page_label": para_info.get("page_label"),
                 "paragraph_label": para_info.get("paragraph_label"),
                 "quote_text": quote,
-                "excerpt": _expand_excerpt(body_text, char_start, char_end),
+                "excerpt": excerpt,
                 "char_start": char_start if char_start >= 0 else None,
                 "char_end": char_end if char_end >= 0 else None,
                 "match_method": c.get("citation_style", "unknown"),
@@ -568,6 +577,133 @@ def extract_body_text_md(md_path: str) -> tuple[list[dict], str]:
 
 def _is_markdown(file_path: str) -> bool:
     return file_path.lower().endswith((".md", ".markdown"))
+
+
+def _normalize_for_match(text: str) -> str:
+    return re.sub(r"\s+", "", text or "").lower()
+
+
+def _find_quote_span(text: str, quote: str) -> Optional[tuple[int, int]]:
+    if not quote:
+        return None
+
+    exact = text.find(quote)
+    if exact >= 0:
+        return exact, exact + len(quote)
+
+    normalized_chars: list[str] = []
+    index_map: list[int] = []
+    for idx, ch in enumerate(text):
+        if ch.isspace():
+            continue
+        normalized_chars.append(ch.lower())
+        index_map.append(idx)
+
+    normalized_text = "".join(normalized_chars)
+    normalized_quote = _normalize_for_match(quote)
+    if not normalized_quote:
+        return None
+
+    normalized_start = normalized_text.find(normalized_quote)
+    if normalized_start < 0:
+        return _find_author_year_span(text, quote)
+
+    normalized_end = normalized_start + len(normalized_quote) - 1
+    return index_map[normalized_start], index_map[normalized_end] + 1
+
+
+def _find_author_year_span(text: str, quote: str) -> Optional[tuple[int, int]]:
+    year_match = re.search(r"(?:19|20)\d{2}", quote)
+    if year_match is None:
+        return None
+
+    year = year_match.group(0)
+    author_part = quote[: year_match.start()]
+    author_part = author_part.strip(" \t\r\n([{（【,，;；:：、")
+    author_part = re.sub(r"[([{（【,，;；:：、\s]+$", "", author_part)
+    author_part = re.sub(r"(等|et\s+al\.?)$", "", author_part, flags=re.IGNORECASE).strip()
+    if len(author_part) < 2:
+        return None
+
+    normalized_author = _normalize_for_match(author_part)
+    for match in re.finditer(re.escape(year), text):
+        window_start = max(0, match.start() - 80)
+        window_end = min(len(text), match.end() + 20)
+        window = text[window_start:window_end]
+
+        normalized_chars: list[str] = []
+        index_map: list[int] = []
+        for offset, ch in enumerate(window):
+            if ch.isspace():
+                continue
+            normalized_chars.append(ch.lower())
+            index_map.append(window_start + offset)
+
+        normalized_window = "".join(normalized_chars)
+        author_pos = normalized_window.find(normalized_author)
+        if author_pos < 0:
+            continue
+
+        start = index_map[author_pos]
+        end = match.end()
+        return start, end
+
+    return None
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    start = 0
+    sentence_end_chars = set("。！？!?；;")
+    for idx, ch in enumerate(text):
+        if ch not in sentence_end_chars:
+            continue
+        end = idx + 1
+        while end < len(text) and text[end] in "\"'”’）)]} \t\r\n":
+            end += 1
+        if text[start:end].strip():
+            spans.append((start, end))
+        start = end
+    if text[start:].strip():
+        spans.append((start, len(text)))
+    return spans
+
+
+def _build_citation_context(text: str, start: int, end: int, *, neighbor_sentences: int = 1) -> Optional[str]:
+    if start < 0 or end < 0:
+        return None
+
+    spans = _sentence_spans(text)
+    if not spans:
+        return _expand_excerpt(text, start, end)
+
+    hit_index = None
+    for idx, (span_start, span_end) in enumerate(spans):
+        if span_start <= start < span_end or (start <= span_start and end >= span_start):
+            hit_index = idx
+            break
+    if hit_index is None:
+        return _expand_excerpt(text, start, end)
+
+    context_start_idx = max(0, hit_index - neighbor_sentences)
+    context_end_idx = min(len(spans) - 1, hit_index + neighbor_sentences)
+    context_start = spans[context_start_idx][0]
+    context_end = spans[context_end_idx][1]
+    excerpt = re.sub(r"\s+", " ", text[context_start:context_end]).strip()
+    if len(excerpt) > 900:
+        return _expand_excerpt(text, start, end)
+    return excerpt
+
+
+def _looks_like_reference_entry(text: Optional[str]) -> bool:
+    if not text:
+        return False
+    compact = re.sub(r"\s+", "", text)
+    if re.search(r"[（(]\d{1,3}[)）].{0,120}[《\"“].{2,80}[》\"”]", compact):
+        return True
+    if "：《" in compact and "》，" in compact and re.search(r"(?:19|20)\d{2}", compact):
+        return True
+    return False
 
 
 def _expand_excerpt(text: str, start: int, end: int, window: int = 180) -> Optional[str]:

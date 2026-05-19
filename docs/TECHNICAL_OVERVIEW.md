@@ -713,19 +713,24 @@
 文件：
 
 - [download.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/routers/download.py)
+- [result_storage.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/result_storage.py)
 
 职责：
 
 - 对受保护文件做鉴权下载
+- 统一解析开发版与 PyInstaller 打包版中的结果产物根目录
 
 关键函数：
 
 - `download_file(...)`
+- `resolve_result_path(...)`
+- `build_result_storage_path(...)`
 
 关键点：
 
 - 不直接暴露物理路径
 - 会校验当前用户是否有权访问该 Artifact
+- 保存/读取 Artifact 文件时不要在各 router 里自行拼接路径，应复用 `result_storage.py`
 
 ## 5.12 参考文献梳理：`backend/routers/references.py` + `backend/services/deepseek_refs.py`
 
@@ -763,6 +768,7 @@
 - `trace_citations_deepseek(pdf_path, references)`
   - 追踪每条参考文献在正文中的引用位置
   - 返回带 citations 的参考文献列表
+  - `quote` 仅作为定位锚点，最终展示优先使用包含完整句子和前后文的 `excerpt`
 - `extract_candidate_text(pdf_path)`
   - 从 PDF 提取参考文献候选文本
   - 自动检测双栏布局并启用 `use_text_flow=True`
@@ -797,6 +803,7 @@
 - `DEEPSEEK_API_KEY` 环境变量必须设置
 - 使用 `deepseek-v4-flash` 模型
 - `max_tokens` 必须设为 16384（避免 JSON 截断）
+- 正文引用详情需要完整句子时，优先检查 `excerpt` 生成链路，不要只看模型返回的短引用标记
 
 ## 5.13 提示词管理：`backend/prompt_registry.py` + `backend/prompt_service.py` + `backend/routers/prompts.py`
 
@@ -1791,6 +1798,46 @@ v2 页面核心架构（与 v1 对比）：
 踩坑记录：
 
 - **`__file__` 路径在 frozen 环境不可靠**（2026-05-18）：PyInstaller onedir 模式下，`_internal/backend/prompt_registry.py` 的 `parents[1]` 会解析到 `_internal` 的父级（exe 所在目录），而 `prompts/` 在 `_internal/prompts/` 中。正确做法是用 `sys._MEIPASS` 获取 PyInstaller 解压的临时目录。**教训：任何通过 `__file__` 计算 `PROJECT_ROOT` 的代码，打包后都必须用 `sys._MEIPASS` 替代，并加 `getattr(sys, "frozen", False)` 分支判断**
+
+### 8.19 打包版产物路径、引用详情与模板生成修复
+
+改动目标：
+
+- 修复 Windows 打包版中筛选报告、精读结果、对比综述、参考文献梳理等产物无法查看/下载的问题
+- 修复参考文献梳理页“正文引用详情”只显示短引用标记，缺少完整句子和前后文的问题
+- 修复模板市场 AI 生成专属模板时重新生成命中旧缓存、20 维度生成 JSON 被截断报错的问题
+
+根因：
+
+- 打包版运行时的结果文件根目录与开发环境不同，历史代码在多个 router 中直接按 `Artifact.file_path` 或当前工作目录拼路径，导致 frozen 环境下找不到真实产物
+- 引用追踪中 DeepSeek 返回的 `quote` 容易只是“作者（年份）”短标记；后端此前直接展示或精确查找该短标记，无法稳定还原完整引用句
+- 模板生成缓存 key 只取论文前 1000 字，未包含用户和维度数；同一论文从 8/12/16 改到 20 维度仍可能返回旧结果
+- 模板生成固定 `max_tokens=4000`，20 维度时模型输出常在 JSON 中途被截断，引发 `JSON解析失败`
+
+落点文件：
+
+- `backend/result_storage.py`（新建）— 统一 `RESULTS_ROOT_DIR` / `RESULTS_DIR` / 默认结果目录解析，提供 `build_result_storage_path()` 与 `resolve_result_path()`
+- `backend/routers/download.py`、`filter.py`、`reading.py`、`compare.py`、`references.py`、`history.py`、`library.py` — 产物写入与读取改用统一路径解析
+- `frontend/src/App.tsx` — 批量精读下载入口改为鉴权下载，避免直接 `<a href="/api/download/...">` 丢 token
+- `backend/services/deepseek_refs.py` — 引用 `quote` 改作定位锚点，新增归一化匹配、作者年份模糊匹配、完整句+前后句上下文抽取、文末参考文献条目误命中过滤
+- `frontend/src/ReferenceTraceTab.tsx` — 正文引用详情优先展示 `excerpt`，短 `quote_text` 仅作为命中标记
+- `backend/services/ai_template_generator.py` — 根据维度数动态提高 token 预算，20 维度最高使用 12000，并在截断时重试；解析失败时尝试 `json_repair`
+- `backend/routers/dimensions.py` — 模板生成缓存 key 纳入用户、维度数和论文文本，新增 `force_regenerate` 表单参数覆盖缓存
+- `frontend/src/TemplateMarket.tsx` — “重新生成”清空旧结果并传 `force_regenerate=true`
+
+验证：
+
+- `python -m py_compile` 覆盖相关后端模块
+- `frontend npm run build` 通过
+- `python build_web_dist.py` 已重新生成 `dist/DeepReadingAgent-Web.zip`
+- 使用用户提供的 Markdown 论文和 DeepSeek key 直跑 20 维度，返回完整 JSON，`dimensions=20`
+- 使用同一论文抽样验证参考文献引用详情，能从短引用标记定位到正文完整句及前后文
+
+踩坑记录：
+
+- **打包版产物路径不能散落在各 router 中自行拼接**（2026-05-19）：开发环境的相对路径在 PyInstaller onedir 下很容易指向错误目录。后续凡是保存或读取 Artifact 文件，都应通过 `result_storage.py` 统一处理，并优先保存相对结果根目录的路径，保留旧绝对路径兼容
+- **LLM 返回的引用标记不是展示文本**（2026-05-19）：`quote` 只能当定位锚点，用户真正需要的是命中句及上下文。引用追踪类功能应将“模型识别锚点”和“用户展示摘录”分开存放
+- **高维模板生成要按输出规模配置 token**（2026-05-19）：维度数越多，JSON 输出越长；固定 4000 token 对 20 维度不够。缓存也必须包含影响输出的参数，否则“重新生成”会被旧结果吞掉
 
 ## 9. 改代码时的推荐查找路径
 

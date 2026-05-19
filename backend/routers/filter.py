@@ -16,10 +16,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from auth.dependencies import current_user
-from db import AsyncSessionLocal, PROJECT_ROOT, get_db
+from db import AsyncSessionLocal, get_db
 from db.models import Artifact, BibEntry, BibFilterLink, File, Job, User
 from db.utils import compute_dedup_key, title_match_score, normalize_doi
 from prompt_service import get_effective_prompt_text
+from result_storage import build_result_storage_path, get_results_root
 from upload_storage import lookup_path_by_file_id
 from backend.utils.api_key import validate_deepseek_key
 
@@ -37,8 +38,7 @@ def _clean_for_excel(text):
 
 # In-memory task store (runtime cache; DB is the source of truth)
 tasks = {}
-RESULTS_ROOT = PROJECT_ROOT / "deep_reading_results"
-RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+RESULTS_ROOT = get_results_root()
 
 
 class FilterRequest(BaseModel):
@@ -166,13 +166,6 @@ def clean_nullable_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-
-
-def build_artifact_storage_path(absolute_path: Path) -> str:
-    try:
-        return absolute_path.relative_to(RESULTS_ROOT).as_posix()
-    except ValueError:
-        return absolute_path.as_posix()
 
 
 async def sync_job_status(task_id: str, **updates: Any) -> None:
@@ -359,7 +352,7 @@ async def persist_filter_results(
             db.add(link)
             processed_bibs[bib_entry.id] = bib_entry.id
 
-        artifact_storage_path = build_artifact_storage_path(out_path)
+        artifact_storage_path = build_result_storage_path(out_path)
         artifact = Artifact(
             job_id=job.id,
             owner_user_id=user.id,

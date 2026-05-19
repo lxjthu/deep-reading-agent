@@ -3,11 +3,13 @@ from typing import Optional
 
 import httpx
 from openai import OpenAI
+from json_repair import loads as repair_json_loads
 
 from backend.utils.api_key import validate_deepseek_key
 
 MODEL = "deepseek-chat"
-MAX_TOKENS = 4000
+DEFAULT_MAX_TOKENS = 4000
+MAX_TEMPLATE_TOKENS = 12000
 MAX_PAPER_CHARS = 8000
 
 META_PROMPT_TEMPLATE = """你是一位资深的学术论文分析专家。请根据以下论文内容，设计一套系统性的案例分析维度体系。
@@ -88,28 +90,66 @@ def generate_template_from_paper(
         timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
     )
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": "你是一个专业的学术论文分析助手，擅长设计多维度的论文精读分析框架。你必须严格按照用户要求的JSON格式输出，不要添加任何markdown标记或解释性文字。",
-            },
-            {"role": "user", "content": meta_prompt},
-        ],
-        temperature=0.7,
-        max_tokens=MAX_TOKENS,
-    )
+    token_budget = _max_tokens_for_dimension_count(dim_count)
+    budgets = [token_budget]
+    if token_budget < MAX_TEMPLATE_TOKENS:
+        budgets.append(MAX_TEMPLATE_TOKENS)
 
-    content = response.choices[0].message.content
+    last_content = ""
+    last_finish_reason = None
+    for budget in budgets:
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是一个专业的学术论文分析助手，擅长设计多维度的论文精读分析框架。你必须严格按照用户要求的JSON格式输出，不要添加任何markdown标记或解释性文字。",
+                },
+                {"role": "user", "content": meta_prompt},
+            ],
+            temperature=0.7,
+            max_tokens=budget,
+        )
 
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        last_content = content
+        last_finish_reason = getattr(choice, "finish_reason", None)
+        parsed = _parse_json_response(content)
+        if parsed is not None:
+            return parsed
+        if last_finish_reason != "length":
+            break
+
+    if last_finish_reason == "length":
+        return {
+            "error": "JSON解析失败：模型输出过长被截断，请减少维度数或稍后重试",
+            "raw_content": last_content[:500],
+        }
+    return {"error": "JSON解析失败", "raw_content": last_content[:500]}
+
+
+def _max_tokens_for_dimension_count(dim_count: int) -> int:
+    return min(MAX_TEMPLATE_TOKENS, max(DEFAULT_MAX_TOKENS, dim_count * 650))
+
+
+def _extract_json_text(content: str) -> str:
+    if "```json" in content:
+        return content.split("```json", 1)[1].split("```", 1)[0].strip()
+    if "```" in content:
+        return content.split("```", 1)[1].split("```", 1)[0].strip()
+    return content.strip()
+
+
+def _parse_json_response(content: str) -> Optional[dict]:
+    if not content:
+        return None
+    json_str = _extract_json_text(content)
     try:
-        if "```json" in content:
-            json_str = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            json_str = content.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = content.strip()
-        return json.loads(json_str)
+        parsed = json.loads(json_str)
     except (json.JSONDecodeError, IndexError):
-        return {"error": "JSON解析失败", "raw_content": content[:500] if content else ""}
+        try:
+            parsed = repair_json_loads(json_str)
+        except Exception:
+            return None
+    return parsed if isinstance(parsed, dict) else None

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,9 +11,10 @@ from sqlalchemy import or_, select, func, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
-from db import PROJECT_ROOT, get_db
+from db import get_db
 from db.models import Artifact, BibEntry, BibFilterLink, File, Job, JobBibEntry, ReadingItem, User
 from db.utils import title_match_score, normalize_doi, compute_metadata_match_score
+from result_storage import resolve_result_path
 from services.crossref_source import CrossrefSource
 from services.metadata_match_service import apply_high_confidence_match, classify_confidence, score_candidates
 from services.metadata_sources import CandidateMetadata
@@ -25,7 +25,6 @@ from upload_storage import resolve_storage_path
 from backend.utils.api_key import validate_deepseek_key
 
 router = APIRouter()
-RESULTS_DIR = PROJECT_ROOT / "deep_reading_results"
 
 
 class LibraryEntrySummary(BaseModel):
@@ -118,7 +117,7 @@ def _clean_optional_text(value) -> Optional[str]:
 def _load_abstract_translation_from_artifact(entry: BibEntry, artifact: Artifact | None) -> Optional[str]:
     if artifact is None:
         return None
-    target_path = RESULTS_DIR / artifact.storage_path
+    target_path = resolve_result_path(artifact.storage_path)
     if not target_path.exists() or target_path.suffix.lower() not in {".xlsx", ".xls"}:
         return None
 

@@ -18,6 +18,7 @@ interface Paper {
   title: string
   authors: string[]
   year: number | null
+  journal?: string
   dimensions?: Array<{ id: string; label: string; content: string; dim_set_name?: string }>
   steps?: Record<string, { label: string; subQuestions: Array<{ id: string; label: string; content: string }> }>
 }
@@ -60,13 +61,34 @@ function getAvailableDimsFromSteps(papers: Paper[], selectedIds: Set<string>): D
 }
 
 export function CompareView({ mode, apiKey }: CompareViewProps) {
-  const { papers, loading, error, refetch } = useCompareData(mode)
+  const { papers: allPapers, loading, error, refetch } = useCompareData(mode)
 
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set())
   const [activePill, setActivePill] = useState<string>('all')
   const [selectedDimIds, setSelectedDimIds] = useState<Set<string>>(new Set())
   const [dimStates, setDimStates] = useState<Record<string, 'collapsed' | 'preview' | 'full'>>({})
   const [showSynthesis, setShowSynthesis] = useState(false)
+
+  const [filterDimSet, setFilterDimSet] = useState('')
+  const [filterJournal, setFilterJournal] = useState('')
+  const [filterSearch, setFilterSearch] = useState('')
+
+  const papers = useMemo(() => {
+    return allPapers.filter((p) => {
+      if (filterDimSet) {
+        const hasDim = (p.dimensions || []).some((d) => d.dim_set_name === filterDimSet)
+        if (!hasDim) return false
+      }
+      if (filterJournal) {
+        if ((p.journal || '').trim() !== filterJournal) return false
+      }
+      if (filterSearch.trim()) {
+        const q = filterSearch.trim().toLowerCase()
+        if (!(p.title || '').toLowerCase().includes(q)) return false
+      }
+      return true
+    })
+  }, [allPapers, filterDimSet, filterJournal, filterSearch])
 
   const availableDims = useMemo(() => {
     if (mode === 'long') return getAvailableDims(papers, selectedPaperIds)
@@ -215,7 +237,7 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
     )
   }
 
-  if (!papers.length) {
+  if (!allPapers.length) {
     return (
     <div className="compare-root">
       <div className="page-wrapper">
@@ -233,7 +255,19 @@ export function CompareView({ mode, apiKey }: CompareViewProps) {
         <p className="page-subtitle">{subtitle}</p>
       </header>
 
-      <PaperSelector papers={papers} selectedIds={selectedPaperIds} onToggle={togglePaper} />
+      <PaperSelector
+        papers={papers}
+        selectedIds={selectedPaperIds}
+        onToggle={togglePaper}
+        mode={mode}
+        allPapers={allPapers}
+        filterDimSet={filterDimSet}
+        filterJournal={filterJournal}
+        filterSearch={filterSearch}
+        onFilterDimSet={setFilterDimSet}
+        onFilterJournal={setFilterJournal}
+        onFilterSearch={setFilterSearch}
+      />
 
       {selectedPaperIds.size > 0 && (
         <DimNavigation

@@ -26,7 +26,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
-from db import AsyncSessionLocal, PROJECT_ROOT, get_db
+from db import AsyncSessionLocal, get_db
 from db.models import (
     Artifact,
     BibEntry,
@@ -42,12 +42,12 @@ from services.deepseek_refs import (
     extract_references_deepseek,
     trace_citations_deepseek,
 )
+from result_storage import build_result_storage_path, get_results_root
 from upload_storage import resolve_storage_path
 
 
 router = APIRouter()
-RESULTS_ROOT = PROJECT_ROOT / "deep_reading_results"
-RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+RESULTS_ROOT = get_results_root()
 
 tasks: dict[str, dict] = {}
 
@@ -428,13 +428,6 @@ def get_results_dir(user_id: int, job_id: str) -> Path:
     result_dir = RESULTS_ROOT / str(user_id) / job_id
     result_dir.mkdir(parents=True, exist_ok=True)
     return result_dir
-
-
-def build_result_storage_path(absolute_path: Path) -> str:
-    try:
-        return absolute_path.relative_to(RESULTS_ROOT).as_posix()
-    except ValueError:
-        return absolute_path.as_posix()
 
 
 def init_task_payload(task_id: str, user_id: int, source_bib_entry_id: str) -> dict:

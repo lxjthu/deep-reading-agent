@@ -13,15 +13,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
-from db import PROJECT_ROOT, get_db
+from db import get_db
 from db.models import Artifact, BibEntry, Job, JobBibEntry, User
+from result_storage import build_result_storage_path, get_results_root, resolve_result_path
 
 router = APIRouter()
 
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "deep_reading_results")
-FILTER_DIR = os.path.join(RESULTS_DIR, "literature_filter")
-SYNTHESIS_DIR = os.path.join(RESULTS_DIR, "synthesis")
-os.makedirs(SYNTHESIS_DIR, exist_ok=True)
+RESULTS_DIR = get_results_root()
+SYNTHESIS_DIR = RESULTS_DIR / "synthesis"
+SYNTHESIS_DIR.mkdir(parents=True, exist_ok=True)
 
 READING_ARTIFACT_TYPES = {"reading_step", "reading_final", "reading_extract", "compare_md"}
 FILTER_ARTIFACT_TYPES = {"filter_excel"}
@@ -45,16 +45,13 @@ def compute_expires_at(user: User) -> datetime | None:
 
 
 def get_results_dir(user_id: int, job_id: str) -> Path:
-    directory = Path(RESULTS_DIR) / str(user_id) / job_id
+    directory = RESULTS_DIR / str(user_id) / job_id
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
 def build_storage_path(absolute_path: Path) -> str:
-    try:
-        return absolute_path.relative_to(Path(RESULTS_DIR)).as_posix()
-    except ValueError:
-        return absolute_path.as_posix()
+    return build_result_storage_path(absolute_path)
 
 
 def _human_size(size: int) -> str:
@@ -83,7 +80,7 @@ def _history_type(artifact: Artifact, job: Job) -> str:
 
 
 def _artifact_absolute_path(artifact: Artifact) -> Path:
-    return Path(RESULTS_DIR) / artifact.storage_path
+    return resolve_result_path(artifact.storage_path)
 
 
 def _artifact_to_file_info(artifact: Artifact, job: Job) -> Dict:
@@ -305,7 +302,7 @@ async def list_synthesis(
     ).all()
     files = []
     for artifact, job in artifacts:
-        absolute_path = Path(RESULTS_DIR) / artifact.storage_path
+        absolute_path = _artifact_absolute_path(artifact)
         size = artifact.size_bytes or (absolute_path.stat().st_size if absolute_path.exists() else 0)
         modified_dt = artifact.created_at or job.created_at or utcnow_naive()
         modified = modified_dt.strftime("%Y-%m-%d %H:%M")

@@ -17,16 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from auth.dependencies import current_user
-from db import PROJECT_ROOT, get_db
+from db import get_db
 from db.models import Annotation, Artifact, BibEntry, DimensionItem, DimensionSet, Job, JobBibEntry, ReadingItem, ReadingItemEdit, User
 from db.utils import compute_dedup_key
+from result_storage import build_result_storage_path, get_results_root
 from backend.utils.api_key import validate_deepseek_key
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 router = APIRouter()
-RESULTS_ROOT = PROJECT_ROOT / "deep_reading_results"
-RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+RESULTS_ROOT = get_results_root()
 
 
 class CompareRequest(BaseModel):
@@ -123,13 +123,6 @@ def get_results_dir(user_id: int, job_id: str) -> Path:
     result_dir = RESULTS_ROOT / str(user_id) / job_id
     result_dir.mkdir(parents=True, exist_ok=True)
     return result_dir
-
-
-def build_storage_path(absolute_path: Path) -> str:
-    try:
-        return absolute_path.relative_to(RESULTS_ROOT).as_posix()
-    except ValueError:
-        return absolute_path.as_posix()
 
 
 def parse_paper_authors(raw_authors) -> list[str]:
@@ -502,7 +495,7 @@ async def persist_compare_result(
     result_dir = get_results_dir(user.id, job_id)
     path = result_dir / filename
     path.write_text(content, encoding="utf-8")
-    storage_path = build_storage_path(path)
+    storage_path = build_result_storage_path(path)
     db.add(
         Artifact(
             job_id=job_id,
@@ -976,7 +969,7 @@ async def persist_synthesis_result(
     result_dir = get_results_dir(user.id, job_id)
     path = result_dir / filename
     path.write_text(content, encoding="utf-8")
-    storage_path = build_storage_path(path)
+    storage_path = build_result_storage_path(path)
     db.add(
         Artifact(
             job_id=job_id,

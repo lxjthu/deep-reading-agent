@@ -454,8 +454,10 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                           <span>{item.page_label || '未知页'} / {item.paragraph_label || '未知段落'}</span>
                           <span>{item.confidence ? `${Math.round(item.confidence * 100)}%` : '-'}</span>
                         </div>
-                        <div className="mt-2 text-sm font-medium text-gray-900">{item.quote_text}</div>
-                        {item.excerpt && <div className="mt-2 text-xs leading-5 text-gray-600">{item.excerpt}</div>}
+                        <div className="mt-2 text-sm leading-6 text-gray-900">{item.excerpt || item.quote_text}</div>
+                        {item.excerpt && item.quote_text && item.excerpt !== item.quote_text && (
+                          <div className="mt-2 text-xs leading-5 text-gray-500">命中标记：{item.quote_text}</div>
+                        )}
                       </div>
                     ))
                   )}
