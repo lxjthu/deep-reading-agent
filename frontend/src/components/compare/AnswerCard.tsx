@@ -21,10 +21,40 @@ function mathRender(el: HTMLElement) {
   }
 }
 
-function formatAuthors(authors: string[], year: number | null): string {
+function formatAuthors(authors: string[], year: number | null, journal?: string): string {
   const auth = (authors || []).slice(0, 3).join(', ')
   const yr = year ? ` (${year})` : ''
-  return auth + yr
+  const j = journal ? ` · ${journal}` : ''
+  return auth + yr + j
+}
+
+function findInMd(md: string, search: string, fromPlainPos: number): { start: number; end: number } | null {
+  const charMap: number[] = []
+  let stripped = ''
+  let i = 0
+  while (i < md.length) {
+    if (md[i] === '*' && i + 1 < md.length && md[i + 1] === '*') { i += 2; continue }
+    if (md[i] === '*') { i += 1; continue }
+    if (md[i] === '#' && (i === 0 || md[i - 1] === '\n')) {
+      while (i < md.length && md[i] === '#') i++
+      if (i < md.length && md[i] === ' ') i++
+      continue
+    }
+    if (md[i] === '-' && (i === 0 || md[i - 1] === '\n') && i + 1 < md.length && md[i + 1] === ' ') {
+      i += 2; continue
+    }
+    if (md[i] === '>' && (i === 0 || md[i - 1] === '\n')) {
+      i += 1; continue
+    }
+    if (md[i] === '`' && i + 1 < md.length && md[i + 1] === '`' && i + 2 < md.length && md[i + 2] === '`') { i += 3; continue }
+    if (md[i] === '`') { i += 1; continue }
+    charMap.push(i)
+    stripped += md[i]
+    i++
+  }
+  const idx = stripped.indexOf(search, fromPlainPos)
+  if (idx < 0 || idx + search.length > charMap.length) return null
+  return { start: charMap[idx], end: charMap[idx + search.length - 1] + 1 }
 }
 
 export type CardMode = 'normal' | 'editing' | 'annotating' | 'ai_summarizing'
@@ -53,6 +83,7 @@ interface AnswerCardProps {
     title: string
     authors: string[]
     year: number | null
+    journal?: string
   }
   content: string | null
   variant: 'preview' | 'full'
@@ -219,7 +250,7 @@ export function AnswerCard({
   }, [cardMode])
 
   const handleCreateAnnotation = useCallback(async () => {
-    if (!readingItemId || !annotationNote.trim()) return
+    if (!readingItemId) return
     try {
       await fetch('/api/compare/annotations', {
         method: 'POST',
@@ -302,13 +333,24 @@ export function AnswerCard({
       let lastEnd = 0
 
       for (const ann of sorted) {
-        if (ann.selected_text && result.includes(ann.selected_text)) {
-          const idx = result.indexOf(ann.selected_text, lastEnd)
-          if (idx >= 0) {
-            if (idx > lastEnd) parts.push({ text: result.slice(lastEnd, idx) })
-            parts.push({ text: ann.selected_text, annotation: ann })
-            lastEnd = idx + ann.selected_text.length
+        let matchStart = -1
+        let matchEnd = -1
+
+        if (ann.char_start != null && ann.char_end != null && ann.char_end > ann.char_start) {
+          matchStart = ann.char_start
+          matchEnd = ann.char_end
+        } else if (ann.selected_text) {
+          const found = findInMd(result, ann.selected_text, 0)
+          if (found) {
+            matchStart = found.start
+            matchEnd = found.end
           }
+        }
+
+        if (matchStart >= 0 && matchEnd > matchStart && matchStart >= lastEnd) {
+          if (matchStart > lastEnd) parts.push({ text: result.slice(lastEnd, matchStart) })
+          parts.push({ text: result.slice(matchStart, matchEnd), annotation: ann })
+          lastEnd = matchEnd
         }
       }
       if (lastEnd < result.length) parts.push({ text: result.slice(lastEnd) })
@@ -330,7 +372,7 @@ export function AnswerCard({
     [annotations],
   )
 
-  const meta = formatAuthors(paper.authors, paper.year)
+  const meta = formatAuthors(paper.authors, paper.year, paper.journal)
   const titleText = paper.title || '未命名文献'
 
   const modeButtons =
@@ -527,8 +569,7 @@ export function AnswerCard({
                     <div className="compare-ai-summary-text">{a.note}</div>
                     {a.selected_text && (
                       <div className="compare-ai-summary-source">
-                        「{a.selected_text.slice(0, 80)}
-                        {a.selected_text.length > 80 ? '...' : ''}」
+                        「{a.selected_text}」
                       </div>
                     )}
                   </div>
@@ -612,7 +653,7 @@ export function AnswerCard({
             <>
               <textarea
                 className="compare-annotation-input"
-                placeholder="输入点评..."
+                placeholder="输入点评（可选）..."
                 value={annotationNote}
                 onChange={(e) => setAnnotationNote(e.target.value)}
                 rows={2}
@@ -631,9 +672,9 @@ export function AnswerCard({
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={handleCreateAnnotation}
-                  disabled={!annotationNote.trim()}
+                  disabled={false}
                 >
-                  保存点评
+                  高亮
                 </button>
                 <button
                   className="btn btn-outline btn-sm"

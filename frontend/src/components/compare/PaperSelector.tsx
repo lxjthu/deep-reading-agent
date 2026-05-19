@@ -113,6 +113,7 @@ export function PaperSelector({
           const sel = selectedIds.has(p.id)
           const auth = (p.authors || []).slice(0, 3).join(', ')
           const yr = p.year ? ` (${p.year})` : ''
+          const jn = p.journal ? ` · ${p.journal}` : ''
           const dc = p.dimensions ? p.dimensions.length : 0
           return (
             <div
@@ -122,7 +123,7 @@ export function PaperSelector({
             >
               <div className="paper-card-title">{p.title || '未命名文献'}</div>
               <div className="paper-card-meta">
-                {auth}{yr}
+                {auth}{yr}{jn}
               </div>
               {dc > 0 && <span className="paper-card-dims">{dc} 个维度</span>}
             </div>

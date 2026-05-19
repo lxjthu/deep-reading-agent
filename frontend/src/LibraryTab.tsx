@@ -208,6 +208,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [detailError, setDetailError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
   const [expandedTimeline, setExpandedTimeline] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const selectedSummary = useMemo(
     () => entries.find((entry) => entry.id === selectedId) || null,
@@ -243,6 +244,45 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       setSelectedId(null)
     } finally {
       setListLoading(false)
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === entries.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(entries.map((e) => e.id)))
+    }
+  }
+
+  async function handleBatchDelete() {
+    if (selectedIds.size === 0) return
+    if (!confirm(`确定删除选中的 ${selectedIds.size} 篇文献？此操作不可撤销。`)) return
+    try {
+      const res = await fetch('/api/library/entries/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_ids: Array.from(selectedIds) }),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || '删除失败')
+      }
+      const data = await res.json()
+      setSelectedIds(new Set())
+      await loadEntries()
+      alert(`已删除 ${data.deleted} 篇文献。`)
+    } catch (e: any) {
+      alert(`批量删除失败：${e.message || e}`)
     }
   }
 
@@ -442,10 +482,33 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       <div className="grid gap-4 2xl:grid-cols-[minmax(380px,0.95fr)_minmax(0,1.05fr)]">
         <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-800">文献列表</h3>
-              <p className="mt-1 text-xs text-gray-400">{listLoading ? '加载中...' : `共 ${entries.length} 篇`}</p>
+            <div className="flex items-center gap-3">
+              {entries.length > 0 && (
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === entries.length && entries.length > 0}
+                  onChange={toggleSelectAll}
+                  className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                  title="全选/取消全选"
+                />
+              )}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800">文献列表</h3>
+                <p className="mt-1 text-xs text-gray-400">
+                  {listLoading ? '加载中...' : `共 ${entries.length} 篇`}
+                  {selectedIds.size > 0 && ` · 已选 ${selectedIds.size} 篇`}
+                </p>
+              </div>
             </div>
+            {selectedIds.size > 0 && (
+              <button
+                onClick={() => void handleBatchDelete()}
+                className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
+                type="button"
+              >
+                删除选中 ({selectedIds.size})
+              </button>
+            )}
           </div>
 
           <div className="max-h-[70vh] overflow-y-auto 2xl:max-h-[74vh]">
@@ -454,14 +517,24 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
             ) : (
               <div className="divide-y divide-gray-100">
                 {entries.map((entry) => (
-                  <button
+                  <div
                     key={entry.id}
-                    onClick={() => setSelectedId(entry.id)}
-                    className={`block w-full px-5 py-4 text-left transition-colors ${
+                    className={`flex items-start gap-2 px-5 py-4 transition-colors ${
                       selectedId === entry.id ? 'bg-emerald-50' : 'hover:bg-gray-50'
                     }`}
-                    type="button"
                   >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(entry.id)}
+                      onChange={() => toggleSelect(entry.id)}
+                      className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <button
+                      onClick={() => setSelectedId(entry.id)}
+                      className="block w-full text-left"
+                      type="button"
+                    >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -502,6 +575,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                       </div>
                     </div>
                   </button>
+                  </div>
                 ))}
               </div>
             )}

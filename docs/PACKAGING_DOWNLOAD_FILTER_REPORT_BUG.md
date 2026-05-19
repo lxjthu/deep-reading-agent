@@ -50,17 +50,24 @@
 
 ---
 
-## 3. 文献库缺少批量删除功能
+## 3. 文献库批量删除功能
 
 ### 需求
 
-文献库页面（LibraryTab）目前只能逐条删除文献，需要增加批量选择 + 批量删除功能。
+文献库页面（LibraryTab）增加批量选择 + 批量删除功能。
+
+### 已实施修复
+
+- 后端：新增 `POST /api/library/entries/batch-delete`，接收 `entry_ids` 数组，处理 `BibReference.matched_bib_entry_id` FK 置空后批量删除。
+- 前端：列表头部加全选复选框 + 批量删除按钮，每行加复选框支持多选。
+- 涉及文件：`backend/routers/library.py`、`frontend/src/LibraryTab.tsx`。
 
 ### 状态
 
-- [ ] 前端：批量选择 UI（复选框 + 全选 + 批量操作栏）
-- [ ] 后端：批量删除 API
-- [ ] 验证
+- [x] 后端：批量删除 API
+- [x] 前端：批量选择 UI（复选框 + 全选 + 批量操作栏）
+- [x] 前端构建验证
+- [ ] 用户本地验证
 
 ---
 
@@ -94,11 +101,18 @@
 
 精读结果对比时，当前只显示作者和年份，希望额外显示期刊名称（journal）。
 
+### 已实施修复
+
+- `AnswerCard.tsx`：`formatAuthors` 增加 `journal` 参数，卡片 meta 行显示 `作者 (年份) · 期刊名`。
+- `PaperSelector.tsx`：文献选择卡 meta 行同样补充期刊名显示。
+- 后端 `build_compare_response` 已返回 `journal` 字段，无需改动。
+
 ### 状态
 
-- [ ] 定位对比视图卡片渲染逻辑
-- [ ] 补充期刊名称字段
-- [ ] 验证
+- [x] 定位对比视图卡片渲染逻辑
+- [x] 补充 AnswerCard 期刊名称字段
+- [x] 补充 PaperSelector 期刊名称字段
+- [x] 前端构建验证
 
 ---
 
@@ -173,21 +187,13 @@ POST 可能返回 4xx/5xx（如数据库写入失败），但代码静默忽略�
 
 AI 总结模式中，每条总结下方显示的原文引用被截断为 80 字符（`AnswerCard.tsx:530`），用户希望完整显示。
 
-### 改法
+### 已实施修复
 
-`AnswerCard.tsx` 第 530-531 行：
-
-```diff
-- 「{a.selected_text.slice(0, 80)}
-- {a.selected_text.length > 80 ? '...' : ''}」
-+ 「{a.selected_text}」
-```
-
-仅此一处。
+`AnswerCard.tsx` 去掉 `.slice(0, 80)` 和省略号逻辑，直接显示 `a.selected_text` 完整内容。
 
 ### 状态
 
-- [ ] 修改并验证
+- [x] 修改并验证
 
 ---
 
@@ -195,47 +201,19 @@ AI 总结模式中，每条总结下方显示的原文引用被截断为 80 字�
 
 ### 问题分析
 
-布局嵌套关系（`ReferenceTraceTab.tsx`）：
+参考文献梳理页中间「梳理结果」表格需要与右侧「正文引用详情」对齐。最终交互要求是：右侧详情区不单独滚动，只给中间表格区设置限高和滚动条；左侧源文献列表不再强制 `max-h-[72vh]`，避免内容不足时出现大片空白。
 
-```
-顶层 grid（line 305）: 2xl:grid-cols-[360px minmax(0,1fr)]
-  ├─ 左：源文献列表 360px
-  └─ 右：section（line 349）
-       ├─ 任务进度卡片
-       └─ 内层 grid（line 370）: xl:grid-cols-[minmax(0,1fr) 320px]
-            ├─ 梳理结果表格（被挤压的主体）
-            └─ 右：引用详情 + 产物下载 320px
-```
+### 已实施修复
 
-**压缩原因**：梳理结果表格在两个维度被夹：
-1. 外层源文献占 360px（2xl 断点才触发两列）
-2. 内层引用详情占 320px（xl 断点就触发两列）
-3. 在 xl~2xl（1280~1536px）之间，外层单列但内层已两列，表格实际只有 ~920px
-4. 表格有 5 列（序号/标题/匹配/命中/操作），窄屏极局促
-5. 内层右侧的「引用详情」+「产物下载」内容不多，占 320px 太浪费
-
-### 修改方案
-
-**方案 A（推荐）**：调整内层 grid 断点和比例
-
-```diff
-// line 370
-- <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-+ <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_300px]">
-```
-
-- 把内层两列断点从 `xl` 提升到 `2xl`，与外层对齐
-- 右侧从 320px 缩至 300px
-- 效果：xl~2xl 区间表格独占整行宽度，不再被挤压
-
-**方案 B**：进一步缩小右侧面板，改用可折叠/抽屉
-
-引用详情和产物下载改为点击表格行后从右侧抽屉弹出，梳理结果表格始终占满可用宽度。改动较大，适合后续优化。
+- `ReferenceTraceTab.tsx`：源文献列表去掉 `max-h-[72vh]`，仅保留 `overflow-y-auto`。
+- `ReferenceTraceTab.tsx`：中间「梳理结果」卡片改为 `flex flex-col`，表格容器设置 `max-h-[62vh] overflow-auto`。
+- `ReferenceTraceTab.tsx`：右侧「正文引用详情」保持不滚动，便于与中间表格顶部对齐。
+- 内层 grid 断点从 `xl` 提升到 `2xl`，右侧从 320px 缩至 300px。
 
 ### 状态
 
-- [ ] 实施方案 A（改一行）
-- [ ] 验证各断点下布局效果
+- [x] 实施修复（中间表格限高滚动 + 右侧不滚动 + 调整 grid 断点）
+- [x] 前端构建验证
 
 ---
 
@@ -880,4 +858,4 @@ async def generate_template_from_paper(paper_text, dim_count, user_id=None, db=N
 
 ## 记录时间
 
-2026-05-18，更新于 2026-05-19
+2026-05-18，更新于 2026-05-19，再次更新于 2026-05-19（修复 #3/#5/#7/#8）

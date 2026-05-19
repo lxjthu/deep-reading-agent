@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import get_db
-from db.models import Artifact, BibEntry, BibFilterLink, File, Job, JobBibEntry, ReadingItem, User
+from db.models import Artifact, BibEntry, BibFilterLink, BibReference, File, Job, JobBibEntry, ReadingItem, User
 from db.utils import title_match_score, normalize_doi, compute_metadata_match_score
 from result_storage import resolve_result_path
 from services.crossref_source import CrossrefSource
@@ -186,6 +186,37 @@ async def get_owned_entry(db: AsyncSession, user: User, entry_id: str) -> BibEnt
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bib entry not found")
     return entry
+
+
+class BatchDeleteRequest(BaseModel):
+    entry_ids: list[str] = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/entries/batch-delete")
+async def batch_delete_entries(
+    body: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    ids = body.entry_ids
+    rows = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.id.in_(ids),
+                BibEntry.owner_user_id == user.id,
+            )
+        )
+    ).scalars().all()
+    found_ids = {r.id for r in rows}
+    await db.execute(
+        BibReference.__table__.update()
+        .where(BibReference.matched_bib_entry_id.in_(found_ids))
+        .values(matched_bib_entry_id=None)
+    )
+    for r in rows:
+        await db.delete(r)
+    await db.commit()
+    return {"deleted": len(found_ids), "not_found": len(ids) - len(found_ids)}
 
 
 @router.get("/entries", response_model=list[LibraryEntrySummary])
