@@ -308,7 +308,7 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
             <h3 className="text-sm font-semibold text-gray-800">源文献</h3>
             <p className="mt-1 text-xs text-gray-400">{loadingList ? '加载中...' : `共 ${entries.length} 篇带 PDF 文献`}</p>
           </div>
-          <div className="max-h-[72vh] overflow-y-auto">
+          <div className="overflow-y-auto">
             {entries.length === 0 && !loadingList ? (
               <div className="px-5 py-12 text-center text-sm text-gray-400">当前没有可用于梳理的 PDF 文献。</div>
             ) : (
@@ -367,8 +367,8 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
             </div>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="flex flex-col rounded-2xl border border-gray-200 bg-white shadow-sm">
               <div className="border-b border-gray-100 px-5 py-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-semibold text-gray-800">梳理结果</h3>
@@ -381,7 +381,7 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                   )}
                 </div>
               </div>
-              <div className="max-h-[55vh] overflow-auto">
+              <div className="max-h-[62vh] overflow-auto">
                 {loadingDetail ? (
                   <div className="px-5 py-12 text-center text-sm text-gray-400">加载中...</div>
                 ) : references.length === 0 ? (

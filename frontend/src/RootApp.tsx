@@ -208,6 +208,29 @@ function LoginPage() {
   const next = useMemo(() => searchParams.get('next') || '/workspace', [searchParams])
 
   useEffect(() => {
+    if (accessToken) return
+    let cancelled = false
+    const autoLoginPackagedAdmin = async () => {
+      try {
+        const runtimeResponse = await fetch('/api/deploy/runtime')
+        if (!runtimeResponse.ok) return
+        const runtime = await runtimeResponse.json()
+        if (!runtime?.packaged) return
+        await login({ username: 'admin', password: 'admin12345' })
+        if (!cancelled) {
+          navigate(next, { replace: true })
+        }
+      } catch {
+        // Keep the normal login form available if packaged auto-login fails.
+      }
+    }
+    void autoLoginPackagedAdmin()
+    return () => {
+      cancelled = true
+    }
+  }, [accessToken, login, navigate, next])
+
+  useEffect(() => {
     if (accessToken) {
       navigate(next, { replace: true })
     }

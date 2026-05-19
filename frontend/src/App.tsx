@@ -763,7 +763,15 @@ function useBatchReadingTracker() {
     const poll = async () => {
       try {
         const res = await fetch(`/api/reading/batch/${batchId}/status`)
+        if (!res.ok) {
+          resetBatch()
+          return
+        }
         const data = await res.json()
+        if (!Array.isArray(data.tasks)) {
+          resetBatch()
+          return
+        }
         const allDone = data.completed + data.failed >= data.total
         setState(prev => ({
           ...prev,
