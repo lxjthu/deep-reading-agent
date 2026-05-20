@@ -97,3 +97,27 @@ def _extract_page_text_column_aware(page) -> str:
 - **三栏或非对称双栏**：比例阈值 `0.25-0.75` 对三栏不适用，但学术论文极少三栏
 - **跨栏标题/图表**：crop 后标题被截断到左半区，但不影响参考文献区（通常在文末、无跨栏元素）
 - **全角数字编号**：`〔１〕`、`［Ｊ］` 等全角字符不影响 DeepSeek 识别
+
+## 附带修复：DeepSeek API 连接错误重试
+
+### 问题
+
+双栏修复后，参考文献提取（`extract_references_deepseek`）成功返回 16 条，但正文引用追踪（`trace_citations_deepseek`）报 `Connection error` 直接失败，未进入重试。
+
+### 根因
+
+`call_deepseek_json` 的 except 只捕获了 `APITimeoutError` 和 `httpx.ConnectTimeout`，未捕获 `httpx.ConnectError` 和 `openai.APIConnectionError`。第二次 API 调用碰上网络瞬断时，异常未被 retry 循环处理，直接抛出导致任务失败。
+
+### 修复
+
+扩大 catch 范围，所有连接类错误（`ConnectError`、`APIConnectionError` 等）都进入 retry 循环（最多 3 次），非连接类错误正常 raise。
+
+```python
+except (APITimeoutError, httpx.ConnectTimeout, httpx.ConnectError) as exc:
+    logger.warning("DeepSeek connection error (attempt %d/%d): %s", ...)
+    continue
+except Exception as exc:
+    if "connection" in type(exc).__name__.lower() or "connect" in str(exc).lower():
+        continue
+    raise
+```
