@@ -102,6 +102,18 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
   const [exampleTab, setExampleTab] = useState<'md' | 'json' | 'prompt'>('md')
   const [copied, setCopied] = useState(false)
 
+  // dimension editing state (user sets only)
+  const [editingDimId, setEditingDimId] = useState<number | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [editPrompt, setEditPrompt] = useState('')
+  const [editQuestion, setEditQuestion] = useState('')
+  const [showAddDim, setShowAddDim] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addDesc, setAddDesc] = useState('')
+  const [addPrompt, setAddPrompt] = useState('')
+  const [addQuestion, setAddQuestion] = useState('')
+
   const loadTemplates = async () => {
     try {
       const url =
@@ -426,6 +438,73 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
     setImportSaving(false)
   }
 
+  // ---- dimension item CRUD (user sets) ----
+
+  const startEditDim = (dim: NonNullable<typeof detailTarget>['dimensions'][0]) => {
+    setEditingDimId(dim.id)
+    setEditName(dim.dim_name)
+    setEditDesc(dim.description || '')
+    setEditPrompt(dim.prompt_content || '')
+    setEditQuestion(dim.default_question || '')
+    setShowAddDim(false)
+  }
+
+  const cancelEdit = () => {
+    setEditingDimId(null)
+  }
+
+  const saveEditDim = async () => {
+    if (editingDimId == null || !detailTarget) return
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/dimensions/sets/${detailTarget.id}/items/${editingDimId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dim_name: editName.trim(), description: editDesc.trim() || null, prompt_content: editPrompt, default_question: editQuestion }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '保存失败')
+      setEditingDimId(null)
+      await showUserSetDetail(detailTarget.id, detailTarget.name, detailTarget.description, detailTarget.is_available_for_reading ?? false)
+      setMessage({ type: 'ok', text: '维度已更新' })
+    } catch (e: unknown) {
+      setMessage({ type: 'err', text: `${e instanceof Error ? e.message : String(e)}` })
+    }
+  }
+
+  const deleteDim = async (dim: NonNullable<typeof detailTarget>['dimensions'][0]) => {
+    if (!confirm(`确定删除维度「${dim.dim_name}」？`) || !detailTarget) return
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/dimensions/sets/${detailTarget.id}/items/${dim.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '删除失败')
+      if (editingDimId === dim.id) setEditingDimId(null)
+      await showUserSetDetail(detailTarget.id, detailTarget.name, detailTarget.description, detailTarget.is_available_for_reading ?? false)
+      void loadUserSets()
+      setMessage({ type: 'ok', text: '维度已删除' })
+    } catch (e: unknown) {
+      setMessage({ type: 'err', text: `${e instanceof Error ? e.message : String(e)}` })
+    }
+  }
+
+  const addDimension = async () => {
+    if (!addName.trim() || !detailTarget) return
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/dimensions/sets/${detailTarget.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dim_name: addName.trim(), description: addDesc.trim() || null, prompt_content: addPrompt, default_question: addQuestion }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '添加失败')
+      setShowAddDim(false); setAddName(''); setAddDesc(''); setAddPrompt(''); setAddQuestion('')
+      await showUserSetDetail(detailTarget.id, detailTarget.name, detailTarget.description, detailTarget.is_available_for_reading ?? false)
+      void loadUserSets()
+      setMessage({ type: 'ok', text: '维度已添加' })
+    } catch (e: unknown) {
+      setMessage({ type: 'err', text: `${e instanceof Error ? e.message : String(e)}` })
+    }
+  }
+
   const goBack = () => {
     setPanel('list')
     setDetailTarget(null)
@@ -433,6 +512,9 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
     setAiFile(null)
     setAiStep('upload')
     setImportPreview(null)
+    setImportFile(null)
+    setEditingDimId(null)
+    setShowAddDim(false)
     setImportFile(null)
   }
 
@@ -477,14 +559,44 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
           <div className="mb-3 text-sm font-medium text-gray-700">维度列表（{detailTarget.dimensions.length}）</div>
           <div className="space-y-2">
             {(() => {
+              const editable = detailTarget._source === 'user'
+              const dimEditForm = (dim: typeof detailTarget.dimensions[0]) => (
+                editingDimId === dim.id && (
+                  <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/30 p-3 space-y-2">
+                    <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="维度名称" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                    <input value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="描述（可选）" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                    <input value={editQuestion} onChange={e => setEditQuestion(e.target.value)} placeholder="默认问题" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                    <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)} placeholder="提示词内容" rows={4} className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+                    <div className="flex gap-2">
+                      <button onClick={saveEditDim} className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700">保存</button>
+                      <button onClick={cancelEdit} className="rounded bg-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-300">取消</button>
+                    </div>
+                  </div>
+                )
+              )
+              const editBtns = (dim: typeof detailTarget.dimensions[0]) => editable && (
+                <div className="flex shrink-0 gap-1 ml-auto">
+                  <button onClick={() => startEditDim(dim)} title="编辑" className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-emerald-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                  </button>
+                  <button onClick={() => deleteDim(dim)} title="删除" className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                  </button>
+                </div>
+              )
+
               if (!detailTarget.group_config?.groups?.length) {
                 return detailTarget.dimensions.map((dim) => (
-                  <div key={dim.id} className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3">
-                    <span className="shrink-0 mt-0.5 h-2 w-2 rounded-full bg-emerald-400" />
-                    <div>
-                      <div className="text-sm font-medium text-gray-800">{dim.dim_name}</div>
-                      {dim.description && <div className="text-xs text-gray-500 mt-0.5">{dim.description}</div>}
+                  <div key={dim.id}>
+                    <div className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3">
+                      <span className="shrink-0 mt-0.5 h-2 w-2 rounded-full bg-emerald-400" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-gray-800">{dim.dim_name}</div>
+                        {dim.description && <div className="text-xs text-gray-500 mt-0.5">{dim.description}</div>}
+                      </div>
+                      {editBtns(dim)}
                     </div>
+                    {dimEditForm(dim)}
                   </div>
                 ))
               }
@@ -498,12 +610,16 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
                     <div className="mb-2 text-xs font-medium text-gray-500">{group.name}</div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {items.map((dim) => (
-                        <div key={dim.id} className="flex items-start gap-2 rounded-lg bg-gray-50/50 p-2">
-                          <span className="shrink-0 mt-1 h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                          <div>
-                            <div className="text-sm text-gray-800">{dim.dim_name}</div>
-                            {dim.description && <div className="text-xs text-gray-500">{dim.description}</div>}
+                        <div key={dim.id} className="sm:col-span-1">
+                          <div className="flex items-start gap-2 rounded-lg bg-gray-50/50 p-2">
+                            <span className="shrink-0 mt-1 h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-gray-800">{dim.dim_name}</div>
+                              {dim.description && <div className="text-xs text-gray-500">{dim.description}</div>}
+                            </div>
+                            {editBtns(dim)}
                           </div>
+                          {dimEditForm(dim)}
                         </div>
                       ))}
                     </div>
@@ -511,6 +627,24 @@ export default function TemplateMarket({ apiKey }: { apiKey: string }) {
                 )
               })
             })()}
+            {detailTarget._source === 'user' && !showAddDim && (
+              <button onClick={() => { setShowAddDim(true); setAddName(''); setAddDesc(''); setAddPrompt(''); setAddQuestion('') }}
+                className="w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-xs text-gray-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors">
+                + 添加维度
+              </button>
+            )}
+            {detailTarget._source === 'user' && showAddDim && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+                <input value={addName} onChange={e => setAddName(e.target.value)} placeholder="维度名称 *" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                <input value={addDesc} onChange={e => setAddDesc(e.target.value)} placeholder="描述（可选）" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                <input value={addQuestion} onChange={e => setAddQuestion(e.target.value)} placeholder="默认问题" className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none" />
+                <textarea value={addPrompt} onChange={e => setAddPrompt(e.target.value)} placeholder="提示词内容" rows={3} className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+                <div className="flex gap-2">
+                  <button onClick={addDimension} disabled={!addName.trim()} className="rounded bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">添加</button>
+                  <button onClick={() => setShowAddDim(false)} className="rounded bg-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-300">取消</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         {message && <MsgBlock message={message} />}
