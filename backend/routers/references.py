@@ -1109,3 +1109,62 @@ async def import_reference_to_library(
     reference.updated_at = utcnow_naive()
     await db.commit()
     return ReferenceImportResponse(bib_entry_id=bib_entry.id, title=bib_entry.title, source="created")
+
+
+class ReferenceUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    authors: Optional[list[str]] = None
+    year: Optional[int] = None
+    journal: Optional[str] = None
+    volume: Optional[str] = None
+    issue: Optional[str] = None
+    pages: Optional[str] = None
+    doi: Optional[str] = None
+    raw_text: Optional[str] = None
+
+
+@router.put("/references/{reference_id}", response_model=ReferenceListItem)
+async def update_reference(
+    reference_id: str,
+    body: ReferenceUpdateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReferenceListItem:
+    reference = (
+        await db.execute(
+            select(BibReference).where(BibReference.id == reference_id, BibReference.owner_user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if reference is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="参考文献不存在。")
+
+    updates = body.model_dump(exclude_none=True)
+    if "authors" in updates:
+        updates["authors_json"] = json.dumps(updates.pop("authors"), ensure_ascii=False)
+    for field, value in updates.items():
+        if hasattr(reference, field):
+            setattr(reference, field, value)
+    reference.updated_at = utcnow_naive()
+    await db.commit()
+    await db.refresh(reference)
+
+    matched_title = None
+    if reference.matched_bib_entry_id:
+        matched = await db.get(BibEntry, reference.matched_bib_entry_id)
+        matched_title = matched.title if matched else None
+
+    return ReferenceListItem(
+        id=reference.id,
+        reference_order=reference.reference_order,
+        raw_text=reference.raw_text,
+        title=reference.title,
+        authors=json_list(reference.authors_json),
+        year=reference.year,
+        journal=reference.journal,
+        doi=reference.doi,
+        match_method=reference.match_method,
+        match_score=reference.match_score,
+        citation_count=reference.citation_count,
+        matched_bib_entry_id=reference.matched_bib_entry_id,
+        matched_bib_title=matched_title,
+    )

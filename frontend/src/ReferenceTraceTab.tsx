@@ -110,6 +110,9 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
   const [stage, setStage] = useState('请选择一篇带 PDF 的文献')
   const [logs, setLogs] = useState<string[]>([])
   const [message, setMessage] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
 
   const selectedEntry = useMemo(
     () => entries.find((item) => item.id === selectedId) || null,
@@ -273,6 +276,45 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
     }
   }
 
+  function startEdit(item: TraceReference) {
+    setEditingId(item.id)
+    setEditForm({
+      title: item.title || '',
+      authors: item.authors.join(', '),
+      year: item.year?.toString() || '',
+      journal: item.journal || '',
+      doi: item.doi || '',
+      raw_text: item.raw_text,
+    })
+  }
+
+  async function saveEdit(referenceId: string) {
+    setSaving(true)
+    try {
+      const payload: Record<string, any> = {}
+      if (editForm.title !== '') payload.title = editForm.title
+      if (editForm.raw_text !== '') payload.raw_text = editForm.raw_text
+      if (editForm.authors !== '') payload.authors = editForm.authors.split(/[,，;；]/).map((s) => s.trim()).filter(Boolean)
+      if (editForm.year !== '') payload.year = parseInt(editForm.year, 10) || null
+      if (editForm.journal !== '') payload.journal = editForm.journal
+      if (editForm.doi !== '') payload.doi = editForm.doi
+
+      const response = await fetch(`/api/references/references/${encodeURIComponent(referenceId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await parseJsonOrThrow<TraceReference>(response)
+      setReferences((prev) => prev.map((r) => (r.id === referenceId ? data : r)))
+      setEditingId(null)
+      setMessage('已保存修改。')
+    } catch (error: any) {
+      setMessage(error.message || '保存失败。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="w-full space-y-4">
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -400,31 +442,111 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                     <tbody>
                       {references.map((item) => (
                         <tr key={item.id} className={`border-b border-gray-100 ${item.id === selectedReferenceId ? 'bg-emerald-50/50' : ''}`}>
-                          <td className="px-4 py-3 align-top text-gray-500">{item.reference_order}</td>
-                          <td className="px-4 py-3 align-top">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedReferenceId(item.id)}
-                              className="text-left hover:text-emerald-700"
-                            >
-                              <div className="font-medium text-gray-900">{item.title || '未识别标题'}</div>
-                              <div className="mt-1 line-clamp-2 text-xs text-gray-500">{item.raw_text}</div>
-                            </button>
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <div className="text-xs text-gray-700">{item.matched_bib_title || '未匹配'}</div>
-                            {item.match_method && <div className="mt-1 text-xs text-gray-400">{item.match_method}</div>}
-                          </td>
-                          <td className="px-4 py-3 align-top text-gray-700">{item.citation_count}</td>
-                          <td className="px-4 py-3 align-top">
-                            <button
-                              type="button"
-                              onClick={() => void importReference(item.id)}
-                              className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
-                            >
-                              {item.matched_bib_entry_id ? '同步到文献库' : '导入文献库'}
-                            </button>
-                          </td>
+                          {editingId === item.id ? (
+                            <>
+                              <td className="px-4 py-3 align-top text-gray-500">{item.reference_order}</td>
+                              <td className="px-4 py-3 align-top" colSpan={4}>
+                                <div className="space-y-2">
+                                  <div className="grid grid-cols-[1fr_80px] gap-2">
+                                    <input
+                                      className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
+                                      placeholder="标题"
+                                      value={editForm.title ?? ''}
+                                      onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                                    />
+                                    <input
+                                      className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
+                                      placeholder="年份"
+                                      value={editForm.year ?? ''}
+                                      onChange={(e) => setEditForm((f) => ({ ...f, year: e.target.value }))}
+                                    />
+                                  </div>
+                                  <div className="grid grid-cols-[1fr_1fr] gap-2">
+                                    <input
+                                      className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
+                                      placeholder="作者（逗号分隔）"
+                                      value={editForm.authors ?? ''}
+                                      onChange={(e) => setEditForm((f) => ({ ...f, authors: e.target.value }))}
+                                    />
+                                    <input
+                                      className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
+                                      placeholder="期刊"
+                                      value={editForm.journal ?? ''}
+                                      onChange={(e) => setEditForm((f) => ({ ...f, journal: e.target.value }))}
+                                    />
+                                  </div>
+                                  <input
+                                    className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
+                                    placeholder="DOI"
+                                    value={editForm.doi ?? ''}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, doi: e.target.value }))}
+                                  />
+                                  <textarea
+                                    className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
+                                    rows={2}
+                                    placeholder="原文"
+                                    value={editForm.raw_text ?? ''}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, raw_text: e.target.value }))}
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={saving}
+                                      onClick={() => void saveEdit(item.id)}
+                                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                                    >
+                                      {saving ? '保存中...' : '保存'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingId(null)}
+                                      className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-3 align-top text-gray-500">{item.reference_order}</td>
+                              <td className="px-4 py-3 align-top">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedReferenceId(item.id)}
+                                  className="text-left hover:text-emerald-700"
+                                >
+                                  <div className="font-medium text-gray-900">{item.title || '未识别标题'}</div>
+                                  <div className="mt-1 line-clamp-2 text-xs text-gray-500">{item.raw_text}</div>
+                                </button>
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <div className="text-xs text-gray-700">{item.matched_bib_title || '未匹配'}</div>
+                                {item.match_method && <div className="mt-1 text-xs text-gray-400">{item.match_method}</div>}
+                              </td>
+                              <td className="px-4 py-3 align-top text-gray-700">{item.citation_count}</td>
+                              <td className="px-4 py-3 align-top">
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => startEdit(item)}
+                                    className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                                    title="编辑"
+                                  >
+                                    编辑
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void importReference(item.id)}
+                                    className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                                  >
+                                    {item.matched_bib_entry_id ? '同步到文献库' : '导入文献库'}
+                                  </button>
+                                </div>
+                              </td>
+                            </>
+                          )}
                         </tr>
                       ))}
                     </tbody>

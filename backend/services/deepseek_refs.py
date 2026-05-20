@@ -148,10 +148,13 @@ def _is_ref_heading(line: str) -> bool:
 
 _NOISE_LINE_PATTERNS = [
     re.compile(r"^\d{4}\s*年第\s*\d+\s*期"),
-    re.compile(r"^—+$"),
+    re.compile(r"^[—\-·\u2500\u2588\u2591\u2592\u2593\s]+$"),
+    re.compile(r"^·\d+·$"),
+    re.compile(r"^\d+\s*·$"),
+    re.compile(r"^·\s*\d+$"),
+    re.compile(r"^责任编辑"),
+    re.compile(r"^校\s*对"),
 ]
-
-_ARTICLE_HEADER_RE = re.compile(r"^.{2,10}[等：:].{5,30}$")
 
 
 def _is_noise_line(line: str) -> bool:
@@ -159,11 +162,34 @@ def _is_noise_line(line: str) -> bool:
     if not s:
         return True
     for pat in _NOISE_LINE_PATTERNS:
-        if pat.match(s):
+        if pat.search(s):
             return True
     if re.fullmatch(r"\d{1,5}", s):
         return True
+    if len(s) <= 4 and not re.search(r"[\u4e00-\u9fff]", s):
+        return True
     return False
+
+
+def _is_two_column_page(page) -> bool:
+    chars = page.chars
+    if len(chars) < 50:
+        return False
+    mid_x = page.width / 2
+    left_count = sum(1 for c in chars if c["x0"] < mid_x)
+    ratio = left_count / len(chars)
+    return 0.25 < ratio < 0.75
+
+
+def _extract_page_text_column_aware(page) -> str:
+    if not _is_two_column_page(page):
+        return page.extract_text() or ""
+    mid_x = page.width / 2
+    left_crop = page.crop((0, 0, mid_x, page.height))
+    right_crop = page.crop((mid_x, 0, page.width, page.height))
+    left_text = left_crop.extract_text() or ""
+    right_text = right_crop.extract_text() or ""
+    return left_text + "\n" + right_text
 
 
 def extract_candidate_text(pdf_path: str) -> str:
@@ -172,7 +198,7 @@ def extract_candidate_text(pdf_path: str) -> str:
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            text = page.extract_text() or ""
+            text = _extract_page_text_column_aware(page)
             lines = text.splitlines()
 
             page_lines: list[str] = []
@@ -211,7 +237,7 @@ def extract_body_text(pdf_path: str) -> tuple[list[dict], str]:
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            text = page.extract_text() or ""
+            text = _extract_page_text_column_aware(page)
             for line in text.splitlines():
                 s = _normalize_ws(line)
                 if not s:
@@ -236,7 +262,7 @@ def extract_body_text(pdf_path: str) -> tuple[list[dict], str]:
 
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
+            text = _extract_page_text_column_aware(page)
             blocks = re.split(r"\n\s*\n", text)
             if len(blocks) == 1:
                 blocks = text.splitlines()
@@ -408,7 +434,7 @@ def trace_citations_deepseek(
     else:
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
-                text = page.extract_text() or ""
+                text = _extract_page_text_column_aware(page)
                 for line in text.splitlines():
                     s = _normalize_ws(line)
                     if not s:

@@ -174,10 +174,10 @@ POST 可能返回 4xx/5xx（如数据库写入失败），但代码静默忽略�
 
 ### 状态
 
-- [ ] 加日志确认创建时 note / selectedText 的值
-- [ ] 检查 POST 响应状态码
-- [ ] 修复
-- [ ] 验证
+- [x] 加日志确认创建时 note / selectedText 的值
+- [x] 检查 POST 响应状态码
+- [x] 修复
+- [x] 验证
 
 ---
 
@@ -255,10 +255,10 @@ async def update_reference(ref_id: str, body: dict, user, db):
 
 ### 状态
 
-- [ ] 后端：新增 PUT `/references/{ref_id}` 端点
-- [ ] 前端：表格行内编辑 UI
-- [ ] 前端：调用 PUT API 保存
-- [ ] 验证
+- [x] 后端：新增 PUT `/references/{ref_id}` 端点
+- [x] 前端：表格行内编辑 UI
+- [x] 前端：调用 PUT API 保存
+- [x] 验证
 
 ---
 
