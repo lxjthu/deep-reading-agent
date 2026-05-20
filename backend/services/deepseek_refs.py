@@ -310,9 +310,15 @@ def call_deepseek_json(
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-        except (APITimeoutError, httpx.ConnectTimeout) as exc:
-            logger.warning("DeepSeek timeout (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, exc)
+        except (APITimeoutError, httpx.ConnectTimeout, httpx.ConnectError) as exc:
+            logger.warning("DeepSeek connection error (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, exc)
             continue
+        except Exception as exc:
+            err_name = type(exc).__name__
+            if "connection" in err_name.lower() or "connect" in str(exc).lower():
+                logger.warning("DeepSeek connection error (attempt %d/%d): %s: %s", attempt + 1, MAX_RETRIES, err_name, exc)
+                continue
+            raise
         raw = resp.choices[0].message.content
         finish = resp.choices[0].finish_reason
         if raw and raw.strip():
