@@ -3062,6 +3062,30 @@ function PromptsEditor() {
         { key: 'empiricist', title: '实证主义者' },
       ],
     },
+    {
+      id: 'synthesis',
+      label: 'AI 综述',
+      icon: '📝',
+      steps: [
+        { key: 'system_role', title: 'AI 综述：系统角色' },
+        { key: 'compare_system_role', title: '对比综述：系统角色' },
+        { key: 'dimension_prompt', title: 'AI 综述：逐维度写作指令' },
+        { key: 'single_prompt', title: '对比综述：单维度写作' },
+        { key: 'multi_prompt', title: '对比综述：多子问题写作' },
+        { key: 'cross_dim_prompt', title: '对比综述：跨维度写作' },
+        { key: 'long_single_prompt', title: '长文本对比：单维度写作' },
+        { key: 'long_multi_prompt', title: '长文本对比：多维度写作' },
+      ],
+    },
+    {
+      id: 'ai_template',
+      label: 'AI 模板生成',
+      icon: '🤖',
+      steps: [
+        { key: 'meta_prompt', title: '模板生成：元提示词' },
+        { key: 'system_role', title: '模板生成：系统角色' },
+      ],
+    },
   ]
 
   const currentType =

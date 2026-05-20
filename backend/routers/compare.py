@@ -48,7 +48,7 @@ class LongCompareRequest(BaseModel):
     mode: Optional[str] = "single"
 
 
-SYNTHESIS_SYSTEM_PROMPT = (
+SYNTHESIS_SYSTEM_PROMPT_DEFAULT = (
     "你是一位资深的学术文献综述专家。你的任务是根据已完成的精读分析，撰写高质量的"
     "文献综述段落。你必须严格基于所提供的文献内容，不得捏造任何数据或结论。\n\n"
     "你的综述风格要求：\n"
@@ -814,30 +814,36 @@ def _match_dimension_content(content_dict: dict, dim_label: str) -> str:
     return "\n\n".join(parts) if parts else ""
 
 
-def build_synthesis_dimension_prompt(
+async def build_synthesis_dimension_prompt(
     dim_label: str,
     papers: list[dict],
     content_field: str = "subQuestions",
+    *,
+    user_id: int | None = None,
+    db: AsyncSession | None = None,
 ) -> str:
-    parts = [
-        f"【当前综述维度】{dim_label}",
-        "",
-        "【写作任务】",
-        "请撰写该维度的综述段落，包含以下层次：",
-        "1. **梳理与总结**：概述各文献在该维度的核心观点和发现",
-        "2. **源流比较**：比较不同文献的研究路径、方法论来源、理论根基的异同",
-        "3. **学术对话**：呈现文献间的共识与分歧，构建观点的交锋与呼应",
-        "4. **缺漏分析**：识别该维度下现有研究的盲区、方法局限或数据空白",
-        "5. **新起点**：基于以上分析，指出未来研究可突破的方向",
-        "",
-        "【引用要求】",
-        "- 正文使用间注法：（第一作者姓等，年份）",
-        "- 可使用转引：（被引作者, 年份, 转引自 引用作者, 年份）",
-        "- 不要写参考文献目录",
-        "",
-        "【各文献在该维度的精读内容】",
-        "",
-    ]
+    scaffold = ""
+    if db is not None and user_id is not None:
+        try:
+            from prompt_service import get_prompt_payload
+            payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="dimension_prompt", user_id=user_id)
+            scaffold = payload.effective_content
+        except Exception:
+            pass
+    if not scaffold:
+        scaffold = "【当前综述维度】{dim_label}\n\n" \
+            "【写作任务】\n请撰写该维度的综述段落，包含以下层次：\n" \
+            "1. **梳理与总结**：概述各文献在该维度的核心观点和发现\n" \
+            "2. **源流比较**：比较不同文献的研究路径、方法论来源、理论根基的异同\n" \
+            "3. **学术对话**：呈现文献间的共识与分歧，构建观点的交锋与呼应\n" \
+            "4. **缺漏分析**：识别该维度下现有研究的盲区、方法局限或数据空白\n" \
+            "5. **新起点**：基于以上分析，指出未来研究可突破的方向\n\n" \
+            "【引用要求】\n" \
+            "- 正文使用间注法：（第一作者姓等，年份）\n" \
+            "- 可使用转引：（被引作者, 年份, 转引自 引用作者, 年份）\n" \
+            "- 不要写参考文献目录\n\n" \
+            "【各文献在该维度的精读内容】\n"
+    parts = [scaffold.format(dim_label=dim_label), ""]
 
     for i, paper in enumerate(papers):
         cite = format_cite_tag(paper.get('authors', []), _safe_year(paper.get('year')))
@@ -1057,7 +1063,7 @@ def build_reference_list(papers: list) -> str:
     return f"\n\n---\n\n## 参考文献\n\n{ref_block}"
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_DEFAULT = (
     "你是一位中文学术写作专家，擅长撰写规范的文献综述段落。"
     "你的任务是根据已有的精读分析内容，综合多篇文献的观点，"
     "写出适合直接插入学术论文文献综述部分的高质量文字。"
@@ -1067,29 +1073,34 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_single_prompt(label: str, papers: list) -> str:
+async def build_single_prompt(label: str, papers: list, *, user_id: int | None = None, db: AsyncSession | None = None) -> str:
     """Single question/dimension: one coherent paragraph."""
     n = len(papers)
-    parts = [
-        f"以下是{n}篇文献在「{label}」这一问题上的精读分析内容。",
-        "",
-        "【写作任务】",
-        "请综合这些文献的内容，写出**恰好一段**连贯的学术性综述文字（8～15句）。",
-        "",
-        "【段落结构要求】",
-        "① 首句：用主题句点明该问题在学界的整体关注焦点或争议；",
-        "② 中间：逐一或分组介绍各文献的研究视角、数据、发现，比较异同；",
-        "③ 重点揭示：哪些结论已形成共识？哪些仍存在分歧或对立？",
-        "④ 末句：指出现有研究的局限、空白或对未来研究的启示；",
-        "",
-        "【写作规范】",
-        "- 行文流畅、逻辑连贯，适合直接嵌入学术论文；",
-        "- 每处引用标注间注：（第一作者姓，年份）或（作者A & 作者B, 年份）；",
-        "- 不要加标题、不要分小节、不要写引言或结尾感谢语；",
-        "- 不要写参考文献目录（系统自动生成）。",
-        "",
-        "【文献内容】",
-    ]
+    scaffold = ""
+    if db is not None and user_id is not None:
+        try:
+            from prompt_service import get_prompt_payload
+            payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="single_prompt", user_id=user_id)
+            scaffold = payload.effective_content
+        except Exception:
+            pass
+    if not scaffold:
+        scaffold = (
+            "以下是{n}篇文献在「{label}」这一问题上的精读分析内容。\n\n"
+            "【写作任务】\n请综合这些文献的内容，写出**恰好一段**连贯的学术性综述文字（8～15句）。\n\n"
+            "【段落结构要求】\n"
+            "① 首句：用主题句点明该问题在学界的整体关注焦点或争议；\n"
+            "② 中间：逐一或分组介绍各文献的研究视角、数据、发现，比较异同；\n"
+            "③ 重点揭示：哪些结论已形成共识？哪些仍存在分歧或对立？\n"
+            "④ 末句：指出现有研究的局限、空白或对未来研究的启示；\n\n"
+            "【写作规范】\n"
+            "- 行文流畅、逻辑连贯，适合直接嵌入学术论文；\n"
+            "- 每处引用标注间注：（第一作者姓，年份）或（作者A & 作者B, 年份）；\n"
+            "- 不要加标题、不要分小节、不要写引言或结尾感谢语；\n"
+            "- 不要写参考文献目录（系统自动生成）。\n\n"
+            "【文献内容】\n"
+        )
+    parts = [scaffold.format(n=n, label=label)]
     for paper in papers:
         parts.append(build_paper_header(paper))
         for sq, content in paper.get('subQuestions', {}).items():
@@ -1099,33 +1110,36 @@ def build_single_prompt(label: str, papers: list) -> str:
     return "\n".join(parts)
 
 
-def build_multi_prompt(label: str, sub_questions: list, papers: list) -> str:
+async def build_multi_prompt(label: str, sub_questions: list, papers: list, *, user_id: int | None = None, db: AsyncSession | None = None) -> str:
     """Multi-question: introduction + one section per question + conclusion."""
     n = len(papers)
     sq_list = "、".join(f"「{sq}」" for sq in sub_questions)
-    parts = [
-        f"以下是{n}篇文献在「{label}」步骤下，针对以下{len(sub_questions)}个子问题的精读分析内容：",
-        sq_list,
-        "",
-        "【写作任务】",
-        "请撰写一篇结构化的分节文献综述，格式如下：",
-        "",
-        "**引言**（1句）：用一句话概括该步骤的整体研究图景；",
-        "",
-        f"**各子问题分节**（共{len(sub_questions)}节）：",
-        "- 每节以 ### [子问题标题] 为标题；",
-        "- 正文1～2段，横向比较各文献在该子问题上的数据、方法、结论；",
-        "- 明确指出共识与分歧；",
-        "",
-        "**结论**（1句）：点出跨问题的整体研究局限或未来方向；",
-        "",
-        "【写作规范】",
-        "- 每处引用标注间注：（第一作者姓，年份）；",
-        "- 不要写参考文献目录（系统自动生成）；",
-        "- 全文使用学术中文。",
-        "",
-        "【文献内容】",
-    ]
+    scaffold = ""
+    if db is not None and user_id is not None:
+        try:
+            from prompt_service import get_prompt_payload
+            payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="multi_prompt", user_id=user_id)
+            scaffold = payload.effective_content
+        except Exception:
+            pass
+    if not scaffold:
+        scaffold = (
+            "以下是{n}篇文献在「{label}」步骤下，针对以下{sub_count}个子问题的精读分析内容：\n"
+            "{sub_questions_list}\n\n"
+            "【写作任务】\n请撰写一篇结构化的分节文献综述，格式如下：\n\n"
+            "**引言**（1句）：用一句话概括该步骤的整体研究图景；\n\n"
+            "**各子问题分节**（共{sub_count}节）：\n"
+            "- 每节以 ### [子问题标题] 为标题；\n"
+            "- 正文1～2段，横向比较各文献在该子问题上的数据、方法、结论；\n"
+            "- 明确指出共识与分歧；\n\n"
+            "**结论**（1句）：点出跨问题的整体研究局限或未来方向；\n\n"
+            "【写作规范】\n"
+            "- 每处引用标注间注：（第一作者姓，年份）；\n"
+            "- 不要写参考文献目录（系统自动生成）；\n"
+            "- 全文使用学术中文。\n\n"
+            "【文献内容】\n"
+        )
+    parts = [scaffold.format(n=n, label=label, sub_count=len(sub_questions), sub_questions_list=sq_list)]
     for paper in papers:
         parts.append(build_paper_header(paper))
         for sq, content in paper.get('subQuestions', {}).items():
@@ -1135,28 +1149,33 @@ def build_multi_prompt(label: str, sub_questions: list, papers: list) -> str:
     return "\n".join(parts)
 
 
-def build_long_single_prompt(dimension: str, papers: list) -> str:
+async def build_long_single_prompt(dimension: str, papers: list, *, user_id: int | None = None, db: AsyncSession | None = None) -> str:
     """Long context single dimension: one paragraph."""
     n = len(papers)
-    parts = [
-        f"以下是{n}篇文献在「{dimension}」维度上的精读分析内容。",
-        "",
-        "【写作任务】",
-        "请综合这些文献，写出**恰好一段**连贯的学术性综述文字（8～15句）。",
-        "",
-        "【段落结构要求】",
-        "① 首句：主题句，点明该维度在学界的整体关注或争议；",
-        "② 中间：介绍各文献的研究路径、数据来源、核心发现，横向比较；",
-        "③ 指出：哪些结论已有共识？哪些存在分歧？",
-        "④ 末句：现有研究的局限与未来方向；",
-        "",
-        "【写作规范】",
-        "- 每处引用标注间注：（第一作者姓，年份）；",
-        "- 不要分节、不要加标题、不要写参考文献目录；",
-        "- 学术中文行文。",
-        "",
-        "【文献内容】",
-    ]
+    scaffold = ""
+    if db is not None and user_id is not None:
+        try:
+            from prompt_service import get_prompt_payload
+            payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="long_single_prompt", user_id=user_id)
+            scaffold = payload.effective_content
+        except Exception:
+            pass
+    if not scaffold:
+        scaffold = (
+            "以下是{n}篇文献在「{dimension}」维度上的精读分析内容。\n\n"
+            "【写作任务】\n请综合这些文献，写出**恰好一段**连贯的学术性综述文字（8～15句）。\n\n"
+            "【段落结构要求】\n"
+            "① 首句：主题句，点明该维度在学界的整体关注或争议；\n"
+            "② 中间：介绍各文献的研究路径、数据来源、核心发现，横向比较；\n"
+            "③ 指出：哪些结论已有共识？哪些存在分歧？\n"
+            "④ 末句：现有研究的局限与未来方向；\n\n"
+            "【写作规范】\n"
+            "- 每处引用标注间注：（第一作者姓，年份）；\n"
+            "- 不要分节、不要加标题、不要写参考文献目录；\n"
+            "- 学术中文行文。\n\n"
+            "【文献内容】\n"
+        )
+    parts = [scaffold.format(n=n, dimension=dimension)]
     for paper in papers:
         parts.append(build_paper_header(paper))
         content = paper.get('content', '')[:2000].strip()
@@ -1165,7 +1184,7 @@ def build_long_single_prompt(dimension: str, papers: list) -> str:
     return "\n".join(parts)
 
 
-def build_cross_dim_prompt(papers: list) -> str:
+async def build_cross_dim_prompt(papers: list, *, user_id: int | None = None, db: AsyncSession | None = None) -> str:
     """
     Cross-dimension synthesis: questions prefixed with step name.
     subQuestions keys are like "[第一步] 研究问题" / "[第三步] 数据来源".
@@ -1185,29 +1204,32 @@ def build_cross_dim_prompt(papers: list) -> str:
 
     n = len(papers)
     step_list = "、".join(f"「{s}」" for s in step_groups)
-    parts = [
-        f"以下是{n}篇文献在**多个分析维度**上的精读内容，涉及：{step_list}。",
-        "",
-        "【写作任务】",
-        "请撰写一篇**跨维度结构化文献综述**，格式如下：",
-        "",
-        "① **引言**（1句）：用一句话概括这批文献整体的研究图景与共性关切；",
-        "",
-        f"② **各维度分节**（共{len(step_groups)}节）：",
-        "   - 每节以 `### [维度名称]` 为标题；",
-        "   - 正文1～2段，横向比较各文献在该维度的数据/方法/发现；",
-        "   - 明确指出共识与分歧；",
-        "   - 如该维度下有多个子问题，按子问题自然过渡，不再单独分节；",
-        "",
-        "③ **跨维度结论**（1句）：综合各维度，点出整体研究局限或未来突破方向；",
-        "",
-        "【引用规范】",
-        "- 间注法：（第一作者姓，年份）；",
-        "- 不写参考文献目录（系统自动生成）；",
-        "- 全文学术中文。",
-        "",
-        "【文献内容（按维度·子问题组织）】",
-    ]
+    scaffold = ""
+    if db is not None and user_id is not None:
+        try:
+            from prompt_service import get_prompt_payload
+            payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="cross_dim_prompt", user_id=user_id)
+            scaffold = payload.effective_content
+        except Exception:
+            pass
+    if not scaffold:
+        scaffold = (
+            "以下是{n}篇文献在**多个分析维度**上的精读内容，涉及：{step_list}。\n\n"
+            "【写作任务】\n请撰写一篇**跨维度结构化文献综述**，格式如下：\n\n"
+            "① **引言**（1句）：用一句话概括这批文献整体的研究图景与共性关切；\n\n"
+            "② **各维度分节**（共{step_count}节）：\n"
+            "   - 每节以 `### [维度名称]` 为标题；\n"
+            "   - 正文1～2段，横向比较各文献在该维度的数据/方法/发现；\n"
+            "   - 明确指出共识与分歧；\n"
+            "   - 如该维度下有多个子问题，按子问题自然过渡，不再单独分节；\n\n"
+            "③ **跨维度结论**（1句）：综合各维度，点出整体研究局限或未来突破方向；\n\n"
+            "【引用规范】\n"
+            "- 间注法：（第一作者姓，年份）；\n"
+            "- 不写参考文献目录（系统自动生成）；\n"
+            "- 全文学术中文。\n\n"
+            "【文献内容（按维度·子问题组织）】\n"
+        )
+    parts = [scaffold.format(n=n, step_list=step_list, step_count=len(step_groups))]
 
     for step, sub_set in step_groups.items():
         parts.append(f"\n▶ **{step}**")
@@ -1225,25 +1247,31 @@ def build_cross_dim_prompt(papers: list) -> str:
     return "\n".join(parts)
 
 
-def build_long_multi_prompt(dimensions: list, papers: list) -> str:
+async def build_long_multi_prompt(dimensions: list, papers: list, *, user_id: int | None = None, db: AsyncSession | None = None) -> str:
     """Long context multi-dimension: sectioned by dimension."""
     n = len(papers)
     dim_label = "、".join(f"「{d}」" for d in dimensions)
-    parts = [
-        f"以下是{n}篇文献在{len(dimensions)}个维度上的精读分析内容：{dim_label}。",
-        "",
-        "【写作任务】",
-        "请撰写一篇结构化的分节文献综述：",
-        "- **引言**（1句）：概括这些维度的整体研究图景；",
-        f"- **分节**（共{len(dimensions)}节，每节标题 ### [维度名]）：每节1～2段，横向比较各文献，指出共识与分歧；",
-        "- **结论**（1句）：整体局限与未来方向。",
-        "",
-        "【写作规范】",
-        "- 间注引用：（第一作者姓，年份）；",
-        "- 不写参考文献目录；学术中文。",
-        "",
-        "【文献内容】",
-    ]
+    scaffold = ""
+    if db is not None and user_id is not None:
+        try:
+            from prompt_service import get_prompt_payload
+            payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="long_multi_prompt", user_id=user_id)
+            scaffold = payload.effective_content
+        except Exception:
+            pass
+    if not scaffold:
+        scaffold = (
+            "以下是{n}篇文献在{dim_count}个维度上的精读分析内容：{dimensions}。\n\n"
+            "【写作任务】\n请撰写一篇结构化的分节文献综述：\n"
+            "- **引言**（1句）：概括这些维度的整体研究图景；\n"
+            "- **分节**（共{dim_count}节，每节标题 ### [维度名]）：每节1～2段，横向比较各文献，指出共识与分歧；\n"
+            "- **结论**（1句）：整体局限与未来方向。\n\n"
+            "【写作规范】\n"
+            "- 间注引用：（第一作者姓，年份）；\n"
+            "- 不写参考文献目录；学术中文。\n\n"
+            "【文献内容】\n"
+        )
+    parts = [scaffold.format(n=n, dim_count=len(dimensions), dimensions=dim_label)]
     for paper in papers:
         parts.append(build_paper_header(paper))
         for dim, content in paper.get('dimensions', {}).items():
@@ -1287,17 +1315,25 @@ async def analyze_comparison(
         client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
 
         if mode == "cross":
-            prompt = build_cross_dim_prompt(paper_data)
+            prompt = await build_cross_dim_prompt(paper_data, user_id=user.id, db=db)
         elif mode == "multi":
-            prompt = build_multi_prompt(req.step, req.subQuestions, paper_data)
+            prompt = await build_multi_prompt(req.step, req.subQuestions, paper_data, user_id=user.id, db=db)
         else:
-            prompt = build_single_prompt(req.step, paper_data)
+            prompt = await build_single_prompt(req.step, paper_data, user_id=user.id, db=db)
+
+        compare_system_prompt = SYSTEM_PROMPT_DEFAULT
+        try:
+            from prompt_service import get_prompt_payload
+            sys_payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="compare_system_role", user_id=user.id)
+            compare_system_prompt = sys_payload.effective_content
+        except Exception:
+            pass
 
         response = client.chat.completions.create(
             model="deepseek-v4-flash",
             extra_body={"thinking": {"type": "disabled"}},
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": compare_system_prompt},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.65,
@@ -1366,15 +1402,23 @@ async def analyze_long_comparison(
                 for d in p.get("dimensions", {}).keys():
                     if d not in all_dims:
                         all_dims.append(d)
-            prompt = build_long_multi_prompt(all_dims or [req.dimension], paper_data)
+            prompt = await build_long_multi_prompt(all_dims or [req.dimension], paper_data, user_id=user.id, db=db)
         else:
-            prompt = build_long_single_prompt(req.dimension, paper_data)
+            prompt = await build_long_single_prompt(req.dimension, paper_data, user_id=user.id, db=db)
+
+        compare_system_prompt = SYSTEM_PROMPT_DEFAULT
+        try:
+            from prompt_service import get_prompt_payload
+            sys_payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="compare_system_role", user_id=user.id)
+            compare_system_prompt = sys_payload.effective_content
+        except Exception:
+            pass
 
         response = client.chat.completions.create(
             model="deepseek-v4-flash",
             extra_body={"thinking": {"type": "disabled"}},
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": compare_system_prompt},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.65,
@@ -1433,6 +1477,14 @@ async def synthesize_dimensions(
     job.started_at = utcnow_naive()
     await db.commit()
 
+    synthesis_system_prompt = SYNTHESIS_SYSTEM_PROMPT_DEFAULT
+    try:
+        from prompt_service import get_prompt_payload
+        sys_payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="system_role", user_id=user.id)
+        synthesis_system_prompt = sys_payload.effective_content
+    except Exception:
+        pass
+
     async def _stream():
         try:
             client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
@@ -1448,14 +1500,14 @@ async def synthesize_dimensions(
                 job_cur.progress = 10 + int(80 * idx / total)
                 await db.commit()
 
-                dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, "subQuestions")
+                dim_prompt = await build_synthesis_dimension_prompt(dim_label, paper_data, "subQuestions", user_id=user.id, db=db)
                 user_message = metadata_block + "\n\n" + dim_prompt
 
                 response = client.chat.completions.create(
                     model="deepseek-v4-flash",
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
-                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "system", "content": synthesis_system_prompt},
                         {"role": "user", "content": user_message},
                     ],
                     temperature=0.65,
@@ -1484,7 +1536,7 @@ async def synthesize_dimensions(
                     model="deepseek-v4-flash",
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
-                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "system", "content": synthesis_system_prompt},
                         {"role": "user", "content": user_message},
                     ],
                     temperature=0.1,
@@ -1582,6 +1634,14 @@ async def synthesis_stream(
     job.started_at = utcnow_naive()
     await db.commit()
 
+    synthesis_system_prompt = SYNTHESIS_SYSTEM_PROMPT_DEFAULT
+    try:
+        from prompt_service import get_prompt_payload
+        sys_payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="system_role", user_id=user.id)
+        synthesis_system_prompt = sys_payload.effective_content
+    except Exception:
+        pass
+
     async def _stream():
         try:
             client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
@@ -1595,14 +1655,14 @@ async def synthesis_stream(
                 job_cur.progress = 10 + int(80 * idx / total)
                 await db.commit()
 
-                dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, content_field)
+                dim_prompt = await build_synthesis_dimension_prompt(dim_label, paper_data, content_field, user_id=user.id, db=db)
                 user_message = metadata_block + "\n\n" + dim_prompt
 
                 response = client.chat.completions.create(
                     model="deepseek-v4-flash",
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
-                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "system", "content": synthesis_system_prompt},
                         {"role": "user", "content": user_message},
                     ],
                     temperature=0.65,
@@ -1631,7 +1691,7 @@ async def synthesis_stream(
                     model="deepseek-v4-flash",
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
-                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "system", "content": synthesis_system_prompt},
                         {"role": "user", "content": user_message},
                     ],
                     temperature=0.1,
@@ -1723,6 +1783,14 @@ async def synthesize_long_dimensions(
     job.started_at = utcnow_naive()
     await db.commit()
 
+    synthesis_system_prompt = SYNTHESIS_SYSTEM_PROMPT_DEFAULT
+    try:
+        from prompt_service import get_prompt_payload
+        sys_payload = await get_prompt_payload(db, prompt_type="synthesis", prompt_key="system_role", user_id=user.id)
+        synthesis_system_prompt = sys_payload.effective_content
+    except Exception:
+        pass
+
     async def _stream():
         try:
             client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
@@ -1736,14 +1804,14 @@ async def synthesize_long_dimensions(
                 job_cur.progress = 10 + int(80 * idx / total)
                 await db.commit()
 
-                dim_prompt = build_synthesis_dimension_prompt(dim_label, paper_data, "dimensions")
+                dim_prompt = await build_synthesis_dimension_prompt(dim_label, paper_data, "dimensions", user_id=user.id, db=db)
                 user_message = metadata_block + "\n\n" + dim_prompt
 
                 response = client.chat.completions.create(
                     model="deepseek-v4-flash",
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
-                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "system", "content": synthesis_system_prompt},
                         {"role": "user", "content": user_message},
                     ],
                     max_tokens=8000,
@@ -1771,7 +1839,7 @@ async def synthesize_long_dimensions(
                     model="deepseek-v4-flash",
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
-                        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+                        {"role": "system", "content": synthesis_system_prompt},
                         {"role": "user", "content": user_message},
                     ],
                     temperature=0.1,

@@ -12,7 +12,7 @@ DEFAULT_MAX_TOKENS = 4000
 MAX_TEMPLATE_TOKENS = 12000
 MAX_PAPER_CHARS = 8000
 
-META_PROMPT_TEMPLATE = """你是一位资深的学术论文分析专家。请根据以下论文内容，设计一套系统性的案例分析维度体系。
+META_PROMPT_DEFAULT = """你是一位资深的学术论文分析专家。请根据以下论文内容，设计一套系统性的案例分析维度体系。
 
 【论文内容】
 {paper_text}
@@ -70,16 +70,23 @@ META_PROMPT_TEMPLATE = """你是一位资深的学术论文分析专家。请根
 5. 维度之间互补不重复
 6. 维度总数控制在 {dim_count} 个左右（±2）"""
 
+SYSTEM_ROLE_DEFAULT = "你是一个专业的学术论文分析助手，擅长设计多维度的论文精读分析框架。你必须严格按照用户要求的JSON格式输出，不要添加任何markdown标记或解释性文字。"
+
 
 def generate_template_from_paper(
     paper_text: str,
     api_key: str,
     dim_count: int = 12,
+    meta_prompt_template: str | None = None,
+    system_role: str | None = None,
 ) -> dict:
     api_key = validate_deepseek_key(api_key)
     text = paper_text[:MAX_PAPER_CHARS]
 
-    meta_prompt = META_PROMPT_TEMPLATE.format(
+    template = meta_prompt_template or META_PROMPT_DEFAULT
+    role = system_role or SYSTEM_ROLE_DEFAULT
+
+    meta_prompt = template.format(
         paper_text=text,
         dim_count=dim_count,
     )
@@ -103,7 +110,7 @@ def generate_template_from_paper(
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一个专业的学术论文分析助手，擅长设计多维度的论文精读分析框架。你必须严格按照用户要求的JSON格式输出，不要添加任何markdown标记或解释性文字。",
+                    "content": role,
                 },
                 {"role": "user", "content": meta_prompt},
             ],

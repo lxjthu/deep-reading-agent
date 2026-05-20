@@ -20,6 +20,8 @@ PROMPT_TYPE_LABELS: dict[str, str] = {
     "long": "长文本精读",
     "filter": "文献筛选",
     "compare": "对比分析",
+    "synthesis": "AI 综述",
+    "ai_template": "AI 模板生成",
 }
 
 PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
@@ -68,6 +70,50 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
         "ai_summary": {
             "title": "AI 文本总结",
             "file_path": "prompts/compare/ai_summary.md",
+        },
+    },
+    "synthesis": {
+        "system_role": {
+            "title": "AI 综述：系统角色",
+            "file_path": "prompts/synthesis/system_role.md",
+        },
+        "compare_system_role": {
+            "title": "对比综述：系统角色",
+            "file_path": "prompts/synthesis/compare_system_role.md",
+        },
+        "dimension_prompt": {
+            "title": "AI 综述：逐维度写作指令",
+            "file_path": "prompts/synthesis/dimension_prompt.md",
+        },
+        "single_prompt": {
+            "title": "对比综述：单维度写作",
+            "file_path": "prompts/synthesis/single_prompt.md",
+        },
+        "multi_prompt": {
+            "title": "对比综述：多子问题写作",
+            "file_path": "prompts/synthesis/multi_prompt.md",
+        },
+        "cross_dim_prompt": {
+            "title": "对比综述：跨维度写作",
+            "file_path": "prompts/synthesis/cross_dim_prompt.md",
+        },
+        "long_single_prompt": {
+            "title": "长文本对比：单维度写作",
+            "file_path": "prompts/synthesis/long_single_prompt.md",
+        },
+        "long_multi_prompt": {
+            "title": "长文本对比：多维度写作",
+            "file_path": "prompts/synthesis/long_multi_prompt.md",
+        },
+    },
+    "ai_template": {
+        "meta_prompt": {
+            "title": "模板生成：元提示词",
+            "file_path": "prompts/ai_template/meta_prompt.md",
+        },
+        "system_role": {
+            "title": "模板生成：系统角色",
+            "file_path": "prompts/ai_template/system_role.md",
         },
     },
 }
@@ -137,4 +183,22 @@ def get_builtin_fallback(prompt_type: str, prompt_key: str) -> str:
         return f'请围绕"{get_prompt_definition(prompt_type, prompt_key)["title"]}"直接输出分析内容，不要客套开场白。'
     if prompt_type == "compare":
         return "你是一位学术文本总结助手。请将用户选中的学术文本片段总结为一句话。要求：1.保留核心信息 2.语言简洁，不超过50个汉字 3.使用学术语言 4.不要添加原文中没有的信息"
+    if prompt_type == "synthesis":
+        slot_defaults = {
+            "system_role": "你是一位资深的学术文献综述专家。你的任务是根据已完成的精读分析，撰写高质量的文献综述段落。你必须严格基于所提供的文献内容，不得捏造任何数据或结论。",
+            "compare_system_role": "你是一位中文学术写作专家，擅长撰写规范的文献综述段落。你的任务是根据已有的精读分析内容，综合多篇文献的观点，写出适合直接插入学术论文文献综述部分的高质量文字。",
+            "dimension_prompt": "【当前综述维度】{dim_label}\n\n请撰写该维度的综述段落。",
+            "single_prompt": "以下是{n}篇文献在「{label}」这一问题上的精读分析内容。\n\n请综合这些文献的内容，写出**恰好一段**连贯的学术性综述文字（8～15句）。",
+            "multi_prompt": "以下是{n}篇文献在「{label}」步骤下，针对以下{sub_count}个子问题的精读分析内容：{sub_questions_list}\n\n请撰写一篇结构化的分节文献综述。",
+            "cross_dim_prompt": "以下是{n}篇文献在**多个分析维度**上的精读内容，涉及：{step_list}。\n\n请撰写一篇**跨维度结构化文献综述**。",
+            "long_single_prompt": "以下是{n}篇文献在「{dimension}」维度上的精读分析内容。\n\n请综合这些文献，写出**恰好一段**连贯的学术性综述文字（8～15句）。",
+            "long_multi_prompt": "以下是{n}篇文献在{dim_count}个维度上的精读分析内容：{dimensions}。\n\n请撰写一篇结构化的分节文献综述。",
+        }
+        return slot_defaults.get(prompt_key, "请直接输出分析内容，不要客套开场白。")
+    if prompt_type == "ai_template":
+        slot_defaults = {
+            "meta_prompt": "你是一位资深的学术论文分析专家。请根据以下论文内容，设计一套系统性的案例分析维度体系。\n\n【论文内容】\n{paper_text}\n\n请设计 {dim_count} 个分析维度。",
+            "system_role": "你是一个专业的学术论文分析助手，擅长设计多维度的论文精读分析框架。你必须严格按照用户要求的JSON格式输出，不要添加任何markdown标记或解释性文字。",
+        }
+        return slot_defaults.get(prompt_key, "请直接输出分析内容，不要客套开场白。")
     return "请直接输出分析内容，不要客套开场白。"

@@ -936,10 +936,23 @@ async def generate_template(
         if not force_regenerate and cache_key in _generation_cache:
             return _generation_cache[cache_key]
 
+        meta_prompt_template = None
+        system_role = None
+        try:
+            from prompt_service import get_prompt_payload
+            meta_payload = await get_prompt_payload(db, prompt_type="ai_template", prompt_key="meta_prompt", user_id=user.id)
+            meta_prompt_template = meta_payload.effective_content
+            sys_payload = await get_prompt_payload(db, prompt_type="ai_template", prompt_key="system_role", user_id=user.id)
+            system_role = sys_payload.effective_content
+        except Exception:
+            pass
+
         result = generate_template_from_paper(
             paper_text=text,
             api_key=api_key or "",
             dim_count=dim_count,
+            meta_prompt_template=meta_prompt_template,
+            system_role=system_role,
         )
 
         if "error" in result:
