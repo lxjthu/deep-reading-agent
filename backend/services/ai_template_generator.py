@@ -7,7 +7,7 @@ from json_repair import loads as repair_json_loads
 
 from backend.utils.api_key import validate_deepseek_key
 
-MODEL = "deepseek-chat"
+MODEL = "deepseek-v4-flash"
 DEFAULT_MAX_TOKENS = 4000
 MAX_TEMPLATE_TOKENS = 12000
 MAX_PAPER_CHARS = 8000
@@ -107,6 +107,7 @@ def generate_template_from_paper(
     for budget in budgets:
         response = client.chat.completions.create(
             model=MODEL,
+            extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {
                     "role": "system",

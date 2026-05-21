@@ -79,10 +79,43 @@ print()
 def _init_db():
     from db.base import Base
     from db import models
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, text
     sync_url = os.environ['DATABASE_URL'].replace('+aiosqlite', '')
     engine = create_engine(sync_url)
     Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        needs_patch = False
+        try:
+            conn.execute(text(
+                "INSERT INTO prompt_templates (owner_user_id, scope, prompt_type, prompt_key, title, content) "
+                "VALUES (NULL, 'system', 'synthesis', '__chk__', 'chk', '')"
+            ))
+            conn.execute(text("DELETE FROM prompt_templates WHERE prompt_key='__chk__' AND prompt_type='synthesis'"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            needs_patch = True
+        if needs_patch:
+            col_list = ", ".join(r[1] for r in conn.execute(text("PRAGMA table_info(prompt_templates)")).fetchall())
+            conn.execute(text(
+                "CREATE TABLE _prompt_templates_new ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "owner_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,"
+                "scope VARCHAR NOT NULL CHECK (scope IN ('system','user')),"
+                "prompt_type VARCHAR NOT NULL CHECK (prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template')),"
+                "prompt_key VARCHAR NOT NULL,"
+                "title VARCHAR NOT NULL,"
+                "content TEXT NOT NULL DEFAULT '',"
+                "updated_by_user_id INTEGER,"
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "UNIQUE (owner_user_id, prompt_type, prompt_key))"
+            ))
+            conn.execute(text(f"INSERT INTO _prompt_templates_new ({col_list}) SELECT {col_list} FROM prompt_templates"))
+            conn.execute(text("DROP TABLE prompt_templates"))
+            conn.execute(text("ALTER TABLE _prompt_templates_new RENAME TO prompt_templates"))
+            conn.commit()
+            print("[startup] prompt_templates CHECK constraint expanded for synthesis/ai_template")
     engine.dispose()
     print("[startup] 数据库初始化完成")
 
