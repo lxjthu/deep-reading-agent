@@ -22,6 +22,7 @@ PROMPT_TYPE_LABELS: dict[str, str] = {
     "compare": "对比分析",
     "synthesis": "AI 综述",
     "ai_template": "AI 模板生成",
+    "translation": "全文翻译",
 }
 
 PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
@@ -116,6 +117,16 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
             "file_path": "prompts/ai_template/system_role.md",
         },
     },
+    "translation": {
+        "glossary": {
+            "title": "术语词典生成",
+            "file_path": "prompts/translation/glossary.md",
+        },
+        "restate": {
+            "title": "逐块重述",
+            "file_path": "prompts/translation/restate.md",
+        },
+    },
 }
 
 FILTER_FALLBACK_TEMPLATE = """你是一位学术文献筛选助手。请围绕研究主题“{topic}”评估下面这篇文献，并严格输出 JSON。
@@ -201,4 +212,6 @@ def get_builtin_fallback(prompt_type: str, prompt_key: str) -> str:
             "system_role": "你是一个专业的学术论文分析助手，擅长设计多维度的论文精读分析框架。你必须严格按照用户要求的JSON格式输出，不要添加任何markdown标记或解释性文字。",
         }
         return slot_defaults.get(prompt_key, "请直接输出分析内容，不要客套开场白。")
+    if prompt_type == "translation":
+        return "请直接输出分析内容，不要客套开场白。"
     return "请直接输出分析内容，不要客套开场白。"

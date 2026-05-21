@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s] %(name)s %(levelname)s %(message)s")
 
 # ---------------------------------------------------------------------------
 # Config
@@ -40,8 +41,10 @@ TIMEOUT = 120  # seconds per API call
 _EXTRACTION_SUFFIXES = ("_paddleocr", "_raw", "_segmented")
 
 
-def _get_client() -> OpenAI:
-    return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+def _get_client(api_key: str | None = None, base_url: str | None = None) -> OpenAI:
+    key = api_key or DEEPSEEK_API_KEY
+    url = base_url or DEEPSEEK_BASE_URL
+    return OpenAI(api_key=key, base_url=url)
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +454,10 @@ def restate_chunk(
 def translate_md_file(
     md_path: str,
     out_dir: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
     log_cb: Optional[Callable[[str], None]] = None,
+    progress_cb: Optional[Callable[[str, int, int], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     model: str = "deepseek-v4-flash",
     max_chars: int = 5000,
@@ -494,17 +500,20 @@ def translate_md_file(
         md_text = f.read()
     log(f"[重述] 文本长度：{len(md_text):,} 字符")
 
-    client = _get_client()
+    client = _get_client(api_key=api_key, base_url=base_url)
 
-    # --- Step 1: Extract front sections ---
-    log("[重述] Step 1/6  提取标题、摘要、引言...")
+    if progress_cb:
+        progress_cb("front_sections", 10, 100)
+
     sections = extract_front_sections(md_text)
     log(f"  标题：{sections['title'] or '(未找到)'}")
     log(f"  摘要：{len(sections['abstract']):,} 字符  "
         f"引言：{len(sections['introduction']):,} 字符")
     check()
 
-    # --- Step 2: Generate glossary ---
+    if progress_cb:
+        progress_cb("glossary", 20, 100)
+
     log("[重述] Step 2/6  生成术语词典...")
     glossary = generate_glossary(sections, client, model=model, log_cb=log)
     with open(glossary_path, "w", encoding="utf-8") as f:
@@ -512,12 +521,15 @@ def translate_md_file(
     log(f"  词典已保存：{glossary_path}")
     check()
 
-    # --- Step 3: Detect section header level ---
-    log("[重述] Step 3/6  检测章节标题层级...")
+    if progress_cb:
+        progress_cb("detect_level", 25, 100)
+
     split_level = detect_section_level(md_text, client, model=model, log_cb=log)
     check()
 
-    # --- Step 4: Chunk ---
+    if progress_cb:
+        progress_cb("chunking", 30, 100)
+
     log(f"[重述] Step 4/6  按 {split_level} 标题切块（每块 ≤ {max_chars:,} 字符）...")
     chunks = chunk_md_by_headers(md_text, max_chars=max_chars, split_level=split_level)
     log(f"  共 {len(chunks)} 块")
@@ -527,9 +539,11 @@ def translate_md_file(
     workers = max(1, min(int(max_workers), len(chunks)))
     log(f"[重述] Step 5/6  逐块重述（共 {len(chunks)} 块，并发 {workers}）...")
 
-    # Pre-allocate result slots to preserve order
+    if progress_cb:
+        progress_cb("restating", 30, len(chunks))
+
     restated_parts: List[str] = [""] * len(chunks)
-    completed = [0]  # mutable counter for thread-safe progress logging
+    completed = [0]
 
     def _restate_one(idx: int, label: str, chunk_text: str) -> None:
         if cancel_check and cancel_check():
@@ -538,21 +552,15 @@ def translate_md_file(
         short_label = label[:60] if label.startswith("#") else f"[{label[:50]}]"
         log(f"  开始 [{idx + 1}/{len(chunks)}] {short_label}  ({len(chunk_text):,} 字符)")
         if label == "__yaml__":
-            # Don't send YAML frontmatter through the restate LLM:
-            # all YAML fields are technical metadata (filenames, dates, extractor)
-            # and don't need Chinese translation.  Sending them to the LLM causes
-            # it to hallucinate full Chinese academic text from the metadata, and
-            # _inject_cn_fields() then fails to find the closing --- at the end.
             result = _inject_cn_fields(chunk_text, stem)
         else:
             result = restate_chunk(chunk_text, glossary, client, model=model)
-            # The LLM sometimes wraps its output in a ---...--- YAML block because
-            # the prompt mentions "YAML frontmatter".  Strip it to avoid spurious
-            # YAML separators scattered throughout the document.
             result = _strip_leading_yaml(result)
         restated_parts[idx] = result
         completed[0] += 1
         log(f"  完成 [{completed[0]}/{len(chunks)}] {short_label}  → {len(result):,} 字符")
+        if progress_cb:
+            progress_cb("restating", 30 + int(50 * completed[0] / len(chunks)), len(chunks))
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -569,6 +577,10 @@ def translate_md_file(
     # --- Step 6: Supplementary restatement — fix missed English blocks ---
     log(f"[重述] Step 6/6  检查并补译残留英文块...")
     check()
+
+    if progress_cb:
+        progress_cb("fixing_untranslated", 85, 100)
+
     final_text, n_fixed = fix_untranslated_blocks(
         final_text,
         glossary,
@@ -586,6 +598,9 @@ def translate_md_file(
     # --- Save ---
     with open(cn_path, "w", encoding="utf-8") as f:
         f.write(final_text)
+
+    if progress_cb:
+        progress_cb("saving", 95, 100)
 
     log(f"[重述] 完成！中文版：{cn_path}")
     return cn_path, glossary_path
@@ -756,64 +771,6 @@ def _inject_cn_fields(yaml_chunk: str, stem: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Step 5b: Full pipeline — one PDF file
-# ---------------------------------------------------------------------------
-
-def translate_pdf_file(
-    pdf_path: str,
-    out_dir: Optional[str] = None,
-    log_cb: Optional[Callable[[str], None]] = None,
-    cancel_check: Optional[Callable[[], bool]] = None,
-    model: str = "deepseek-v4-flash",
-    max_chars: int = 5000,
-    extraction_method: str = "PaddleOCR (远程API)",
-    max_workers: int = 5,
-) -> Tuple[str, str]:
-    """
-    Extract PDF → MD, then restate.
-
-    extraction_method options (matches Tab 2/3 labels):
-      "PaddleOCR (远程API)"  — remote API with auto-fallback (default)
-      "PaddleOCR (本地GPU)"  — force local GPU
-      "Legacy (pdfplumber)"  — legacy pdfplumber
-
-    Returns (cn_md_path, glossary_path).
-    """
-    def log(msg: str):
-        logger.info(msg)
-        if log_cb:
-            log_cb(msg)
-
-    log(f"[重述] PDF 提取（{extraction_method}）：{pdf_path}")
-    from paddleocr_pipeline import extract_with_fallback, extract_pdf_legacy
-
-    stem = Path(pdf_path).stem
-    pdf_out = os.path.join(os.path.dirname(pdf_path), "paddleocr_md")
-    os.makedirs(pdf_out, exist_ok=True)
-
-    if extraction_method == "PaddleOCR (本地GPU)":
-        md_path, _ = extract_with_fallback(pdf_path, out_dir=pdf_out, force_local=True)
-    elif extraction_method == "Legacy (pdfplumber)":
-        md_path, _ = extract_pdf_legacy(pdf_path, out_dir=pdf_out)
-    else:
-        # "PaddleOCR (远程API)" or any unknown value
-        md_path, _ = extract_with_fallback(pdf_path, out_dir=pdf_out)
-
-    log(f"[重述] 提取完成：{md_path}")
-
-    return translate_md_file(
-        md_path,
-        out_dir=out_dir,
-        log_cb=log_cb,
-        cancel_check=cancel_check,
-        model=model,
-        extra_body={"thinking": {"type": "disabled"}},
-        max_chars=max_chars,
-        max_workers=max_workers,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
 # ---------------------------------------------------------------------------
 
 def _log(cb: Optional[Callable], msg: str):

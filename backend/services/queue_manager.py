@@ -19,6 +19,7 @@ class TaskQueueManager:
             "long": 720,
             "reference": 300,
             "filter": 180,
+            "translation": 480,
         }
 
     def enqueue(self, task_id: str, user_id: int, task_type: str) -> dict:

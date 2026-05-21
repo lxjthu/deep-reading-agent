@@ -4,6 +4,7 @@ import './index.css'
 import LibraryTab from './LibraryTab'
 import ReferenceTraceTab from './ReferenceTraceTab'
 import TemplateMarket from './TemplateMarket'
+import TranslationTab from './TranslationTab'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import { useAuthStore } from './store/auth'
 import { CompareView } from './components/CompareView'
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'compare-7step', label: '七步对比', icon: '⇄' },
   { id: 'qual', label: '四步精读', icon: '◉' },
   { id: 'compare-4step', label: '四步对比', icon: '⇄' },
+  { id: 'translation', label: '全文翻译', icon: '文' },
   { id: 'library', label: '我的文献库', icon: '📚' },
   { id: 'references', label: '参考文献梳理', icon: '🔗' },
   { id: 'prompts', label: '提示词管理', icon: '⚙' },
@@ -514,6 +516,7 @@ function App() {
           {activeTab === 'compare-long' && <CompareView mode="long" apiKey={apiKey || null} />}
           {activeTab === 'compare-7step' && <CompareView mode="quant" apiKey={apiKey || null} />}
           {activeTab === 'compare-4step' && <CompareView mode="qual" apiKey={apiKey || null} />}
+          {activeTab === 'translation' && <TranslationTab apiKey={apiKey} />}
           {activeTab === 'library' && <LibraryTab apiKey={apiKey} />}
           {activeTab === 'references' && <ReferenceTraceTab apiKey={apiKey} />}
           {activeTab === 'prompts' && <PromptsTab apiKey={apiKey} />}

@@ -28,7 +28,7 @@ from db import AsyncSessionLocal
 from dimension_seed import ensure_default_dimension_sets
 from prompt_service import ensure_builtin_prompt_templates
 from template_seed import ensure_dimension_templates
-from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions
+from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions, translation
 
 _UPLOAD_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
 _RESULTS_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deep_reading_results")
@@ -133,6 +133,7 @@ app.include_router(library.router, prefix="/api/library", tags=["Library"])
 app.include_router(references.router, prefix="/api/references", tags=["References"])
 app.include_router(data.router, prefix="/api/data", tags=["Data"])
 app.include_router(dimensions.router, prefix="/api/dimensions", tags=["Dimensions"])
+app.include_router(translation.router, prefix="/api/translation", tags=["Translation"])
 app.include_router(deploy.router, prefix="/api/deploy", tags=["Deploy"])
 
 

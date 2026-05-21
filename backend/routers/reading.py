@@ -1,5 +1,6 @@
 """Reading Router - authenticated reading jobs with DB persistence."""
 import logging
+import traceback
 import os
 import sys
 import uuid
@@ -36,6 +37,9 @@ from services.queue_manager import task_queue
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 RESULTS_ROOT = get_results_root()
 
@@ -1304,6 +1308,7 @@ def run_quant_task(
     try:
         import asyncio
 
+        logger.info("[quant:%s] 开始七步精读 user=%s bib=%s file=%s", task_id[:8], user_id, bib_entry_id, file_path)
         task_queue.mark_running(task_id)
         asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
@@ -1312,6 +1317,7 @@ def run_quant_task(
         tasks[task_id]["logs"].append("[步骤 1/7] 提取文本...")
         
         api_key = validate_deepseek_key(api_key)
+        logger.info("[quant:%s] API Key 验证通过", task_id[:8])
         
         from new_architecture.conversation_engine import ConversationEngine
         from new_architecture.paper_cache import PaperCache, PaperMetadata
@@ -1319,35 +1325,42 @@ def run_quant_task(
         
         config = Config.from_key(api_key)
         
+        logger.info("[quant:%s] 开始提取文本...", task_id[:8])
         paper_text = extract_paper_text(file_path)
         if not paper_text:
             raise ValueError("无法提取文本。请检查文件内容是否有效。")
+        logger.info("[quant:%s] 文本提取完成, 长度=%d字符", task_id[:8], len(paper_text))
         
         metadata = PaperMetadata(title=os.path.basename(file_path), authors=[], source="upload")
         paper_cache = PaperCache(text=paper_text, metadata=metadata)
         engine = ConversationEngine(config=config, paper_cache=paper_cache, max_history_turns=0)
         
         tasks[task_id]["logs"].append("✓ PDF 提取完成")
+        logger.info("[quant:%s] PDF 提取完成，开始七步分析", task_id[:8])
         
         steps = list(QUANT_PROMPT_KEYS.items())
         
         results = {}
         for i, (step_name, prompt_key) in enumerate(steps):
             if tasks[task_id]["status"] == "cancelled":
+                logger.info("[quant:%s] 任务已取消，退出", task_id[:8])
                 return
             
             tasks[task_id]["progress"] = 15 + i * 12
             tasks[task_id]["stage"] = step_name
             tasks[task_id]["logs"].append(f"[{i+1}/7] {step_name}...")
+            logger.info("[quant:%s] [%d/7] %s 开始 (prompt_key=%s)", task_id[:8], i+1, step_name, prompt_key)
             
             try:
                 prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
                 answer = engine.ask(prompt_content)
                 results[step_name] = answer
                 tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
+                logger.info("[quant:%s] [%d/7] %s 完成, 回答长度=%d", task_id[:8], i+1, step_name, len(answer))
             except Exception as e:
                 tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(e)[:80]}")
                 results[step_name] = f"[分析出错: {str(e)[:200]}]"
+                logger.warning("[quant:%s] [%d/7] %s 出错: %s", task_id[:8], i+1, step_name, e)
         
         # Post-check: retry empty steps
         def _retry_quant(step_name_inner):
@@ -1358,6 +1371,7 @@ def run_quant_task(
         # Generate report
         tasks[task_id]["progress"] = 95
         tasks[task_id]["stage"] = "生成七步精读报告..."
+        logger.info("[quant:%s] 七步分析完成，生成报告...", task_id[:8])
         
         original_name = get_original_filename(file_path)
         safe_name = sanitize_filename(original_name)
@@ -1372,8 +1386,10 @@ def run_quant_task(
             front_matter = extract_front_matter(file_path)
             metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
             tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+            logger.info("[quant:%s] 元数据提取完成: %s", task_id[:8], metadata.get('title', '未知'))
         except Exception as exc:
             tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+            logger.warning("[quant:%s] 元数据提取跳过: %s", task_id[:8], exc)
         if not metadata:
             from backend.services.pdf_metadata_llm import _empty_metadata
             metadata = _empty_metadata()
@@ -1383,8 +1399,10 @@ def run_quant_task(
             updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+                logger.info("[quant:%s] 文献库元数据已更新: %s", task_id[:8], updated_fields)
         except Exception as exc:
             tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
+            logger.warning("[quant:%s] 文献库元数据更新跳过: %s", task_id[:8], exc)
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "七步精读")
@@ -1394,6 +1412,8 @@ def run_quant_task(
             f.write("# 七步精读报告\n\n")
             for step_name, answer in results.items():
                 f.write(f"## {step_name}\n\n{answer}\n\n---\n\n")
+        
+        logger.info("[quant:%s] 报告已写入: %s", task_id[:8], report_path)
         
         preview = "\n\n".join([f"## {k}\n{v[:400]}..." for k, v in list(results.items())[:3]])
         
@@ -1415,6 +1435,7 @@ def run_quant_task(
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["stage"] = "完成"
         tasks[task_id]["logs"].append("✅ 七步精读全部完成！")
+        logger.info("[quant:%s] 七步精读全部完成", task_id[:8])
         tasks[task_id]["result"] = {
             "output_path": build_result_storage_path(report_path),
             "preview": preview,
@@ -1436,6 +1457,7 @@ def run_quant_task(
         task_queue.mark_completed(task_id)
         
     except Exception as e:
+        logger.error("[quant:%s] 七步精读失败: %s\n%s", task_id[:8], e, traceback.format_exc())
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ {str(e)}")
@@ -1458,6 +1480,7 @@ def run_qual_task(
     try:
         import asyncio
 
+        logger.info("[qual:%s] 开始四步精读 user=%s bib=%s file=%s", task_id[:8], user_id, bib_entry_id, file_path)
         task_queue.mark_running(task_id)
         asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
@@ -1466,6 +1489,7 @@ def run_qual_task(
         tasks[task_id]["logs"].append("[步骤 1/4] 提取文本...")
         
         api_key = validate_deepseek_key(api_key)
+        logger.info("[qual:%s] API Key 验证通过", task_id[:8])
         
         from new_architecture.conversation_engine import ConversationEngine
         from new_architecture.paper_cache import PaperCache, PaperMetadata
@@ -1473,35 +1497,42 @@ def run_qual_task(
         
         config = Config.from_key(api_key)
         
+        logger.info("[qual:%s] 开始提取文本...", task_id[:8])
         paper_text = extract_paper_text(file_path)
         if not paper_text:
             raise ValueError("无法提取文本。请检查文件内容是否有效。")
+        logger.info("[qual:%s] 文本提取完成, 长度=%d字符", task_id[:8], len(paper_text))
         
         metadata = PaperMetadata(title=os.path.basename(file_path), authors=[], source="upload")
         paper_cache = PaperCache(text=paper_text, metadata=metadata)
         engine = ConversationEngine(config=config, paper_cache=paper_cache, max_history_turns=0)
         
         tasks[task_id]["logs"].append("✓ PDF 提取完成")
+        logger.info("[qual:%s] PDF 提取完成，开始四步分析", task_id[:8])
         
         steps = list(QUAL_PROMPT_KEYS.items())
         
         results = {}
         for i, (step_name, prompt_key) in enumerate(steps):
             if tasks[task_id]["status"] == "cancelled":
+                logger.info("[qual:%s] 任务已取消，退出", task_id[:8])
                 return
             
             tasks[task_id]["progress"] = 20 + i * 20
             tasks[task_id]["stage"] = step_name
             tasks[task_id]["logs"].append(f"[{i+1}/4] {step_name}...")
+            logger.info("[qual:%s] [%d/4] %s 开始 (prompt_key=%s)", task_id[:8], i+1, step_name, prompt_key)
             
             try:
                 prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
                 answer = engine.ask(prompt_content)
                 results[step_name] = answer
                 tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
+                logger.info("[qual:%s] [%d/4] %s 完成, 回答长度=%d", task_id[:8], i+1, step_name, len(answer))
             except Exception as e:
                 tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(e)[:80]}")
                 results[step_name] = f"[分析出错: {str(e)[:200]}]"
+                logger.warning("[qual:%s] [%d/4] %s 出错: %s", task_id[:8], i+1, step_name, e)
         
         # Post-check: retry empty steps
         def _retry_qual(step_name_inner):
@@ -1512,6 +1543,7 @@ def run_qual_task(
         # Generate report
         tasks[task_id]["progress"] = 95
         tasks[task_id]["stage"] = "生成四步精读报告..."
+        logger.info("[qual:%s] 四步分析完成，生成报告...", task_id[:8])
         
         original_name = get_original_filename(file_path)
         safe_name = sanitize_filename(original_name)
@@ -1526,8 +1558,10 @@ def run_qual_task(
             front_matter = extract_front_matter(file_path)
             metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
             tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
+            logger.info("[qual:%s] 元数据提取完成: %s", task_id[:8], metadata.get('title', '未知'))
         except Exception as exc:
             tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+            logger.warning("[qual:%s] 元数据提取跳过: %s", task_id[:8], exc)
         if not metadata:
             from backend.services.pdf_metadata_llm import _empty_metadata
             metadata = _empty_metadata()
@@ -1537,8 +1571,10 @@ def run_qual_task(
             updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
+                logger.info("[qual:%s] 文献库元数据已更新: %s", task_id[:8], updated_fields)
         except Exception as exc:
             tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
+            logger.warning("[qual:%s] 文献库元数据更新跳过: %s", task_id[:8], exc)
         
         # Build frontmatter
         frontmatter = build_frontmatter(metadata, "四步精读")
@@ -1548,6 +1584,8 @@ def run_qual_task(
             f.write("# 四步精读报告\n\n")
             for step_name, answer in results.items():
                 f.write(f"## {step_name}\n\n{answer}\n\n---\n\n")
+        
+        logger.info("[qual:%s] 报告已写入: %s", task_id[:8], report_path)
         
         preview = "\n\n".join([f"## {k}\n{v[:400]}..." for k, v in list(results.items())[:2]])
         
@@ -1569,6 +1607,7 @@ def run_qual_task(
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["stage"] = "完成"
         tasks[task_id]["logs"].append("✅ 四步精读全部完成！")
+        logger.info("[qual:%s] 四步精读全部完成", task_id[:8])
         tasks[task_id]["result"] = {
             "output_path": build_result_storage_path(report_path),
             "preview": preview,
@@ -1590,6 +1629,7 @@ def run_qual_task(
         task_queue.mark_completed(task_id)
         
     except Exception as e:
+        logger.error("[qual:%s] 四步精读失败: %s\n%s", task_id[:8], e, traceback.format_exc())
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ {str(e)}")

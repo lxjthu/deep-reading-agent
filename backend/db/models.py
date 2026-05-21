@@ -100,7 +100,7 @@ class PromptTemplate(Base):
             name="ck_prompt_templates_scope",
         ),
         CheckConstraint(
-            "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template')",
+            "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template','translation')",
             name="ck_prompt_templates_type",
         ),
         UniqueConstraint(
@@ -208,7 +208,7 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "job_type IN ('filter','reading_long','reading_quant','reading_qual',"
-            "'compare','synthesis','reference_trace')",
+            "'compare','synthesis','reference_trace','translation')",
             name="ck_jobs_job_type",
         ),
         CheckConstraint(
@@ -586,7 +586,7 @@ class Artifact(Base):
             "artifact_type IN ('reading_step','reading_final','reading_extract',"
             "'filter_excel','compare_excel','compare_md','synthesis_md',"
             "'references_excel','references_with_citations_excel',"
-            "'citation_trace_md','references_json')",
+            "'citation_trace_md','references_json','translation_md','translation_glossary')",
             name="ck_artifacts_artifact_type",
         ),
     )
