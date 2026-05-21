@@ -26,8 +26,9 @@ cd frontend && npm run build
 ```
 frontend/ (React 19 + Vite + Tailwind + Zustand)
   src/RootApp.tsx       — 路由守卫、登录注册
-  src/App.tsx           — 工作台壳（Tab导航、FilterTab/LongTab/QuantTab/QualTab/HistoryTab/PromptsTab）
+  src/App.tsx           — 工作台壳（Tab导航、FilterTab/LongTab/QuantTab/QualTab/HistoryTab/PromptsTab/TranslationTab）
   src/LibraryTab.tsx    — 文献库页面
+  src/TranslationTab.tsx — 全文翻译（中文重述）页面
   src/components/CompareView.tsx — 对比综述主组件（替代 iframe）
   src/components/compare/ — 对比子组件（AnswerCard/AccordionPanel/PaperSelector/DimNavigation/SynthesisModal）
   src/store/auth.ts     — Zustand 登录态
@@ -35,7 +36,7 @@ frontend/ (React 19 + Vite + Tailwind + Zustand)
 
 backend/ (FastAPI + SQLAlchemy 2.0 async + SQLite)
   main.py               — FastAPI 入口、路由注册、启动初始化
-  routers/              — auth|upload|filter|reading|compare|library|history|download|prompts|references|admin
+  routers/              — auth|upload|filter|reading|compare|library|history|download|prompts|references|admin|translation
   db/models.py          — ORM 模型（User|File|BibEntry|Job|ReadingItem|Artifact|PromptTemplate）
   db/session.py         — 异步引擎 + get_db 依赖
   prompt_registry.py    — 提示词槽位注册表
@@ -48,6 +49,8 @@ backend/ (FastAPI + SQLAlchemy 2.0 async + SQLite)
 
 new_architecture/
   conversation_engine.py — 长文本/七步/四步 LLM 对话引擎
+
+translation_pipeline.py  — 全文翻译流水线（PDF 全文两步 / Markdown 分片六步）
 ```
 
 ## 核心数据流
@@ -59,6 +62,7 @@ new_architecture/
 批量精读 → POST /batch/start → 多个 Job(reading_*, 共享 batch_id) → GET /batch/{batch_id}/status 轮询进度
 对比综述 → 从 ReadingItem 聚合 → Job(compare) → Artifact(compare_md/synthesis_md)
 AI综述  → /synthesis 或 /synthesis_long → 串行逐维度 deepseek-v4-flash → Artifact(synthesis_md) + GB/T 7714 参考文献
+全文翻译 → POST /translation/start → Job(translation) → Artifact(translation_md + translation_glossary) → 关联 BibEntry
 文献库   → BibEntry 聚合展示（关联筛选评分、精读结果、时间线产物）
 ```
 
@@ -74,10 +78,10 @@ AI综述  → /synthesis 或 /synthesis_long → 串行逐维度 deepseek-v4-fla
   - `CURRENT_SCHEMA_VERSION` 必须与最新 migration 编号一致；
   - 新增用户数据表必须加入 `.dra` 导出/导入顺序，或在代码/文档中明确说明为什么排除；
   - 涉及自增主键或跨表引用时，必须补充导入时的 id remap 逻辑。
-- **任务类型**：filter / reading_long / reading_quant / reading_qual / compare / synthesis / reference。
-- **产物类型**：filter_excel / reading_final / compare_md / synthesis_md / references_excel 等。
+- **任务类型**：filter / reading_long / reading_quant / reading_qual / compare / synthesis / reference / translation。
+- **产物类型**：filter_excel / reading_final / compare_md / synthesis_md / references_excel / translation_md / translation_glossary 等。
 - **角色**：admin / vip / normal，normal 用户数据 24h 过期自动清理。
-- **LLM**：精读用 deepseek-reasoner，分类/筛选/对比/AI综述用 deepseek-v4-flash，参考文献用 deepseek-v4-flash。
+- **LLM**：精读用 deepseek-reasoner，分类/筛选/对比/AI综述/翻译用 deepseek-v4-flash，参考文献用 deepseek-v4-flash。
 - **文本上限**：150k 字符（超出中间截断）。
 - **PDF 提取**：PaddleOCR 优先（需远程 API），自动回退 pdfplumber。
 - **输出 Markdown**：含 YAML frontmatter，兼容 Obsidian Dataview。
@@ -135,6 +139,7 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 | 提示词 | `prompt_registry.py` `prompt_service.py` `routers/prompts.py` |
 | 参考文献 | `services/deepseek_refs.py` `routers/references.py` |
 | 任务队列 | `services/queue_manager.py` |
+| 全文翻译 | `routers/translation.py` `translation_pipeline.py` `TranslationTab.tsx` |
 
 ## 文档导航
 
@@ -147,3 +152,4 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 | `docs/DEPLOYMENT_ARCHITECTURE.md` | 本地→GitHub→服务器部署链路 |
 | `docs/OPS_HEALTHCHECK_GUIDE.md` | 服务器健康检查与自动恢复 |
 | `docs/PENDING_PLANS.md` | 未实施的方案与待办 |
+| `docs/TRANSLATION_INTEGRATION_PLAN.md` | 全文翻译功能集成规划 |

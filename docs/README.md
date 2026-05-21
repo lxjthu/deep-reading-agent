@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-20
+> 最后更新：2026-05-21
 
 ---
 
@@ -32,6 +32,8 @@
 | [PDF_METADATA_MATCH_PLAN.md](PDF_METADATA_MATCH_PLAN.md) | 方案 | PDF 元数据在线匹配 | 理解 match_online/apply_match 的设计 |
 | [SYNTHESIS_PROMPT_PLAN.md](SYNTHESIS_PROMPT_PLAN.md) | 方案 | 综述提示词改进 | 综述相关规划 |
 | [REFERENCE_CITATION_TAB_PLAN.md](REFERENCE_CITATION_TAB_PLAN.md) | 方案 | 参考文献梳理标签页 | 引用追踪相关规划 |
+| [LIBRARY_SOURCE_TRANSLATION_PLAN.md](LIBRARY_SOURCE_TRANSLATION_PLAN.md) | 方案 | 文献库原文预览下载、语言标注与全文翻译联动 | 文献库原文与英文翻译入口改造时 |
+| [TRANSLATION_FULLTEXT_PDF_RESTATE_PLAN.md](TRANSLATION_FULLTEXT_PDF_RESTATE_PLAN.md) | 方案 | PDF 全文不分片中文重述翻译改造计划 | 调整全文翻译提示词与 PDF 翻译管线时 |
 | [CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md) | 设计 | CNKI/WoS 解析与反向匹配 | 理解题录解析和文件绑定逻辑 |
 | [SYNTHESIS_CURRENT_DESIGN.md](SYNTHESIS_CURRENT_DESIGN.md) | 设计 | 当前综述实现设计 | 了解对比综述的当前实现 |
 

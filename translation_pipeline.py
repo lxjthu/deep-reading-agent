@@ -35,7 +35,7 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 TRANSLATION_OUT_DIR = os.path.join(os.getcwd(), "translation_results")
 
 MAX_RETRIES = 2
-TIMEOUT = 120  # seconds per API call
+TIMEOUT = 600  # seconds per API call (full-text restatement can take minutes)
 
 # Extraction suffixes to strip when deriving stem
 _EXTRACTION_SUFFIXES = ("_paddleocr", "_raw", "_segmented")
@@ -102,6 +102,51 @@ RESTATE_USER_TMPL = """\
 
 **待重述的文本块：**
 {chunk}
+"""
+
+PDF_FULLTEXT_GLOSSARY_SYSTEM = (
+    "你是严谨的学术文献翻译准备专家。你只能依据用户提供的论文全文判断文献类型、"
+    "抽取术语并制定术语对照，不得补充原文没有的研究背景、方法、数据、引用或结论。"
+)
+
+PDF_FULLTEXT_GLOSSARY_USER_TMPL = """\
+下面是一篇待做中文全文重述的学术文献全文。请完整阅读输入文本，先判断文献类型，
+再为后续全文中文重述建立术语库。
+
+输出要求：
+1. 先输出“## 文献类型”，用一句话判断文献类型；只能根据原文判断，不确定时明确写“不确定”。
+2. 再输出“## 术语库”，用 Markdown 表格列出：原文术语 | 建议中文表述 | 说明。
+3. 术语库应覆盖核心概念、研究对象、方法名称、模型、变量、数据来源、制度或政策名称、关键缩写。
+4. 对无法可靠译出的专名保留原文，并说明处理方式。
+5. 不得虚构原文未出现的术语、方法、变量、结论或文献类型信息。
+6. 不要输出额外寒暄或与全文重述无关的评论。
+
+【文献全文】
+{full_text}
+"""
+
+PDF_FULLTEXT_RESTATE_SYSTEM = (
+    "你是严谨的学术中文重述专家。你的任务是忠实重述用户提供的全文，"
+    "不是摘要、评论、扩写或续写。任何原文没有的信息都不得写入输出。"
+)
+
+PDF_FULLTEXT_RESTATE_USER_TMPL = """\
+请依据下列“文献类型与术语库”，将随后给出的文献全文用典雅、规范、清晰的中文完整重述。
+
+【绝对约束】
+1. 必须忠实覆盖原文内容，不得摘要化、压缩化、删节关键论证或跳过原文段落。
+2. 不得增加原文没有的事实、背景、数据、变量、方法、引文、论证、例子、解释或结论。
+3. 尤其不得编造；遇到提取文本残缺、含义不明或证据不足时，宁可保留原意和不确定性，也不得猜测补写。
+4. 必须保持数字、百分比、公式、符号、样本量、系数、统计显著性、置信区间、结论方向和限定语一致。
+5. 必须遵循术语库；未列入术语库但需要保留原文的专名或缩写，可在中文表述中保留原文。
+6. 保留原文可识别的 Markdown 结构、标题层级、列表、表格、公式块和引用标记；不要擅自重组为新的提纲。
+7. 输出应是中文学术正文，不要输出解释、声明、前言、后记或“以下是”等对话性文字。
+
+【文献类型与术语库】
+{glossary}
+
+【待重述全文】
+{full_text}
 """
 
 # ---------------------------------------------------------------------------
@@ -437,7 +482,7 @@ def restate_chunk(
                 ],
                 timeout=TIMEOUT,
             )
-            return _strip_preamble(resp.choices[0].message.content.strip())
+            return _fix_table_linebreaks(_strip_preamble(resp.choices[0].message.content.strip()))
         except Exception as e:
             if attempt < MAX_RETRIES:
                 _log(log_cb, f"    重试 {attempt + 1}：{e}")
@@ -451,6 +496,142 @@ def restate_chunk(
 # Step 5: Full pipeline — one MD file
 # ---------------------------------------------------------------------------
 
+def _complete_with_retries(
+    client: OpenAI,
+    *,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    log_cb: Optional[Callable[[str], None]] = None,
+    failure_label: str,
+    max_tokens: Optional[int] = None,
+) -> str:
+    effective_max_tokens = max_tokens or 16384
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            _log(log_cb, f"    {failure_label} 调用 {model}（第 {attempt + 1} 次，max_tokens={effective_max_tokens}）...")
+            resp = client.chat.completions.create(
+                model=model,
+                extra_body={"thinking": {"type": "disabled"}},
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=effective_max_tokens,
+                timeout=TIMEOUT,
+            )
+            content = resp.choices[0].message.content.strip()
+            _log(log_cb, f"    {failure_label} 完成，输出 {len(content):,} 字符，usage={resp.usage}")
+            return content
+        except Exception as exc:
+            if attempt < MAX_RETRIES:
+                _log(log_cb, f"    {failure_label} retry {attempt + 1}: {exc}")
+                time.sleep(3)
+            else:
+                raise
+
+
+def build_pdf_fulltext_glossary(
+    full_text: str,
+    client: OpenAI,
+    model: str = "deepseek-v4-flash",
+    log_cb: Optional[Callable[[str], None]] = None,
+) -> str:
+    return _complete_with_retries(
+        client,
+        model=model,
+        system_prompt=PDF_FULLTEXT_GLOSSARY_SYSTEM,
+        user_prompt=PDF_FULLTEXT_GLOSSARY_USER_TMPL.format(full_text=full_text),
+        log_cb=log_cb,
+        failure_label="pdf glossary",
+    )
+
+
+def restate_pdf_fulltext(
+    full_text: str,
+    glossary: str,
+    client: OpenAI,
+    model: str = "deepseek-v4-flash",
+    log_cb: Optional[Callable[[str], None]] = None,
+) -> str:
+    result = _complete_with_retries(
+        client,
+        model=model,
+        system_prompt=PDF_FULLTEXT_RESTATE_SYSTEM,
+        user_prompt=PDF_FULLTEXT_RESTATE_USER_TMPL.format(
+            glossary=glossary,
+            full_text=full_text,
+        ),
+        log_cb=log_cb,
+        failure_label="pdf fulltext restatement",
+        max_tokens=65536,
+    )
+    return _strip_preamble(_fix_table_linebreaks(result))
+
+
+def translate_pdf_fulltext(
+    full_text: str,
+    source_name: str,
+    out_dir: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    log_cb: Optional[Callable[[str], None]] = None,
+    progress_cb: Optional[Callable[[str, int, int], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    model: str = "deepseek-v4-flash",
+) -> Tuple[str, str]:
+    """Run the PDF-only two-step full-text Chinese restatement pipeline."""
+    if not full_text.strip():
+        raise ValueError("PDF extracted text is empty")
+
+    def log(msg: str):
+        logger.info(msg)
+        if log_cb:
+            log_cb(msg)
+
+    def check():
+        if cancel_check and cancel_check():
+            raise InterruptedError("用户取消")
+
+    stem = Path(source_name).stem
+    for suffix in _EXTRACTION_SUFFIXES:
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+
+    if out_dir is None:
+        out_dir = os.path.join(TRANSLATION_OUT_DIR, stem)
+    os.makedirs(out_dir, exist_ok=True)
+
+    cn_path = os.path.join(out_dir, f"{stem}_cn.md")
+    glossary_path = os.path.join(out_dir, f"{stem}_glossary.md")
+    client = _get_client(api_key=api_key, base_url=base_url)
+
+    log(f"[PDF全文重述] 读取提取全文：{len(full_text):,} 字符")
+    check()
+    if progress_cb:
+        progress_cb("generating_glossary", 20, 100)
+
+    log("[PDF全文重述] Step 1/2 解析文献类型并生成术语库...")
+    glossary = build_pdf_fulltext_glossary(full_text, client, model=model, log_cb=log)
+    with open(glossary_path, "w", encoding="utf-8") as f:
+        f.write(f"# 全文重述术语库：{stem}\n\n{glossary}\n")
+
+    check()
+    if progress_cb:
+        progress_cb("restating", 55, 100)
+
+    log("[PDF全文重述] Step 2/2 直接重述全文...")
+    final_text = restate_pdf_fulltext(full_text, glossary, client, model=model, log_cb=log)
+    with open(cn_path, "w", encoding="utf-8") as f:
+        f.write(final_text)
+
+    if progress_cb:
+        progress_cb("saving", 95, 100)
+    log(f"[PDF全文重述] 完成：{cn_path}")
+    return cn_path, glossary_path
+
+
 def translate_md_file(
     md_path: str,
     out_dir: Optional[str] = None,
@@ -462,6 +643,7 @@ def translate_md_file(
     model: str = "deepseek-v4-flash",
     max_chars: int = 5000,
     max_workers: int = 5,
+    pdf_fulltext: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
     Full restatement pipeline for one MD file.
@@ -472,6 +654,19 @@ def translate_md_file(
     Returns:
         (cn_md_path, glossary_path)
     """
+    if pdf_fulltext is not None:
+        return translate_pdf_fulltext(
+            pdf_fulltext,
+            md_path,
+            out_dir=out_dir,
+            api_key=api_key,
+            base_url=base_url,
+            log_cb=log_cb,
+            progress_cb=progress_cb,
+            cancel_check=cancel_check,
+            model=model,
+        )
+
     def log(msg: str):
         logger.info(msg)
         if log_cb:
@@ -586,7 +781,6 @@ def translate_md_file(
         glossary,
         client,
         model=model,
-        extra_body={"thinking": {"type": "disabled"}},
         log_cb=log,
         cancel_check=cancel_check,
     )
@@ -620,13 +814,71 @@ _LEADING_YAML_RE = re.compile(r'^---\s*\n.*?\n---\s*\n*', re.DOTALL)
 
 def _strip_preamble(text: str) -> str:
     """Remove LLM conversational preamble lines from the start of output."""
-    # Strip repeatedly in case there are multiple preamble lines
     while True:
         cleaned = _PREAMBLE_RE.sub("", text, count=1)
         if cleaned == text:
             break
         text = cleaned
     return text.lstrip("\n")
+
+
+def _fix_table_linebreaks(text: str) -> str:
+    """Ensure each markdown table row is on its own line.
+
+    LLM sometimes outputs multiple table rows on a single line like:
+      | h1 | h2 | |---|---| | a | b |
+    or rows separated only by spaces instead of newlines.
+    """
+    def _is_separator_row(cols: list[str]) -> bool:
+        return all(set(c.strip()) <= {'-', ':', ' '} for c in cols)
+
+    lines = text.split('\n')
+    result: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith('|') or not stripped.endswith('|'):
+            result.append(line)
+            continue
+        pipe_count = stripped.count('|')
+        if pipe_count <= 2:
+            result.append(line)
+            continue
+        parts = stripped.split('|')
+        cols = [p for p in parts if p.strip() != '']
+        if not cols:
+            result.append(line)
+            continue
+        first_sep = _is_separator_row([cols[0]]) if cols else False
+        if first_sep and len(cols) <= 3:
+            result.append(line)
+            continue
+        if len(cols) > 3:
+            expected_cols = 0
+            for c in cols:
+                if _is_separator_row([c]) and expected_cols > 0:
+                    break
+                expected_cols += 1
+            if expected_cols < 2:
+                result.append(line)
+                continue
+            rows: list[list[str]] = []
+            cur: list[str] = []
+            for c in cols:
+                if _is_separator_row([c]) and len(cur) == expected_cols:
+                    rows.append(cur)
+                    cur = []
+                elif len(cur) == expected_cols:
+                    rows.append(cur)
+                    cur = [c]
+                else:
+                    cur.append(c)
+            if cur:
+                rows.append(cur)
+            for row in rows:
+                result.append('| ' + ' | '.join(c.strip() for c in row) + ' |')
+        else:
+            result.append(line)
+    return '\n'.join(result)
 
 
 def _strip_leading_yaml(text: str) -> str:

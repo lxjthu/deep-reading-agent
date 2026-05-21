@@ -261,6 +261,10 @@ class BibEntry(Base):
             "metadata_completeness IN ('full','partial','minimal')",
             name="ck_bib_metadata_completeness",
         ),
+        CheckConstraint(
+            "language IS NULL OR language IN ('en','zh','other')",
+            name="ck_bib_language",
+        ),
         UniqueConstraint("owner_user_id", "dedup_key", name="uq_bib_dedup"),
     )
 
@@ -280,6 +284,7 @@ class BibEntry(Base):
     volume: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     issue: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     pages: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    language: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Provenance
     source_db: Mapped[str] = mapped_column(String, nullable=False)

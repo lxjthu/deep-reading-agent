@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from './lib/api-fetch'
+import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 
 interface TranslatableEntry {
   bib_entry_id: string
@@ -38,14 +39,6 @@ function getStageLabel(stage: string): string {
   return STAGE_LABELS[stage] || stage
 }
 
-function isLikelyEnglish(title: string | null | undefined): boolean {
-  if (!title) return false
-  const ascii = (title.match(/[a-zA-Z]/g) || []).length
-  const total = (title.match(/[a-zA-Z\u4e00-\u9fff]/g) || []).length
-  if (total === 0) return false
-  return ascii / total > 0.6
-}
-
 export default function TranslationTab({ apiKey }: { apiKey: string }) {
   const [entries, setEntries] = useState<TranslatableEntry[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -57,7 +50,8 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
   const [currentStage, setCurrentStage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([])
-  const [showFilter, setShowFilter] = useState<'all' | 'english'>('all')
+  const [uploading, setUploading] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState('')
   const pollRef = useRef<number | null>(null)
 
   const stopPolling = () => {
@@ -84,11 +78,48 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
     return () => { stopPolling() }
   }, [])
 
-  const filteredEntries = showFilter === 'english'
-    ? entries.filter(e => isLikelyEnglish(e.title))
-    : entries
-
   const selected = entries.find(e => e.bib_entry_id === selectedId)
+
+  const handleSourceUpload = async (file: File | null) => {
+    if (!file) return
+    setUploading(true)
+    setUploadMessage('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const uploadRes = await apiFetch('/api/upload/', {
+        method: 'POST',
+        body: formData,
+      })
+      if (!uploadRes.ok) {
+        const data = await uploadRes.json().catch(() => ({}))
+        throw new Error(data.detail || data.message || `上传失败 (${uploadRes.status})`)
+      }
+      const uploadData = await uploadRes.json()
+      if (!uploadData.success || !uploadData.file_id) {
+        throw new Error(uploadData.message || '上传失败')
+      }
+
+      const bindRes = await apiFetch('/api/translation/bind-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: uploadData.file_id }),
+      })
+      if (!bindRes.ok) {
+        const data = await bindRes.json().catch(() => ({}))
+        throw new Error(data.detail || `文献匹配失败 (${bindRes.status})`)
+      }
+      const bound = await bindRes.json()
+      await loadEntries()
+      setSelectedId(bound.bib_entry_id)
+      setUploadMessage(`已上传并匹配到文献库：${bound.title}`)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '上传文献失败'
+      setUploadMessage(message)
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const handleStart = async () => {
     if (!selected) {
@@ -175,17 +206,16 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
   }
 
   const handleDownload = (artifact: ArtifactInfo) => {
-    const url = `/api/download/${encodeURIComponent(artifact.storage_path)}`
-    const a = document.createElement('a')
-    a.href = url
-    a.download = artifact.filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    downloadWithAuth(
+      `/api/download/${encodeURIComponent(artifact.storage_path)}`,
+      artifact.filename,
+    ).catch((error) => alert(error.message))
   }
 
   const handlePreview = (artifact: ArtifactInfo) => {
-    window.open(`/api/download/${encodeURIComponent(artifact.storage_path)}`, '_blank')
+    openPreviewWithAuth(
+      `/api/history/${encodeURIComponent(artifact.filename)}/preview`,
+    ).catch((error) => alert(error.message))
   }
 
   const isRunning = jobStatus === 'pending' || jobStatus === 'running'
@@ -195,26 +225,36 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-bold text-gray-900 mb-1">全文翻译 — DeepSeek 中文重述</h2>
         <p className="text-sm text-gray-500 mb-4">
-          选择已上传的英文文献，生成术语词典和全文中文重述版本。
+          选择文献库中已标注为英文且绑定了 PDF 或 Markdown 原文的文献，生成术语词典和全文中文重述版本。
         </p>
 
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-emerald-200 bg-emerald-50/60 px-4 py-3">
+          <label className="inline-flex cursor-pointer items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+            <input
+              type="file"
+              accept=".pdf,.md,.markdown,application/pdf,text/markdown"
+              className="sr-only"
+              disabled={uploading || isRunning}
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null
+                event.currentTarget.value = ''
+                void handleSourceUpload(file)
+              }}
+            />
+            {uploading ? '上传匹配中...' : '上传 PDF / Markdown'}
+          </label>
+          <p className="text-xs text-emerald-800">
+            上传后会按精读链路匹配或创建文献库档案，并作为英文原文加入翻译列表。
+          </p>
+          {uploadMessage && (
+            <p className="w-full text-xs text-emerald-900">{uploadMessage}</p>
+          )}
+        </div>
+
         <div className="flex gap-2 mb-3">
-          <button
-            onClick={() => setShowFilter('english')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              showFilter === 'english' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            英文文献 ({entries.filter(e => isLikelyEnglish(e.title)).length})
-          </button>
-          <button
-            onClick={() => setShowFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              showFilter === 'all' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            全部 ({entries.length})
-          </button>
+          <span className="rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-medium text-emerald-800">
+            英文原文 ({entries.length})
+          </span>
           <button
             onClick={loadEntries}
             className="ml-auto px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
@@ -225,14 +265,14 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
 
         {loading ? (
           <div className="py-8 text-center text-sm text-gray-400">加载中...</div>
-        ) : filteredEntries.length === 0 ? (
+        ) : entries.length === 0 ? (
           <div className="py-8 text-center">
             <p className="text-sm text-gray-400 mb-2">暂无可翻译的文献</p>
-            <p className="text-xs text-gray-400">请先上传 PDF 或 Markdown 文件，系统会自动匹配文献档案。</p>
+            <p className="text-xs text-gray-400">请在文献库绑定 PDF 或 Markdown 原文，并把语言标注为英文。</p>
           </div>
         ) : (
           <div className="border border-gray-100 rounded-lg max-h-80 overflow-y-auto divide-y divide-gray-50">
-            {filteredEntries.map(entry => (
+            {entries.map(entry => (
               <label
                 key={entry.bib_entry_id}
                 className={`flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors ${

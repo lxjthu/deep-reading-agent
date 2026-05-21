@@ -40,6 +40,8 @@ class LibraryEntrySummary(BaseModel):
     source_db: str
     source_file_id: Optional[str]
     source_file_name: Optional[str]
+    source_file_type: Optional[str]
+    language: Optional[str]
     tags: list[str]
     note: Optional[str]
     filter_score: Optional[float] = None
@@ -89,6 +91,7 @@ class LibraryEntryUpdateRequest(BaseModel):
     tags: Optional[list[str]] = None
     note: Optional[str] = None
     is_pinned: Optional[int] = Field(default=None, ge=0, le=1)
+    language: Optional[str] = None
 
 
 def _json_list(value: str | None) -> list[str]:
@@ -112,6 +115,18 @@ def _clean_optional_text(value) -> Optional[str]:
     if not text or text.lower() == "nan":
         return None
     return text
+
+
+def _clean_language(value: str | None) -> str | None:
+    language = _clean_optional_text(value)
+    if language is None:
+        return None
+    if language not in {"en", "zh", "other"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported bibliography language.",
+        )
+    return language
 
 
 def _load_abstract_translation_from_artifact(entry: BibEntry, artifact: Artifact | None) -> Optional[str]:
@@ -171,6 +186,8 @@ def build_entry_summary(entry: BibEntry, source_file: File | None, filter_score:
         source_db=entry.source_db,
         source_file_id=entry.source_file_id,
         source_file_name=source_file.original_name if source_file else None,
+        source_file_type=source_file.file_type if source_file else None,
+        language=entry.language,
         tags=_json_list(entry.user_tags_json),
         note=entry.user_note,
         filter_score=filter_score,
@@ -388,6 +405,8 @@ async def update_entry(
         entry.user_note = request.note.strip() or None
     if request.is_pinned is not None:
         entry.is_pinned = request.is_pinned
+    if request.language is not None:
+        entry.language = _clean_language(request.language)
 
     await db.commit()
     return await get_entry_detail(entry_id, user=user, db=db)

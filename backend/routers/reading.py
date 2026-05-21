@@ -250,7 +250,7 @@ class BatchCheckConflictRequest(BaseModel):
 
 
 def resolve_conflict_mode(force_overwrite: Optional[bool], conflict_resolution: Optional[str], default: str = "check") -> str:
-    if conflict_resolution in ("overwrite", "new", "incremental"):
+    if conflict_resolution in ("overwrite", "new", "incremental", "skip"):
         return conflict_resolution
     if force_overwrite is True:
         return "overwrite"
@@ -406,6 +406,22 @@ async def create_reading_job(
         )
     )
     return task_id
+
+
+async def find_existing_reading_job(db: AsyncSession, bib_entry_id: str, job_type: str) -> Job | None:
+    return (
+        await db.execute(
+            select(Job)
+            .join(JobBibEntry, JobBibEntry.job_id == Job.id)
+            .where(
+                JobBibEntry.bib_entry_id == bib_entry_id,
+                Job.job_type == job_type,
+                Job.status == "success",
+            )
+            .order_by(Job.created_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
 
 
 def check_reading_duplicate(bib_entry: BibEntry, force_overwrite: bool) -> Optional[dict]:
@@ -723,6 +739,11 @@ async def _try_update_bib_metadata(
                 if metadata.get(field) and not getattr(bib_entry, field, None):
                     setattr(bib_entry, field, metadata[field])
                     updated_fields.append(field)
+
+            language = metadata.get("language")
+            if language in {"en", "zh"} and not bib_entry.language:
+                bib_entry.language = language
+                updated_fields.append("language")
 
             # Recompute dedup_key
             authors_list = json.loads(bib_entry.authors_json) if bib_entry.authors_json else []
@@ -1933,9 +1954,10 @@ async def start_batch_reading(
                 continue
             bib_entry = await get_or_create_bib_entry(db, user, file_record)
             batch_resolution = resolve_conflict_mode(request.force_overwrite, request.conflict_resolution, default="check")
-            if batch_resolution == "overwrite" and bib_entry.reading_status in ("reading", "read"):
+            existing_job = await find_existing_reading_job(db, bib_entry.id, job_type)
+            if batch_resolution == "overwrite" and existing_job is not None:
                 await cleanup_old_reading_data(db, bib_entry, job_type)
-            elif batch_resolution == "check" and bib_entry.reading_status in ("reading", "read"):
+            elif batch_resolution in ("check", "skip") and existing_job is not None:
                 batch_tasks.append({"file_id": file_id, "file_name": file_record.original_name, "task_id": None, "status": "skipped", "error": "已有同模式精读结果"})
                 continue
 

@@ -23,7 +23,14 @@ RESULTS_DIR = get_results_root()
 SYNTHESIS_DIR = RESULTS_DIR / "synthesis"
 SYNTHESIS_DIR.mkdir(parents=True, exist_ok=True)
 
-READING_ARTIFACT_TYPES = {"reading_step", "reading_final", "reading_extract", "compare_md"}
+READING_ARTIFACT_TYPES = {
+    "reading_step",
+    "reading_final",
+    "reading_extract",
+    "compare_md",
+    "translation_md",
+    "translation_glossary",
+}
 FILTER_ARTIFACT_TYPES = {"filter_excel"}
 
 
@@ -64,6 +71,8 @@ def _human_size(size: int) -> str:
 
 
 def _history_type(artifact: Artifact, job: Job) -> str:
+    if job.job_type == "translation":
+        return "全文翻译"
     if artifact.artifact_type == "filter_excel":
         return "文献筛选"
     if artifact.artifact_type == "compare_md":

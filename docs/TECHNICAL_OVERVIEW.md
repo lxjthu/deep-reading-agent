@@ -131,7 +131,27 @@
 - 删除功能：删除未使用的自定义维度集（后端检查使用状态）
 - 维度分组显示：精读结果按 `group_name` 分组渲染
 
-### 2.9 数据导入导出
+### 2.9 全文翻译（中文重述）
+
+- **上线日期**：2026-05-21
+- 选择已上传的英文 PDF 或 Markdown 文献，调用 DeepSeek 生成术语词典 + 全文中文重述
+- **两条线路**：
+  - PDF：先提取文本（复用已有 PaddleOCR/pdfplumber），再走翻译流水线
+  - Markdown：直接进入翻译流水线
+- **PDF 全文翻译**（两步流水线）：
+  1. 把 PDF 提取全文交给 DeepSeek → 判断文献类型 + 生成术语库
+  2. 把全文一次性交给 DeepSeek → 直接中文重述（max_tokens=65536）
+- **Markdown 分片翻译**（旧流程，六步流水线）：
+  - 提取前置章节 → 术语词典 → 检测标题层级 → 分块 → 逐块重述 → 补遗英文
+- 产物：`translation_md`（中文重述 MD）+ `translation_glossary`（术语词典 MD）
+- 翻译结果通过 `JobBibEntry` 关联到文献档案，可在文献库时间线中查看
+- 后端路由：`backend/routers/translation.py`（`/api/translation/*`）
+- 翻译核心：`translation_pipeline.py`
+- 前端组件：`frontend/src/TranslationTab.tsx`
+- **表格渲染修复**：`_fix_table_linebreaks()` 自动修复 LLM 输出中多行表格被合并为单行的问题
+- **详细日志**：翻译、七步精读、四步精读均输出 `[module:task_id]` 格式的详细日志
+
+### 2.10 数据导入导出
 
 - 一键导出所有用户数据为 `.dra` 格式（JSON + 物理文件打包）
 - 一键导入 `.dra` 文件恢复数据

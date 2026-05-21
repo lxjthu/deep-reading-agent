@@ -93,6 +93,8 @@ class ReadingRouterTests(unittest.TestCase):
         TEST_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
         TEST_RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
         reading_router.tasks.clear()
+        reading_router.task_queue._queue.clear()
+        reading_router.task_queue._running.clear()
         PENDING_READING_RUNS.clear()
 
     def register(self, username: str, password: str) -> None:
@@ -107,11 +109,17 @@ class ReadingRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
-    def upload_pdf(self, headers: dict[str, str], *, filename: str = "paper.pdf") -> dict:
+    def upload_pdf(
+        self,
+        headers: dict[str, str],
+        *,
+        filename: str = "paper.pdf",
+        content: bytes = b"%PDF-1.4 test pdf",
+    ) -> dict:
         response = self.client.post(
             "/api/upload/",
             headers=headers,
-            files={"file": (filename, b"%PDF-1.4 test pdf", "application/pdf")},
+            files={"file": (filename, content, "application/pdf")},
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
@@ -164,9 +172,12 @@ class ReadingRouterTests(unittest.TestCase):
         extraction_method,
         prompt_overrides=None,
         api_key=None,
+        dimension_set_id=None,
+        conflict_resolution="check",
     ):
         import asyncio
 
+        reading_router.task_queue.mark_running(task_id)
         asyncio.run(reading_router.sync_job_and_bib_start(task_id, bib_entry_id, stage="执行长文本分析...", progress=20))
         result_dir = reading_router.get_results_dir(user_id, task_id)
         report_path = result_dir / "long_report.md"
@@ -192,6 +203,7 @@ class ReadingRouterTests(unittest.TestCase):
                 reading_items=reading_router.build_long_reading_items(results),
             )
         )
+        reading_router.task_queue.mark_completed(task_id)
 
     @staticmethod
     def fake_quant(
@@ -204,6 +216,7 @@ class ReadingRouterTests(unittest.TestCase):
     ):
         import asyncio
 
+        reading_router.task_queue.mark_running(task_id)
         asyncio.run(reading_router.sync_job_and_bib_start(task_id, bib_entry_id, stage="执行七步精读...", progress=20))
         result_dir = reading_router.get_results_dir(user_id, task_id)
         step_path = result_dir / "step_1.md"
@@ -236,6 +249,7 @@ class ReadingRouterTests(unittest.TestCase):
                 reading_items=reading_router.build_step_reading_items(results, mode="quant"),
             )
         )
+        reading_router.task_queue.mark_completed(task_id)
 
     @staticmethod
     def fake_qual(
@@ -248,6 +262,7 @@ class ReadingRouterTests(unittest.TestCase):
     ):
         import asyncio
 
+        reading_router.task_queue.mark_running(task_id)
         asyncio.run(reading_router.sync_job_and_bib_start(task_id, bib_entry_id, stage="执行四步精读...", progress=20))
         result_dir = reading_router.get_results_dir(user_id, task_id)
         final_path = result_dir / "qual_report.md"
@@ -275,6 +290,7 @@ class ReadingRouterTests(unittest.TestCase):
                 reading_items=reading_router.build_step_reading_items(results, mode="qual"),
             )
         )
+        reading_router.task_queue.mark_completed(task_id)
 
     def start_long(self, headers: dict[str, str], file_id: str) -> dict:
         response = self.client.post(
@@ -482,6 +498,64 @@ class ReadingRouterTests(unittest.TestCase):
             self.assertEqual(items[0].item_key, "qual.step1")
             self.assertEqual(items[1].item_key, "qual.step1.q1")
             self.assertEqual(items[2].item_label, "2. 核心问题")
+
+    def test_batch_skip_does_not_create_job_for_existing_same_mode_reading(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        payload = self.upload_pdf(headers)
+        self.start_quant(headers, payload["file_id"])
+
+        response = self.client.post(
+            "/api/reading/batch/start",
+            headers=headers,
+            json={
+                "file_ids": [payload["file_id"]],
+                "mode": "quant",
+                "api_key": "dummy",
+                "conflict_resolution": "skip",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["skipped_count"], 1)
+        self.assertEqual(body["tasks"][0]["status"], "skipped")
+        self.assertIsNone(body["tasks"][0]["task_id"])
+
+        with Session(self.sync_engine) as session:
+            jobs = session.execute(select(Job).where(Job.job_type == "reading_quant")).scalars().all()
+            self.assertEqual(len(jobs), 1)
+
+    def test_batch_skip_only_queues_files_without_same_mode_reading(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        existing = self.upload_pdf(headers, filename="existing-paper.pdf")
+        new_file = self.upload_pdf(
+            headers,
+            filename="new-paper.pdf",
+            content=b"%PDF-1.4 second test pdf",
+        )
+        self.start_quant(headers, existing["file_id"])
+
+        response = self.client.post(
+            "/api/reading/batch/start",
+            headers=headers,
+            json={
+                "file_ids": [existing["file_id"], new_file["file_id"]],
+                "mode": "quant",
+                "api_key": "dummy",
+                "conflict_resolution": "skip",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        statuses = {task["file_id"]: task["status"] for task in body["tasks"]}
+        self.assertEqual(body["skipped_count"], 1)
+        self.assertEqual(statuses[existing["file_id"]], "skipped")
+        self.assertEqual(statuses[new_file["file_id"]], "queued")
+
+        with Session(self.sync_engine) as session:
+            jobs = session.execute(select(Job).where(Job.job_type == "reading_quant")).scalars().all()
+            self.assertEqual(len(jobs), 2)
 
     def test_reading_status_and_cancel_require_owner(self) -> None:
         self.register("alice", "pwd12345")

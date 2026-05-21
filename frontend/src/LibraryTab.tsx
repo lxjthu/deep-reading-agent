@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { downloadWithAuth } from './lib/download'
+import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import MetadataMatchPanel from './MetadataMatchPanel'
 
 type LibraryEntrySummary = {
@@ -15,6 +15,8 @@ type LibraryEntrySummary = {
   source_db: string
   source_file_id: string | null
   source_file_name: string | null
+  source_file_type: 'pdf' | 'markdown' | string | null
+  language: 'en' | 'zh' | 'other' | null
   tags: string[]
   note: string | null
   filter_score: number | null
@@ -64,6 +66,7 @@ type EditDraft = {
   tagsText: string
   note: string
   isPinned: boolean
+  language: string
 }
 
 async function parseJsonOrThrow<T>(response: Response): Promise<T> {
@@ -143,6 +146,33 @@ function sourceDbLabel(sourceDb: string) {
   )
 }
 
+function languageLabel(language: LibraryEntrySummary['language']) {
+  if (!language) return '未标注语言'
+  return {
+    en: '英文',
+    zh: '中文',
+    other: '其他语言',
+  }[language]
+}
+
+function languageClass(language: LibraryEntrySummary['language']) {
+  if (!language) return 'bg-rose-100 text-rose-700'
+  return {
+    en: 'bg-indigo-100 text-indigo-700',
+    zh: 'bg-teal-100 text-teal-700',
+    other: 'bg-slate-100 text-slate-700',
+  }[language]
+}
+
+function sourceFileTypeLabel(fileType: LibraryEntrySummary['source_file_type']) {
+  return (
+    {
+      pdf: 'PDF 原文',
+      markdown: 'Markdown 原文',
+    }[fileType || ''] || '未绑定原文'
+  )
+}
+
 function artifactTypeLabel(artifactType: string) {
   return (
     {
@@ -187,6 +217,7 @@ function buildDraft(detail: LibraryEntryDetail): EditDraft {
     tagsText: detail.tags.join(', '),
     note: detail.note || '',
     isPinned: detail.is_pinned === 1,
+    language: detail.language || '',
   }
 }
 
@@ -334,6 +365,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
         tags: splitCsv(draft.tagsText),
         note: draft.note,
         is_pinned: draft.isPinned ? 1 : 0,
+        language: draft.language,
       }
       if (draft.yearText.trim()) {
         payload.year = Number(draft.yearText.trim())
@@ -562,6 +594,12 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
                             {sourceDbLabel(entry.source_db)}
                           </span>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${languageClass(entry.language)}`}>
+                            {languageLabel(entry.language)}
+                          </span>
+                          <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] font-medium text-cyan-700">
+                            {sourceFileTypeLabel(entry.source_file_type)}
+                          </span>
                         </div>
                       </div>
                       <div className="text-right text-xs text-gray-400">
@@ -666,7 +704,21 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                     />
                   </label>
 
-                  <label className="block md:col-span-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500">文献语言</span>
+                    <select
+                      value={draft.language}
+                      onChange={(event) => setDraft({ ...draft, language: event.target.value })}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="">未标注</option>
+                      <option value="en">英文</option>
+                      <option value="zh">中文</option>
+                      <option value="other">其他语言</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
                     <span className="mb-1 block text-xs font-medium text-gray-500">期刊 / 来源</span>
                     <input
                       value={draft.journal}
@@ -718,19 +770,52 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                  <div className="space-y-1 text-sm text-gray-600">
+                  <div className="min-w-0 space-y-1 text-sm text-gray-600">
                     <div>来源：{sourceDbLabel(detail.source_db)}</div>
-                    <div>关联源文件：{detail.source_file_name || '未绑定'}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>语言：{languageLabel(detail.language)}</span>
+                      <span>{sourceFileTypeLabel(detail.source_file_type)}</span>
+                    </div>
+                    <div className="break-all">关联原文：{detail.source_file_name || '未绑定'}</div>
                     <div>任务时间线：{detail.timeline.length} 条</div>
                   </div>
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      checked={draft.isPinned}
-                      onChange={(event) => setDraft({ ...draft, isPinned: event.target.checked })}
-                      type="checkbox"
-                    />
-                    置顶这篇文献
-                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {detail.source_file_id && detail.source_file_name && detail.source_file_type && (
+                      <>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-cyan-200 bg-white px-3 py-1.5 text-xs font-medium text-cyan-700 hover:bg-cyan-50"
+                          onClick={() =>
+                            openPreviewWithAuth(
+                              `/api/upload/${encodeURIComponent(detail.source_file_id || '')}/preview`,
+                            ).catch((error) => alert(error.message))
+                          }
+                        >
+                          预览原文
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-700"
+                          onClick={() =>
+                            downloadWithAuth(
+                              `/api/upload/${encodeURIComponent(detail.source_file_id || '')}/download`,
+                              detail.source_file_name || 'source-file',
+                            ).catch((error) => alert(error.message))
+                          }
+                        >
+                          下载原文
+                        </button>
+                      </>
+                    )}
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        checked={draft.isPinned}
+                        onChange={(event) => setDraft({ ...draft, isPinned: event.target.checked })}
+                        type="checkbox"
+                      />
+                      置顶这篇文献
+                    </label>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">

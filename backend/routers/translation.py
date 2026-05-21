@@ -26,6 +26,7 @@ from db.models import Artifact, BibEntry, File, Job, JobBibEntry, User
 from result_storage import build_result_storage_path, get_results_root
 from upload_storage import lookup_path_by_file_id
 from services.queue_manager import task_queue
+from routers.reading import get_or_create_bib_entry
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -44,6 +45,10 @@ class TranslationStartRequest(BaseModel):
     bib_entry_id: Optional[str] = None
     api_key: Optional[str] = None
     max_workers: int = 5
+
+
+class TranslationBindUploadRequest(BaseModel):
+    file_id: str
 
 
 def utcnow_naive() -> datetime:
@@ -153,6 +158,7 @@ def _run_translation_task(
             progress_cb=progress_cb,
             cancel_check=cancel_check,
             max_workers=max_workers,
+            pdf_fulltext=md_text,
         )
         logger.info("[translation:%s] 翻译完成 cn=%s glossary=%s", task_id[:8], cn_path, glossary_path)
 
@@ -234,6 +240,7 @@ async def list_translatable(
         .where(
             BibEntry.owner_user_id == user.id,
             BibEntry.source_file_id.isnot(None),
+            BibEntry.language == "en",
             File.file_type.in_(["pdf", "markdown"]),
         )
         .order_by(BibEntry.updated_at.desc(), BibEntry.created_at.desc())
@@ -253,6 +260,38 @@ async def list_translatable(
             "file_type": source_file.file_type,
         })
     return {"entries": results}
+
+
+@router.post("/bind-upload")
+async def bind_translation_upload(
+    request: TranslationBindUploadRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    file_record = (
+        await db.execute(
+            select(File).where(File.id == request.file_id, File.owner_user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if file_record is None or file_record.file_type not in ("pdf", "markdown"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Translation source file not found",
+        )
+
+    bib_entry = await get_or_create_bib_entry(db, user, file_record)
+    if not bib_entry.language:
+        bib_entry.language = "en"
+    await db.commit()
+
+    return {
+        "bib_entry_id": bib_entry.id,
+        "title": bib_entry.title,
+        "language": bib_entry.language,
+        "file_id": file_record.id,
+        "file_name": file_record.original_name,
+        "file_type": file_record.file_type,
+    }
 
 
 @router.post("/start")

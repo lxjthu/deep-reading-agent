@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-type ConflictOption = 'overwrite' | 'new' | 'incremental'
+type ConflictOption = 'overwrite' | 'skip' | 'incremental'
 
 interface BatchConflictItem {
   file_id: string
@@ -92,8 +92,8 @@ export default function BatchConflictDialog({ conflicts, noConflictCount, mode, 
           </label>
 
           <label className="flex items-center gap-2 p-3 rounded-lg border cursor-pointer hover:bg-gray-50">
-            <input type="radio" name="batch-conflict" value="new"
-              checked={selected === 'new'} onChange={() => setSelected('new')} />
+            <input type="radio" name="batch-conflict" value="skip"
+              checked={selected === 'skip'} onChange={() => setSelected('skip')} />
             <div>
               <span className="font-medium">跳过已有</span>
               <span className="text-xs text-gray-500 ml-1">（保留旧结果，只精读新文件）</span>

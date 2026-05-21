@@ -1667,7 +1667,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
     }
   }
 
-  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'skip' | 'incremental') => {
     setBatchConflictInfo(null)
     const fileIds = pendingBatchFileIdsRef.current
     const effectiveKey = pendingBatchKeyRef.current
@@ -1692,10 +1692,18 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (!startRes.ok || !startData.batch_id) throw new Error(startData.detail || '启动批量精读失败')
       const queuedCount = (startData.tasks || []).filter((t: any) => t.status === 'queued').length
       const errorCount = (startData.tasks || []).filter((t: any) => t.status === 'error').length
+      const skippedCount = startData.skipped_count || 0
+      if (queuedCount === 0 && skippedCount > 0 && errorCount === 0) {
+        addLog(`ℹ ${skippedCount} 个文件已有结果，已全部跳过`)
+        setStage('批量精读已跳过')
+        setShowBatchPreview(false)
+        setIsRunning(false)
+        return
+      }
       if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
       addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
       if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
-      if ((startData.skipped_count || 0) > 0) addLog(`ℹ ${startData.skipped_count} 个文件已有结果已跳过`)
+      if (skippedCount > 0) addLog(`ℹ ${skippedCount} 个文件已有结果已跳过`)
       setShowBatchPreview(false)
       batchTracker.startBatchTracking(startData.batch_id)
     } catch (error: any) {
@@ -2297,7 +2305,7 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
     }
   }
 
-  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'skip' | 'incremental') => {
     setBatchConflictInfo(null)
     const fileIds = pendingBatchFileIdsRef.current
     const effectiveKey = pendingBatchKeyRef.current
@@ -2319,10 +2327,18 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (!startRes.ok || !startData.batch_id) throw new Error(startData.detail || '启动批量精读失败')
       const queuedCount = (startData.tasks || []).filter((t: any) => t.status === 'queued').length
       const errorCount = (startData.tasks || []).filter((t: any) => t.status === 'error').length
+      const skippedCount = startData.skipped_count || 0
+      if (queuedCount === 0 && skippedCount > 0 && errorCount === 0) {
+        addLog(`ℹ ${skippedCount} 个文件已有结果，已全部跳过`)
+        setStage('批量精读已跳过')
+        setShowBatchPreview(false)
+        setIsRunning(false)
+        return
+      }
       if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
       addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
       if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
-      if ((startData.skipped_count || 0) > 0) addLog(`ℹ ${startData.skipped_count} 个文件已有结果已跳过`)
+      if (skippedCount > 0) addLog(`ℹ ${skippedCount} 个文件已有结果已跳过`)
       setShowBatchPreview(false)
       batchTracker.startBatchTracking(startData.batch_id)
     } catch (error: any) {
@@ -2738,7 +2754,7 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
     }
   }
 
-  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'new' | 'incremental') => {
+  const handleBatchConflictResolve = async (resolution: 'overwrite' | 'skip' | 'incremental') => {
     setBatchConflictInfo(null)
     const fileIds = pendingBatchFileIdsRef.current
     const effectiveKey = pendingBatchKeyRef.current
@@ -2760,10 +2776,18 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
       if (!startRes.ok || !startData.batch_id) throw new Error(startData.detail || '启动批量精读失败')
       const queuedCount = (startData.tasks || []).filter((t: any) => t.status === 'queued').length
       const errorCount = (startData.tasks || []).filter((t: any) => t.status === 'error').length
+      const skippedCount = startData.skipped_count || 0
+      if (queuedCount === 0 && skippedCount > 0 && errorCount === 0) {
+        addLog(`ℹ ${skippedCount} 个文件已有结果，已全部跳过`)
+        setStage('批量精读已跳过')
+        setShowBatchPreview(false)
+        setIsRunning(false)
+        return
+      }
       if (queuedCount === 0) throw new Error(`所有 ${fileIds.length} 个文件均启动失败${errorCount > 0 ? `（${errorCount} 个错误）` : ''}`)
       addLog(`✓ 批量任务已创建: ${startData.batch_id} (${queuedCount} 篇排队)`)
       if (errorCount > 0) addLog(`⚠ ${errorCount} 个文件跳过`)
-      if ((startData.skipped_count || 0) > 0) addLog(`ℹ ${startData.skipped_count} 个文件已有结果已跳过`)
+      if (skippedCount > 0) addLog(`ℹ ${skippedCount} 个文件已有结果已跳过`)
       setShowBatchPreview(false)
       batchTracker.startBatchTracking(startData.batch_id)
     } catch (error: any) {
@@ -3426,6 +3450,7 @@ function HistoryTab() {
     '四步精读': '📋',
     '文献筛选': '📑',
     'AI综述': '🤖',
+    '全文翻译': '🌐',
     '其他': '📎',
   }
 

@@ -44,7 +44,7 @@ from upload_storage import get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "014"
+CURRENT_SCHEMA_VERSION = "015"
 
 # FK forward order for export / import
 EXPORT_TABLE_ORDER = [

@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +18,17 @@ from auth.dependencies import current_user
 from db import get_db
 from db.models import BibEntry, File, Job, User
 from db.utils import title_match_score
+from services.markdown_preview import render_markdown_preview_html
 from upload_storage import build_storage_path, get_user_upload_dir, resolve_storage_path
 
 
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".doc", ".docx", ".md", ".markdown"}
+SOURCE_MEDIA_TYPES = {
+    "pdf": "application/pdf",
+    "markdown": "text/markdown; charset=utf-8",
+}
 
 
 def utcnow_naive() -> datetime:
@@ -263,6 +269,58 @@ async def get_file_info(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     return build_upload_response(record, message="查询成功。", deduplicated=False)
+
+
+async def get_owned_source_file(
+    file_id: str,
+    user: User,
+    db: AsyncSession,
+) -> tuple[File, Path]:
+    record = (
+        await db.execute(select(File).where(File.id == file_id, File.owner_user_id == user.id))
+    ).scalar_one_or_none()
+    if record is None or record.file_type not in SOURCE_MEDIA_TYPES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source file not found")
+
+    stored_path = resolve_storage_path(record.storage_path)
+    if not stored_path.exists() or not stored_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source file not found")
+    return record, stored_path
+
+
+@router.get("/{file_id}/preview")
+async def preview_source_file(
+    file_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    record, stored_path = await get_owned_source_file(file_id, user, db)
+    if record.file_type == "markdown":
+        return HTMLResponse(
+            render_markdown_preview_html(
+                stored_path.read_text(encoding="utf-8"),
+                record.original_name,
+            )
+        )
+    return FileResponse(
+        stored_path,
+        media_type=SOURCE_MEDIA_TYPES[record.file_type],
+        headers={"Content-Disposition": "inline"},
+    )
+
+
+@router.get("/{file_id}/download")
+async def download_source_file(
+    file_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    record, stored_path = await get_owned_source_file(file_id, user, db)
+    return FileResponse(
+        stored_path,
+        filename=record.original_name,
+        media_type=SOURCE_MEDIA_TYPES[record.file_type],
+    )
 
 
 @router.delete("/{file_id}")

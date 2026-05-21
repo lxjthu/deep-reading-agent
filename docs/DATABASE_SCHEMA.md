@@ -1,8 +1,8 @@
 # 数据库设计文档
 
-> **版本**: v1.5  
-> **日期**: 2026-05-10  
-> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)、[CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)、[DIMENSION_TEMPLATE_PLAN.md](./DIMENSION_TEMPLATE_PLAN.md)
+> **版本**: v1.6  
+> **日期**: 2026-05-21  
+> **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)、[CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)、[DIMENSION_TEMPLATE_PLAN.md](./DIMENSION_TEMPLATE_PLAN.md)、[TRANSLATION_INTEGRATION_PLAN.md](./TRANSLATION_INTEGRATION_PLAN.md)
 
 ## 1. 选型与约定
 
@@ -143,7 +143,7 @@ CREATE TABLE prompt_templates (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
     scope               TEXT NOT NULL CHECK (scope IN ('system', 'user')),
-    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter')),
+    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter', 'compare', 'synthesis', 'ai_template', 'translation')),
     prompt_key          TEXT NOT NULL,
     title               TEXT NOT NULL,
     content             TEXT NOT NULL,
@@ -246,6 +246,8 @@ CREATE TABLE bib_entries (
     volume          TEXT,                                        -- 卷号（CNKI Volume-卷 / WoS VL）
     issue           TEXT,                                        -- 期号（CNKI Period-期 / WoS IS）
     pages           TEXT,                                        -- 页码范围（CNKI PageCount-页码 / WoS BP-EP）
+    language        TEXT CHECK (language IS NULL OR language IN
+                        ('en', 'zh', 'other')),                  -- 文献语言，供翻译入口筛选
 
     -- 来源
     source_db       TEXT NOT NULL CHECK (source_db IN
@@ -309,6 +311,8 @@ def compute_dedup_key(doi: str | None, title: str, authors: list[str], year: int
 - `partial`: 至少 title + authors
 - `minimal`: 只有 title
 
+> **v1.4 新增字段**：`language` 于 2026-05-21 增加，用于文献库语言标注和全文翻译英文入口筛选；历史文献可保持未标注。
+>
 > **v1.3 新增字段**：`volume`、`issue`、`pages` 于 2026-05-07 规划，详见 [CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)。这三个字段来源：
 > - CNKI 导出：`Volume-卷`、`Period-期`、`PageCount-页码`
 > - WoS 导出：`VL`、`IS`、`BP`+`EP`
@@ -459,7 +463,8 @@ CREATE TABLE jobs (
                          'synthesis',
                          'reference_trace',   -- 参考文献梳理全链路
                          'reference_extract', -- 仅抽取参考文献目录
-                         'citation_trace'     -- 仅重跑正文引用核验
+                         'citation_trace',    -- 仅重跑正文引用核验
+                         'translation'        -- 全文翻译（中文重述）
                         )),
     status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
                         ('pending', 'running', 'success', 'failed', 'canceled')),
@@ -592,8 +597,10 @@ CREATE TABLE artifacts (
                          'references_excel', -- 参考文献目录 Excel
                          'references_with_citations_excel', -- 含正文引用命中的 Excel
                          'citation_trace_md',-- 引用梳理 Markdown 报告
-                         'references_json'   -- 可选：结构化 JSON 产物
-                        )),
+                         'references_json',  -- 可选：结构化 JSON 产物
+                         'translation_md',       -- 全文翻译中文重述 MD
+                         'translation_glossary'  -- 全文翻译术语词典 MD
+                         )),
     filename        TEXT NOT NULL,
     storage_path    TEXT NOT NULL,
     size_bytes      INTEGER,
@@ -1102,6 +1109,7 @@ backend/migrations/versions/
 | 文献标签/笔记 | `bib_entries.user_tags_json`, `user_note`, `is_pinned` |
 | 引文计数/h-index | `bib_entries.citation_count` |
 | 参考文献梳理与正文引用对齐 | `bib_references` + `bib_reference_citations` + `jobs.job_type/artifacts.artifact_type` 扩展 |
+| 全文翻译（中文重述） | `jobs.job_type='translation'` + `artifacts.artifact_type` 新增 `translation_md`/`translation_glossary` + `prompt_templates.prompt_type` 新增 `translation`（v1.6 migration 014） |
 | 引用网络分析 / 共引分析 | 依赖 `bib_references.source_bib_entry_id -> matched_bib_entry_id` 关系继续向上扩展 |
 | VIP 试用期 | `users.vip_expires_at` |
 | 团队/共享空间 | 不在本期，需要新增 `workspaces` 中间层（暂不规划） |
