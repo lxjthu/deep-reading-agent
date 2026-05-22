@@ -825,6 +825,7 @@ function FilterTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [logs, setLogs] = useState<string[]>([])
   const [results, setResults] = useState<any[]>([])
   const [downloadUrl, setDownloadUrl] = useState('')
+  const [importing, setImporting] = useState(false)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -970,6 +971,36 @@ function FilterTab({ apiKey: _apiKey }: { apiKey: string }) {
     addLog('⚠ 用户取消了筛选')
   }
 
+  async function handleDirectImport() {
+    if (!file) return
+    setImporting(true)
+    setLogs([])
+    setResults([])
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const uploadRes = await fetch('/api/upload/', { method: 'POST', body: fd })
+      if (!uploadRes.ok) throw new Error('Upload failed')
+      const uploadData = await uploadRes.json()
+      if (!uploadData.success) throw new Error(uploadData.message || 'Upload failed')
+      const res = await fetch('/api/filter/direct-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: uploadData.id }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Import failed')
+      }
+      const data = await res.json()
+      setLogs([`✅ 成功导入 ${data.count} 条题录到文献库`])
+    } catch (e: any) {
+      setLogs([`❌ 导入失败: ${e.message}`])
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const addLog = (msg: string) => {
     setLogs(prev => [...prev, msg])
   }
@@ -1077,6 +1108,13 @@ function FilterTab({ apiKey: _apiKey }: { apiKey: string }) {
             className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             停止
+          </button>
+          <button
+            onClick={handleDirectImport}
+            disabled={!file || importing || isRunning}
+            className="flex-1 rounded-lg bg-gradient-to-r from-green-600 to-green-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:from-green-700 hover:to-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            {importing ? '导入中...' : '直接导入（跳过AI）'}
           </button>
         </div>
       </div>
