@@ -335,6 +335,8 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [batchTagsText, setBatchTagsText] = useState('')
   const [batchTagsBusy, setBatchTagsBusy] = useState(false)
   const [batchTagsMessage, setBatchTagsMessage] = useState('')
+  const [translating, setTranslating] = useState(false)
+  const [translateProgress, setTranslateProgress] = useState('')
 
   const [chatOpen, setChatOpen] = useState(false)
   const [chatQuestion, setChatQuestion] = useState('')
@@ -445,6 +447,53 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       setSelectedIds(new Set())
     } else {
       setSelectedIds(new Set(entries.map((e) => e.id)))
+    }
+  }
+
+  async function handleBatchTranslate() {
+    const apiKey = localStorage.getItem('deepseek_api_key') || ''
+    if (!apiKey) {
+      alert('请先在设置中配置 DeepSeek API Key')
+      return
+    }
+    const ids = Array.from(selectedIds)
+    if (!confirm(`确认翻译 ${ids.length} 条英文摘要？将调用 DeepSeek API。`)) return
+
+    setTranslating(true)
+    setTranslateProgress('提交翻译任务...')
+    try {
+      const res = await fetch('/api/library/entries/batch-translate-abstracts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_ids: ids, api_key: apiKey }),
+      })
+      if (!res.ok) throw new Error('Failed to start translation')
+      const { job_id } = await res.json()
+
+      const poll = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/library/translate-job/${job_id}/status`)
+          const sd = await sr.json()
+          setTranslateProgress(sd.current_stage || `${sd.progress}%`)
+          if (sd.status === 'success' || sd.status === 'failed') {
+            clearInterval(poll)
+            setTranslating(false)
+            if (sd.status === 'success') {
+              const r = sd.result || {}
+              alert(`翻译完成：${r.translated || 0} 条成功，${r.failed || 0} 条失败`)
+            } else {
+              alert('翻译任务失败：' + (sd.error || '未知错误'))
+            }
+            loadEntries()
+          }
+        } catch {
+          clearInterval(poll)
+          setTranslating(false)
+        }
+      }, 2000)
+    } catch (e: any) {
+      alert('翻译失败: ' + e.message)
+      setTranslating(false)
     }
   }
 
@@ -1206,6 +1255,14 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                   type="button"
                 >
                   删标签
+                </button>
+                <button
+                  onClick={() => void handleBatchTranslate()}
+                  disabled={translating}
+                  className="rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-100 disabled:opacity-40"
+                  type="button"
+                >
+                  {translating ? translateProgress : '翻译摘要'}
                 </button>
                 <button
                   onClick={() => void handleBatchDelete()}
