@@ -243,6 +243,95 @@ async def reverse_match_to_existing_files(
         break
 
 
+async def _upsert_bib_entry(
+    db,
+    owner_user_id: int,
+    row: Any,
+    source_db: str,
+    source_filter_job_id: str | None = None,
+    abstract_cn: str | None = None,
+) -> BibEntry | None:
+    title = clean_nullable_text(row.get("Title")) or "Untitled"
+    authors = parse_authors(row.get("Authors"))
+    year = parse_year(row.get("Year"))
+    doi = clean_nullable_text(row.get("DOI"))
+    journal = clean_nullable_text(row.get("Journal"))
+    abstract = clean_nullable_text(row.get("Abstract"))
+    keywords = parse_keywords(row.get("Keywords"))
+    venue_type = clean_nullable_text(row.get("Type"))
+    citation_count = parse_int(row.get("Citations"))
+    volume = clean_nullable_text(row.get("Volume"))
+    issue = clean_nullable_text(row.get("Issue"))
+    pages = clean_nullable_text(row.get("Pages"))
+    metadata_completeness = compute_metadata_completeness(
+        title, authors, year, doi, journal, abstract
+    )
+    dedup_key = compute_dedup_key(doi, title, authors, year)
+
+    bib_entry = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.owner_user_id == owner_user_id,
+                BibEntry.dedup_key == dedup_key,
+            )
+        )
+    ).scalar_one_or_none()
+
+    now = utcnow_naive()
+
+    if bib_entry is None:
+        bib_entry = BibEntry(
+            id=str(uuid.uuid4()),
+            owner_user_id=owner_user_id,
+            title=title,
+            authors_json=json.dumps(authors, ensure_ascii=False),
+            year=year,
+            doi=doi,
+            journal=journal,
+            abstract=abstract,
+            abstract_cn=abstract_cn,
+            keywords_json=json.dumps(keywords, ensure_ascii=False),
+            venue_type=venue_type,
+            citation_count=citation_count,
+            volume=volume,
+            issue=issue,
+            pages=pages,
+            source_db=source_db,
+            source_filter_job_id=source_filter_job_id,
+            source_file_id=None,
+            reading_status="none",
+            metadata_completeness=metadata_completeness,
+            dedup_key=dedup_key,
+            expires_at=None,
+        )
+        db.add(bib_entry)
+        await db.flush()
+        return bib_entry
+
+    bib_entry.updated_at = now
+    bib_entry.title = title
+    bib_entry.authors_json = json.dumps(authors, ensure_ascii=False)
+    bib_entry.year = year
+    bib_entry.doi = doi
+    bib_entry.journal = journal
+    bib_entry.abstract = abstract
+    if abstract_cn and not bib_entry.abstract_cn:
+        bib_entry.abstract_cn = abstract_cn
+    bib_entry.keywords_json = json.dumps(keywords, ensure_ascii=False)
+    bib_entry.venue_type = venue_type
+    bib_entry.citation_count = citation_count
+    if not bib_entry.volume and volume:
+        bib_entry.volume = volume
+    if not bib_entry.issue and issue:
+        bib_entry.issue = issue
+    if not bib_entry.pages and pages:
+        bib_entry.pages = pages
+    bib_entry.metadata_completeness = metadata_completeness
+    if source_filter_job_id and not bib_entry.source_filter_job_id:
+        bib_entry.source_filter_job_id = source_filter_job_id
+    return bib_entry
+
+
 async def persist_filter_results(
     task_id: str,
     user: User,
@@ -265,79 +354,23 @@ async def persist_filter_results(
         now = utcnow_naive()
 
         for _, row in df.iterrows():
-            title = clean_nullable_text(row.get("Title")) or "Untitled"
-            authors = parse_authors(row.get("Authors"))
-            year = parse_year(row.get("Year"))
-            doi = clean_nullable_text(row.get("DOI"))
-            journal = clean_nullable_text(row.get("Journal"))
-            abstract = clean_nullable_text(row.get("Abstract"))
-            keywords = parse_keywords(row.get("Keywords"))
-            venue_type = clean_nullable_text(row.get("Type"))
-            citation_count = parse_int(row.get("Citations"))
-            volume = clean_nullable_text(row.get("Volume"))
-            issue = clean_nullable_text(row.get("Issue"))
-            pages = clean_nullable_text(row.get("Pages"))
-            metadata_completeness = compute_metadata_completeness(
-                title, authors, year, doi, journal, abstract
+            abstract_cn = clean_nullable_text(row.get("abstract_cn"))
+            bib_entry = await _upsert_bib_entry(
+                db,
+                owner_user_id=user.id,
+                row=row,
+                source_db=source_db,
+                source_filter_job_id=job.id,
+                abstract_cn=abstract_cn,
             )
-            dedup_key = compute_dedup_key(doi, title, authors, year)
-
-            bib_entry = (
-                await db.execute(
-                    select(BibEntry).where(
-                        BibEntry.owner_user_id == user.id,
-                        BibEntry.dedup_key == dedup_key,
-                    )
-                )
-            ).scalar_one_or_none()
-
             if bib_entry is None:
-                bib_entry = BibEntry(
-                    id=str(uuid.uuid4()),
-                    owner_user_id=user.id,
-                    title=title,
-                    authors_json=json.dumps(authors, ensure_ascii=False),
-                    year=year,
-                    doi=doi,
-                    journal=journal,
-                    abstract=abstract,
-                    keywords_json=json.dumps(keywords, ensure_ascii=False),
-                    venue_type=venue_type,
-                    citation_count=citation_count,
-                    volume=volume,
-                    issue=issue,
-                    pages=pages,
-                    source_db=source_db,
-                    source_filter_job_id=job.id,
-                    source_file_id=None,
-                    reading_status="none",
-                    metadata_completeness=metadata_completeness,
-                    dedup_key=dedup_key,
-                    expires_at=compute_expires_at(user),
-                )
-                db.add(bib_entry)
-                await db.flush()
+                continue
+
+            if bib_entry.expires_at is None:
+                bib_entry.expires_at = compute_expires_at(user)
+
+            if bib_entry.id not in processed_bibs:
                 await reverse_match_to_existing_files(db, bib_entry, user.id)
-            else:
-                bib_entry.updated_at = now
-                bib_entry.title = title
-                bib_entry.authors_json = json.dumps(authors, ensure_ascii=False)
-                bib_entry.year = year
-                bib_entry.doi = doi
-                bib_entry.journal = journal
-                bib_entry.abstract = abstract
-                bib_entry.keywords_json = json.dumps(keywords, ensure_ascii=False)
-                bib_entry.venue_type = venue_type
-                bib_entry.citation_count = citation_count
-                if not bib_entry.volume and volume:
-                    bib_entry.volume = volume
-                if not bib_entry.issue and issue:
-                    bib_entry.issue = issue
-                if not bib_entry.pages and pages:
-                    bib_entry.pages = pages
-                bib_entry.metadata_completeness = metadata_completeness
-                if not bib_entry.source_filter_job_id:
-                    bib_entry.source_filter_job_id = job.id
 
             if bib_entry.id in processed_bibs:
                 continue
