@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import uuid
 from datetime import UTC, datetime
 from typing import Optional
 
@@ -24,6 +26,7 @@ from services.pdf_metadata_extract import extract_front_matter
 from services.pdf_metadata_llm import extract_metadata_with_llm
 from upload_storage import resolve_storage_path
 from backend.utils.api_key import validate_deepseek_key
+from services.abstract_translator import run_batch_translate
 
 router = APIRouter()
 
@@ -107,6 +110,11 @@ class LibraryEntryUpdateRequest(BaseModel):
 
 class LibraryAiCommentUpdateRequest(BaseModel):
     note: str = Field(min_length=1, max_length=12000)
+
+
+class BatchTranslateRequest(BaseModel):
+    entry_ids: list[str] = Field(..., min_length=1, max_length=200)
+    api_key: str
 
 
 def _json_list(value: str | None) -> list[str]:
@@ -656,6 +664,73 @@ async def delete_ai_comment(
     await db.delete(comment)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/entries/batch-translate-abstracts")
+async def batch_translate_abstracts(
+    req: BatchTranslateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        api_key = validate_deepseek_key(req.api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    job = Job(
+        id=str(uuid.uuid4()),
+        owner_user_id=user.id,
+        job_type="translate_abstracts",
+        status="pending",
+        progress=0,
+        current_stage="准备翻译...",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    in_memory_status = {"status": "pending"}
+
+    def cancel_check():
+        return in_memory_status.get("status") == "cancelled"
+
+    thread = threading.Thread(
+        target=run_batch_translate,
+        args=(job.id, user.id, req.entry_ids, api_key),
+        daemon=True,
+    )
+    thread.start()
+
+    return {"job_id": job.id}
+
+
+@router.get("/translate-job/{job_id}/status")
+async def get_translate_job_status(
+    job_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job = (
+        await db.execute(select(Job).where(Job.id == job_id, Job.owner_user_id == user.id))
+    ).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = None
+    if job.params_json:
+        try:
+            result = json.loads(job.params_json)
+        except Exception:
+            pass
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "progress": job.progress,
+        "current_stage": job.current_stage,
+        "error": job.error_msg,
+        "result": result,
+    }
 
 
 # ============================================================
