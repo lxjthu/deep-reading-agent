@@ -986,7 +986,7 @@ function FilterTab({ apiKey: _apiKey }: { apiKey: string }) {
       const res = await fetch('/api/filter/direct-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: uploadData.id }),
+        body: JSON.stringify({ file_id: uploadData.file_id }),
       })
       if (!res.ok) {
         const err = await res.json()
