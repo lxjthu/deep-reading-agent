@@ -452,7 +452,6 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   }
 
   async function handleBatchTranslate() {
-    const apiKey = localStorage.getItem('deepseek_api_key') || ''
     if (!apiKey) {
       alert('请先在设置中配置 DeepSeek API Key')
       return
@@ -492,8 +491,8 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
           setTranslating(false)
         }
       }, 2000)
-    } catch (e: any) {
-      alert('翻译失败: ' + e.message)
+    } catch (error: unknown) {
+      alert('翻译失败: ' + (error instanceof Error ? error.message : String(error)))
       setTranslating(false)
     }
   }
@@ -1945,19 +1944,6 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                             {keyword}
                           </span>
                         ))}
-                      </div>
-                    )}
-
-                    {turn.citations.length > 0 && (
-                      <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-3">
-                        <div className="text-xs font-semibold text-indigo-700">命中集合内引用关系</div>
-                        <div className="mt-2 space-y-1 text-xs text-indigo-800">
-                          {turn.citations.map((citation) => (
-                            <div key={`${turn.id}-${citation.from_id}-${citation.to_id}`}>
-                              《{citation.from_title}》 引用了 《{citation.to_title}》
-                            </div>
-                          ))}
-                        </div>
                       </div>
                     )}
 
