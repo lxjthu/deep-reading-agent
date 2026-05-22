@@ -242,6 +242,7 @@ CREATE TABLE bib_entries (
     doi             TEXT,
     journal         TEXT,
     abstract        TEXT,
+    abstract_cn     TEXT,                                        -- v1.5 摘要中文翻译
     keywords_json   TEXT NOT NULL DEFAULT '[]',
     venue_type      TEXT,                                        -- journal/conference/book/preprint
     citation_count  INTEGER,                                     -- 预留，可后期填
@@ -466,8 +467,9 @@ CREATE TABLE jobs (
                          'reference_trace',   -- 参考文献梳理全链路
                          'reference_extract', -- 仅抽取参考文献目录
                          'citation_trace',    -- 仅重跑正文引用核验
-                         'translation'        -- 全文翻译（中文重述）
-                        )),
+                          'translation'        -- 全文翻译（中文重述）
+                          'translate_abstracts' -- 批量翻译摘要
+                         )),
     status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
                         ('pending', 'running', 'success', 'failed', 'canceled')),
 
@@ -1084,7 +1086,8 @@ backend/migrations/versions/
 ├── 014_add_translation_prompt_type.py  # prompt_templates 增加 translation
 ├── 015_add_bib_entry_language.py  # bib_entries 增加 language
 ├── 016_add_library_chat_prompt_type.py  # prompt_templates 增加 library_chat
-└── (后续新增字段时追加)
+├── 017_add_bib_entry_abstract_cn.py  # bib_entries 新增 abstract_cn（摘要中文翻译）
+└── 018_add_translate_abstracts_job_type.py  # jobs CHECK 约束新增 translate_abstracts
 ```
 
 > 说明：`admin` 账号继续通过 `backend/scripts/seed_admin.py` 初始化，不放入 Alembic 迁移。

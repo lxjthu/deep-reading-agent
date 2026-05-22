@@ -38,9 +38,11 @@
 | API Key | `App.tsx`、`CompareView` / `SynthesisModal` | 大多数接口通过请求体传 `api_key`；compare 相关生成接口也从 React 组件传入 | 浏览器本地存储，不入库 | 无 |
 | 上传 | `App.tsx` 中各上传页 | `routers/upload.py` | `files`、`bib_entries` | 用户文件 |
 | 筛选 | `FilterTab` | `routers/filter.py` | `jobs`、`bib_entries`、`bib_filter_links`、`artifacts` | `filter_excel` |
+| 直接导入题录 | `FilterTab` | `routers/filter.py` | `bib_entries` | 无 Job/Artifact |
 | 精读 | `LongTab / QuantTab / QualTab` | `routers/reading.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `reading_final` |
 | 对比综述 | `CompareView` React 组件 | `routers/compare.py`、`routers/history.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `compare_md`、`synthesis_md` |
 | 文献库 | `LibraryTab.tsx` | `routers/library.py`、`routers/library_chat.py` | `bib_entries`、`bib_filter_links`、`bib_references`、`reading_items`、`job_bib_entries`、`artifacts` | 时间线产物、AI 查询报告 |
+| 批量翻译摘要 | `LibraryTab.tsx` | `routers/library.py`、`services/abstract_translator.py` | `jobs(translate_abstracts)`、`bib_entries.abstract_cn` | 无独立产物 |
 | 维度模板市场 | `DimensionMarketTab` | `routers/dimensions.py` | `dimension_templates`、`template_items`、`dimension_sets`、`dimension_items` | 用户维度集 |
 | 提示词管理 | `PromptsTab` | `routers/prompts.py`、`prompt_service.py` | `prompt_templates` | 无 |
 | 历史记录 / 下载 | `HistoryTab`、`download.ts` | `routers/history.py`、`routers/download.py` | `jobs`、`artifacts` | 各类产物文件 |
@@ -243,6 +245,7 @@ API Key 本身没有单独的后端管理接口。
 | 前端动作 | API | 后端函数 |
 |---|---|---|
 | 启动筛选 | `POST /api/filter/start` | `filter.py.start_filter(...)` |
+| 直接导入题录 | `POST /api/filter/direct-import` | `filter.py.direct_import(...)` |
 | 查状态 | `GET /api/filter/task/{task_id}/status` | `filter.py.get_task_status(...)` |
 | 取消任务 | `POST /api/filter/task/{task_id}/cancel` | `filter.py.cancel_task(...)` |
 
@@ -441,6 +444,8 @@ API Key 本身没有单独的后端管理接口。
 | 在线匹配 | `POST /api/library/entries/{entry_id}/match-online` | `library.py.match_online(...)` |
 | 应用匹配 | `POST /api/library/entries/{entry_id}/apply-match` | `library.py.apply_match(...)` |
 | AI 文献查询 | `POST /api/library/chat` | `library_chat.py.library_chat(...)` |
+| 批量翻译摘要 | `POST /api/library/entries/batch-translate-abstracts` | `library.py.batch_translate_abstracts(...)` |
+| 翻译任务状态 | `GET /api/library/translate-job/{job_id}/status` | `library.py.get_translate_job_status(...)` |
 
 ## 9.3 数据库映射
 

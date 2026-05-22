@@ -59,6 +59,7 @@
 - 结果导出 Excel
 - 题录写入文献库
 - 保存筛选评价、分数、筛选任务产物
+- **直接导入**（2026-05-22 新增）：上传 WoS/CNKI .txt 题录文件，跳过 AI 筛选，直接将全部题录导入文献库（不创建 Job/BibFilterLink/Artifact）
 
 ### 2.4 文献精读
 
@@ -107,6 +108,7 @@
 - 查看和修改题录元数据
 - 查看筛选评价
 - 查看任务时间线与产物
+- **批量翻译摘要**（2026-05-22 新增）：选中多篇英文文献后一键翻译摘要为中文，结果写入 `bib_entries.abstract_cn`
 - **AI 文献助手**（2026-05-22）
   - 支持 `自动 / 全库 / 当前结果` 多轮自然语言检索
   - DeepSeek 先解析检索意图，再对当前用户文献库召回题录元数据与摘要生成报告
@@ -298,6 +300,7 @@
 重点字段：
 
 - `title / authors_json / year / journal / doi`
+- `abstract / abstract_cn`（英文摘要 / 中文翻译摘要）
 - `owner_user_id`
 - `source_file_id`
 - `dedup_key`
@@ -317,6 +320,7 @@
 - `reading_qual`
 - `compare`
 - `synthesis`
+- `translate_abstracts`
 
 ### 4.5 `job_bib_entries`
 
@@ -523,6 +527,10 @@
 
 关键函数：
 
+- `_upsert_bib_entry(...)`
+  - 从 `persist_filter_results()` 中提取的共享函数，创建或更新 BibEntry（含 abstract_cn），供筛选和直接导入共用
+- `direct_import(...)`
+  - 直接导入题录端点：上传 WoS/CNKI .txt 文件，解析后直接入库，不创建 Job/BibFilterLink/Artifact
 - `start_filter(...)`
   - 启动筛选任务
 - `run_filter_task(...)`
@@ -689,6 +697,10 @@
 
 关键函数：
 
+- `batch_translate_abstracts(...)`
+  - 批量翻译摘要：接收 entry_ids + api_key，创建 Job(translate_abstracts)，后台线程逐条翻译英文摘要为中文写入 abstract_cn
+- `get_translate_job_status(...)`
+  - 轮询翻译任务状态
 - `list_entries(...)`
   - 文献库列表，支持 `sort_by`（updated/score/year/journal）、`sort_order`（desc/asc）和标签筛选
   - 通过子查询关联 `bib_filter_links` 获取最高筛选评分 `filter_score`
@@ -1873,6 +1885,43 @@ v2 页面核心架构（与 v1 对比）：
 - **打包版产物路径不能散落在各 router 中自行拼接**（2026-05-19）：开发环境的相对路径在 PyInstaller onedir 下很容易指向错误目录。后续凡是保存或读取 Artifact 文件，都应通过 `result_storage.py` 统一处理，并优先保存相对结果根目录的路径，保留旧绝对路径兼容
 - **LLM 返回的引用标记不是展示文本**（2026-05-19）：`quote` 只能当定位锚点，用户真正需要的是命中句及上下文。引用追踪类功能应将“模型识别锚点”和“用户展示摘录”分开存放
 - **高维模板生成要按输出规模配置 token**（2026-05-19）：维度数越多，JSON 输出越长；固定 4000 token 对 20 维度不够。缓存也必须包含影响输出的参数，否则“重新生成”会被旧结果吞掉
+
+
+### 8.20 直接导入题录 + 批量翻译摘要
+
+改动目标：
+
+- 新增"直接导入"功能：上传 WoS/CNKI .txt 题录文件，跳过 AI 筛选，直接将全部题录导入文献库
+- 新增"批量翻译摘要"功能：选中多篇英文文献后一键翻译摘要为中文，结果写入 `bib_entries.abstract_cn`
+
+落点文件：
+
+- `backend/routers/filter.py` — 新增 `_upsert_bib_entry()` 共享函数（从 `persist_filter_results()` 提取）、`direct_import()` 端点
+- `backend/routers/library.py` — 新增 `batch_translate_abstracts()` 和 `get_translate_job_status()` 端点
+- `backend/services/abstract_translator.py`（新建）— `_translate_one()` 和 `run_batch_translate()` 核心翻译逻辑
+- `backend/db/models.py` — BibEntry 新增 `abstract_cn` 字段；Job CHECK 约束扩展含 `translate_abstracts`
+- `backend/migrations/versions/017_add_bib_entry_abstract_cn.py` — bib_entries 新增 abstract_cn 列
+- `backend/migrations/versions/018_add_translate_abstracts_job_type.py` — jobs CHECK 约束新增 translate_abstracts
+- `backend/services/data_portability.py` — CURRENT_SCHEMA_VERSION 更新为 "018"
+- `frontend/src/App.tsx` — FilterTab 新增直接导入按钮
+- `frontend/src/LibraryTab.tsx` — 文献库批量操作栏新增翻译摘要按钮
+
+关键实现细节：
+
+- `_upsert_bib_entry()` 从 `persist_filter_results()` 中提取为独立函数，被筛选和直接导入两个路径共用
+- 直接导入不创建 Job/BibFilterLink/Artifact，只写入 BibEntry 并执行反向匹配
+- 批量翻译创建 Job(translate_abstracts)，后台线程逐条调用 DeepSeek flash 翻译英文摘要，结果写入 `abstract_cn`
+- 筛选入库管道也同步写入 `abstract_cn` 字段
+
+踩坑记录：
+
+- **前端字段名错误**：直接导入前端使用 `uploadData.id` 而非 `uploadData.file_id`，导致 422 错误。上传接口返回的是 `file_id`，不是 `id`
+- **前端 API Key 取值错误**：前端使用 `localStorage.getItem('deepseek_api_key')` 而非从 App.tsx 传入的 `apiKey` prop，导致"API key not configured"错误。必须使用通过 props 传递的 key
+- **jobs 表 CHECK 约束遗漏**：`jobs` 表 CHECK 约束未包含 `translate_abstracts`，创建翻译任务时 500 IntegrityError。必须先写 migration 018 扩展 CHECK 约束
+- **Alembic 迁移虚标**：远程服务器 `alembic upgrade head` 报 `018 (head)` 但 `abstract_cn` 列实际不存在于生产数据库。017 migration 文件中 SQLite `batch_alter_table` 可能静默失败。**验证方法**：迁移后务必执行 `PRAGMA table_info(bib_entries)` 确认列实际存在
+- **服务器数据库路径混淆**：服务器数据库路径为项目根目录下 `db/app.sqlite`，不是 `backend/db/app.sqlite`。执行 `cd backend && sqlite3 db/app.sqlite` 找不到数据库
+- **前端构建需手动执行**：服务器自动部署脚本只执行 `pip install` 和 `alembic upgrade head`，不执行前端构建。部署后必须手动 `cd frontend && npm run build`
+- **浏览器缓存**：服务器前端重新构建后，必须强制刷新浏览器（Ctrl+Shift+R）清除缓存的旧 JS 文件
 
 ## 9. 改代码时的推荐查找路径
 

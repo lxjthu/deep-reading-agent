@@ -149,6 +149,8 @@
 
 | 函数 | 作用 | 什么时候优先看 |
 |---|---|---|
+| `_upsert_bib_entry(...)` | 共享函数：创建或更新 BibEntry（含 abstract_cn），供筛选和直接导入共用 | 直接导入或筛选入库逻辑异常 |
+| `direct_import(...)` | 直接导入题录端点：上传 .txt 文件跳过 AI 筛选直接入库 | 直接导入 422/500 错误 |
 | `start_filter(...)` | 启动筛选任务 | 点击开始筛选没反应、任务没创建 |
 | `run_filter_task(...)` | 后台执行筛选、导出、持久化 | 筛选过程出错、日志不对、任务卡住 |
 | `persist_filter_results(...)` | 将筛选结果写入 `BibEntry` / `BibFilterLink` / `Artifact`，含反向匹配 | 文献库中缺筛选信息、Excel 产物缺失 |
@@ -246,6 +248,8 @@
 | `delete_ai_comment(...)` | 删除文献库已保存 AI 点评 | 点评删除失败 |
 | `match_online(...)` | 对单篇文献执行在线元数据匹配 | 在线匹配失败、候选结果异常 |
 | `apply_match(...)` | 应用候选元数据到文献（重新搜索 → 只补空字段 → 更新 dedup_key 和 metadata_completeness） | 应用匹配结果失败 |
+| `batch_translate_abstracts(...)` | 批量翻译摘要：接收 entry_ids + api_key，创建 Job 后台翻译 | 批量翻译启动失败 |
+| `get_translate_job_status(...)` | 轮询翻译任务进度 | 翻译进度不更新 |
 
 ## 2.13.1 `backend/routers/library_chat.py`
 
@@ -481,7 +485,18 @@
 | `_deserialize_table(db, model, records, ...)` | 反序列化 JSON 并 INSERT 到数据库 | 导入数据格式问题 |
 | `_serialize_table(db, model, user_id)` | 将表数据序列化为 JSON | 导出数据不全 |
 
-## 2.23 `backend/routers/data.py`
+## 2.23.1 `backend/services/abstract_translator.py`
+
+文件：
+
+- [abstract_translator.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/abstract_translator.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `_translate_one(entry, api_key)` | 调用 DeepSeek flash 翻译单条英文摘要为中文 | 翻译结果异常或超时 |
+| `run_batch_translate(job_id, entry_ids, user_id, api_key)` | 批量翻译入口：逐条翻译摘要并写入 `abstract_cn` | 批量翻译任务卡住或部分失败 |
+
+## 2.24 `backend/routers/data.py`
 
 文件：
 
@@ -492,7 +507,7 @@
 | `export_data(user, db)` | GET /api/data/export 导出接口 | 导出 API 问题 |
 | `import_data(file, user, db)` | POST /api/data/import 导入接口 | 导入 API 问题 |
 
-## 2.24 `backend/routers/dimensions.py` (22 endpoints)
+## 2.25 `backend/routers/dimensions.py` (22 endpoints)
 
 文件：
 
@@ -513,7 +528,7 @@ Key functions/endpoints:
 | `preview_document_import` POST /import/preview | Parse TXT/MD/JSON dimension doc | Import preview issues |
 | `confirm_document_import` POST /import/confirm | Save imported document dimensions | Import confirm fails |
 
-## 2.25 `backend/services/ai_template_generator.py`
+## 2.26 `backend/services/ai_template_generator.py`
 
 文件：
 
@@ -523,7 +538,7 @@ Key functions/endpoints:
 |---|---|---|
 | `generate_dimension_template(text, dim_count, api_key)` | Call DeepSeek to generate dimensions from paper text | AI generation returns bad results, meta-prompt tuning |
 
-## 2.26 `backend/services/document_parser.py`
+## 2.27 `backend/services/document_parser.py`
 
 文件：
 

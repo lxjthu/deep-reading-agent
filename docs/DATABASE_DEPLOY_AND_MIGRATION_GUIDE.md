@@ -641,6 +641,74 @@ python -m alembic upgrade head
 
 ---
 
+## 15. 直接导入 + 批量翻译摘要部署踩坑记录（2026-05-22）
+
+本次上线涉及两个新功能（直接导入题录、批量翻译摘要），过程中遇到多个部署相关问题，记录如下供后续参考。
+
+### 15.1 SQLite Alembic 迁移可能"虚标"
+
+**现象**：远程服务器执行 `alembic upgrade head` 输出 `018 (head)` 表示迁移成功，但 `bib_entries` 表中 `abstract_cn` 列实际不存在。
+
+**根因**：SQLite 不支持 `ALTER TABLE ADD COLUMN` 的某些场景（如在有 CHECK 约束的表上），Alembic 使用 `batch_alter_table` 做表重建，如果迁移脚本中 batch 操作有隐含错误，可能静默失败但仍被标记为已执行。
+
+**验证方法**：迁移后务必手动检查列是否实际存在：
+
+```bash
+sqlite3 db/app.sqlite "PRAGMA table_info(bib_entries);"
+```
+
+如果列不在输出中，需要手动补列：
+
+```bash
+sqlite3 db/app.sqlite "ALTER TABLE bib_entries ADD COLUMN abstract_cn TEXT;"
+```
+
+**教训**：SQLite 迁移后不能只信 `alembic current` 的输出，必须用 `PRAGMA table_info()` 验证。
+
+### 15.2 服务器数据库路径不是 `backend/db/app.sqlite`
+
+**现象**：执行 `cd backend && sqlite3 db/app.sqlite` 报错找不到文件。
+
+**根因**：服务器上数据库文件位于项目根目录下 `db/app.sqlite`，不是 `backend/db/app.sqlite`。`session.py` 中的 `DATABASE_URL` 根据运行环境动态解析路径，直接 cd 到 backend 下找不到 db 目录。
+
+**正确操作**：
+
+```bash
+cd /root/.openclaw/workspace/deep-reading-agent
+sqlite3 db/app.sqlite "PRAGMA table_info(bib_entries);"
+```
+
+### 15.3 服务器自动部署不执行前端构建
+
+**现象**：推送代码后服务器自动部署完成，但前端页面没有新功能按钮。
+
+**根因**：当前自动部署脚本只执行 `pip install -r requirements.txt` 和 `alembic upgrade head`，不执行 `cd frontend && npm run build`。前端静态文件不会自动更新。
+
+**正确操作**：部署后手动执行前端构建：
+
+```bash
+cd /root/.openclaw/workspace/deep-reading-agent/frontend
+npm run build
+```
+
+### 15.4 浏览器缓存导致前端更新不生效
+
+**现象**：前端已重新 build，但浏览器仍显示旧页面、旧按钮。
+
+**根因**：浏览器缓存了旧的 JS/CSS 文件，常规刷新（F5）可能仍使用缓存。
+
+**解决**：强制刷新浏览器（Ctrl+Shift+R 或 Cmd+Shift+R）。
+
+### 15.5 jobs 表 CHECK 约束必须先扩展
+
+**现象**：创建 `translate_abstracts` 类型的 Job 时 500 IntegrityError。
+
+**根因**：`jobs` 表的 `job_type` 字段有 `CHECK (job_type IN (...))` 约束，新增任务类型必须先通过 Alembic migration 扩展约束范围。
+
+**教训**：凡是新增 `job_type` 枚举值，必须先写 migration 扩展 CHECK 约束，再部署使用该类型的业务代码。
+
+---
+
 ## 15. 一句话总结
 
 **服务器不是通过“接收你的数据库文件”知道数据库改动的，而是通过“你推上去的模型代码 + 迁移脚本”，并在执行 Alembic 迁移后，才真正完成数据库结构升级。**
