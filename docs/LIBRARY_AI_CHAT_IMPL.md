@@ -22,6 +22,7 @@
 - 检索只访问当前登录用户拥有的 `BibEntry`、`BibReference` 和 `ReadingItem`。
 - 文献列表新增 `POST /api/library/entries/by-ids`，用 JSON body 承载 AI 命中 ID 集合，避免把大量 UUID 塞进 GET URL。
 - 标签能力新增 `GET /api/library/tags` 与 `POST /api/library/entries/batch-tags`；标签筛选参数复用 `/api/library/entries` 与 `/api/library/entries/by-ids`。
+- 标签动作在“当前结果”范围内会先保留上一轮候选全集，再用 `tag_target_selector` 做结构化目标选择；避免字面关键词召回只命中标题最像的一篇，而把报告语义上已筛出的相关文献漏掉。
 - 点评能力新增 `POST /api/library/chat/comments`：以当前 turn 的问题、报告和命中文献为输入，按批生成逐篇 JSON 点评。
 - AI 点评复用 `annotations`：`source_type='library_note'`、`is_ai_generated=1`、`source_id=<turn_id>`；同一轮重复保存会替换该轮旧点评。
 - 文献库专用点评编辑接口为 `PATCH /api/library/ai-comments/{comment_id}` 与 `DELETE /api/library/ai-comments/{comment_id}`，只允许操作当前用户的 AI 文献库点评。
@@ -43,6 +44,7 @@
 |---|---|---|
 | `query_parser` | `prompts/library_chat/query_parser.md` | 把自然语言问题解析为检索意图 JSON |
 | `report_writer` | `prompts/library_chat/report_writer.md` | 基于命中文献与上下文输出中文 Markdown 报告 |
+| `tag_target_selector` | `prompts/library_chat/tag_target_selector.md` | 在候选结果中为标签确认卡选择真实目标文献 ID |
 | `paper_comment_writer` | `prompts/library_chat/paper_comment_writer.md` | 保存点评时输出值得写入条目的逐篇 JSON 点评 |
 
 报告提示词要求回答中提到具体文献时沿用输入编号，便于前端和文献列表对照。  
@@ -67,3 +69,4 @@
 - `cd frontend && npx eslint src/LibraryTab.tsx`
 - 本地页面验证 AI 报告流式生成、命中文献同步筛选列表、列表与详情编号显示、报告编号点击定位
 - 本地页面验证标签搜索下拉筛选、AI 标签提议确认、保存本轮 AI 点评、点评编辑删除和否定点评跳过
+- 标签确认卡 hotfix 验证：报告按语义筛出多篇文献时，当前结果内标签提议不再因字面关键词召回漏掉目标文献

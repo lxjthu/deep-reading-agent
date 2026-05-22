@@ -257,6 +257,7 @@
 |---|---|---|
 | `_build_papers_text(...)` | 给本轮命中文献生成带 `[n]` 编号的报告上下文 | 报告编号与文献列表编号对不上 |
 | `_build_report_user_message(...)` | 拼装多轮上下文、检索意图、引用关系和命中文献全集 | 报告依据缺字段或上下文不连续 |
+| `_build_tag_target_user_message(...)` | 为标签目标选择器拼装当前问题、历史报告和候选文献 | 标签确认卡漏掉语义相关文献 |
 | `_build_comment_user_message(...)` | 拼装当前 turn 的问题、报告与逐篇元数据 | 保存点评缺少本轮依据 |
 | `library_chat(...)` | 解析查询意图、检索文献、流式输出 AI 报告 | AI 文献助手 SSE、检索范围或 DeepSeek 调用失败 |
 | `save_library_chat_comments(...)` | 保存当前 turn 值得写入文献条目的逐篇 AI 点评 | 保存点评失败、重复保存同轮点评异常 |

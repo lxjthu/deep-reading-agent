@@ -203,6 +203,56 @@ def _build_comment_user_message(
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _build_tag_target_user_message(
+    req: LibraryChatRequest,
+    intent: dict,
+    rows: list[BibEntry],
+    candidate_numbers: dict[str, int],
+) -> str:
+    payload = {
+        "current_question": req.question.strip(),
+        "search_intent": intent,
+        "history": [
+            {
+                "question": turn.question,
+                "report": turn.report,
+                "result_count": turn.result_count,
+                "keywords": turn.keywords[:24],
+            }
+            for turn in req.history[-3:]
+        ],
+        "candidates": [
+            {
+                "candidate_number": candidate_numbers.get(row.id),
+                "entry_id": row.id,
+                "title": row.title,
+                "authors": _json_list(row.authors_json),
+                "journal": row.journal,
+                "year": row.year,
+                "keywords": _json_list(row.keywords_json),
+                "abstract": row.abstract,
+            }
+            for row in rows
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _parse_target_entry_ids(value, allowed_entry_ids: set[str]) -> list[str]:
+    rows = value.get("entry_ids") if isinstance(value, dict) else None
+    if not isinstance(rows, list):
+        return []
+
+    entry_ids: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        entry_id = str(row or "").strip()
+        if entry_id in allowed_entry_ids and entry_id not in seen:
+            seen.add(entry_id)
+            entry_ids.append(entry_id)
+    return entry_ids
+
+
 def _parse_comment_rows(value, allowed_entry_ids: set[str]) -> dict[str, str]:
     rows = value.get("comments") if isinstance(value, dict) else None
     if not isinstance(rows, list):
@@ -246,6 +296,12 @@ async def library_chat(
         user_id=user.id,
         prompt_type="library_chat",
         prompt_key="report_writer",
+    )
+    tag_target_prompt = await get_effective_prompt_text(
+        db,
+        user_id=user.id,
+        prompt_type="library_chat",
+        prompt_key="tag_target_selector",
     )
 
     async def _stream():
@@ -292,7 +348,11 @@ async def library_chat(
             stmt = select(BibEntry).where(BibEntry.owner_user_id == user.id)
             if scope == "previous_results":
                 stmt = stmt.where(BibEntry.id.in_(previous_entry_ids))
-            if search_terms:
+            # Previous-result tag actions need semantic target selection from the whole
+            # prior result set. Literal keyword matching here can silently drop papers
+            # that the prior AI report selected by abstract-level relevance.
+            use_keyword_recall = not (tag_action and scope == "previous_results")
+            if search_terms and use_keyword_recall:
                 keyword_conditions = []
                 for term in search_terms:
                     like = f"%{term}%"
@@ -314,6 +374,41 @@ async def library_chat(
                 stmt = stmt.where(BibEntry.authors_json.ilike(f"%{author}%"))
 
             rows = (await db.execute(stmt.order_by(BibEntry.updated_at.desc(), BibEntry.created_at.desc()))).scalars().all()
+            if scope == "previous_results":
+                previous_order = {entry_id: index for index, entry_id in enumerate(previous_entry_ids)}
+                rows.sort(key=lambda row: previous_order.get(row.id, len(previous_order)))
+
+            if tag_action and rows:
+                candidate_numbers = (
+                    {entry_id: index + 1 for index, entry_id in enumerate(previous_entry_ids)}
+                    if scope == "previous_results"
+                    else {row.id: index + 1 for index, row in enumerate(rows)}
+                )
+                target_response = client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    extra_body={"thinking": {"type": "disabled"}},
+                    messages=[
+                        {"role": "system", "content": tag_target_prompt},
+                        {
+                            "role": "user",
+                            "content": _build_tag_target_user_message(
+                                req,
+                                intent,
+                                rows,
+                                candidate_numbers,
+                            ),
+                        },
+                    ],
+                    temperature=0.1,
+                    max_tokens=4000,
+                    response_format={"type": "json_object"},
+                )
+                target_raw = target_response.choices[0].message.content or "{}"
+                target_ids = _parse_target_entry_ids(json.loads(target_raw), {row.id for row in rows})
+                target_id_set = set(target_ids)
+                rows_by_id = {row.id: row for row in rows if row.id in target_id_set}
+                rows = [rows_by_id[entry_id] for entry_id in target_ids if entry_id in rows_by_id]
+
             entry_ids = [row.id for row in rows]
             titles = [row.title for row in rows]
             id_to_title = {row.id: row.title for row in rows}

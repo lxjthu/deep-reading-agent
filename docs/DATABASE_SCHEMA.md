@@ -166,7 +166,7 @@ CREATE INDEX idx_prompt_templates_type_key ON prompt_templates (prompt_type, pro
 - 当前阶段仍只允许固定槽位，不开放任意自定义 key
 - 运行时优先级：`用户覆盖 → 系统默认 → prompts/ 文件兜底 → 代码内置兜底`
 - 首批系统默认值从现有 `prompts/` 目录幂等导入数据库
-- `library_chat` 于 migration `016` 加入，当前包含查询解析、报告生成和逐篇点评保存三个提示词槽位
+- `library_chat` 于 migration `016` 加入，当前包含查询解析、报告生成、标签目标选择和逐篇点评保存四个提示词槽位
 - 系统默认提示词若尚未被管理员编辑，会在默认种子同步时跟随托管提示词文件更新
 
 ### 3.5 `files` — 物理文件
