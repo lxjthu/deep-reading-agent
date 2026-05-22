@@ -15,6 +15,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from auth.dependencies import current_user
 from db import AsyncSessionLocal, get_db
 from db.models import Artifact, BibEntry, BibFilterLink, File, Job, User
@@ -23,6 +24,7 @@ from prompt_service import get_effective_prompt_text
 from result_storage import build_result_storage_path, get_results_root
 from upload_storage import lookup_path_by_file_id
 from backend.utils.api_key import validate_deepseek_key
+from parsers import get_parser
 
 # Add parent directory to path to import existing modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -757,3 +759,88 @@ async def cancel_task(
     job.finished_at = utcnow_naive()
     await db.commit()
     return {"success": True}
+
+
+class DirectImportRequest(BaseModel):
+    file_id: str
+
+
+class DirectImportEntrySummary(BaseModel):
+    title: str
+    authors: list[str]
+    year: Optional[int] = None
+    doi: Optional[str] = None
+    journal: Optional[str] = None
+
+
+class DirectImportResponse(BaseModel):
+    count: int
+    entries: list[DirectImportEntrySummary]
+
+
+@router.post("/direct-import")
+async def direct_import(
+    req: DirectImportRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    file_record = (
+        await db.execute(
+            select(File).where(File.id == req.file_id, File.owner_user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if file_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    file_path = lookup_path_by_file_id(req.file_id)
+    if file_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
+
+    parser = get_parser(str(file_path))
+    if parser is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported file format",
+        )
+
+    parser.parse()
+    df = parser.to_dataframe()
+
+    source_db_map = {"WoS": "wos", "CNKI": "cnki"}
+    raw_source = infer_source_db(df, file_record)
+    source_db = raw_source if raw_source in ("wos", "cnki") else "other"
+
+    imported: list[DirectImportEntrySummary] = []
+    for _, row in df.iterrows():
+        bib_entry = await _upsert_bib_entry(
+            db,
+            owner_user_id=user.id,
+            row=row,
+            source_db=source_db,
+        )
+        if bib_entry is None:
+            continue
+
+        if bib_entry.expires_at is None:
+            bib_entry.expires_at = compute_expires_at(user)
+
+        is_new = bib_entry.source_file_id is None
+        if is_new:
+            await reverse_match_to_existing_files(db, bib_entry, user.id)
+
+        await db.flush()
+
+        authors_list = json.loads(bib_entry.authors_json or "[]")
+        imported.append(
+            DirectImportEntrySummary(
+                title=bib_entry.title,
+                authors=authors_list,
+                year=bib_entry.year,
+                doi=bib_entry.doi,
+                journal=bib_entry.journal,
+            )
+        )
+
+    await db.commit()
+
+    return DirectImportResponse(count=len(imported), entries=imported)
