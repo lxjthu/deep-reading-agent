@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import get_db
-from db.models import Artifact, BibEntry, BibFilterLink, BibReference, File, Job, JobBibEntry, ReadingItem, User
+from db.models import Annotation, Artifact, BibEntry, BibFilterLink, BibReference, File, Job, JobBibEntry, ReadingItem, User
 from db.utils import title_match_score, normalize_doi, compute_metadata_match_score
 from result_storage import resolve_result_path
 from services.crossref_source import CrossrefSource
@@ -73,11 +74,21 @@ class LibraryFilterEvaluation(BaseModel):
     created_at: Optional[str]
 
 
+class LibraryAiComment(BaseModel):
+    id: str
+    source_id: str
+    question: Optional[str]
+    note: str
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+
 class LibraryEntryDetail(LibraryEntrySummary):
     abstract: Optional[str]
     keywords: list[str]
     timeline: list[LibraryTimelineItem]
     filter_evaluations: list[LibraryFilterEvaluation]
+    ai_comments: list[LibraryAiComment]
 
 
 class LibraryEntryUpdateRequest(BaseModel):
@@ -92,6 +103,10 @@ class LibraryEntryUpdateRequest(BaseModel):
     note: Optional[str] = None
     is_pinned: Optional[int] = Field(default=None, ge=0, le=1)
     language: Optional[str] = None
+
+
+class LibraryAiCommentUpdateRequest(BaseModel):
+    note: str = Field(min_length=1, max_length=12000)
 
 
 def _json_list(value: str | None) -> list[str]:
@@ -205,12 +220,67 @@ async def get_owned_entry(db: AsyncSession, user: User, entry_id: str) -> BibEnt
     return entry
 
 
+async def get_owned_ai_comment(db: AsyncSession, user: User, comment_id: str) -> Annotation:
+    comment = (
+        await db.execute(
+            select(Annotation).where(
+                Annotation.id == comment_id,
+                Annotation.owner_user_id == user.id,
+                Annotation.source_type == "library_note",
+                Annotation.is_ai_generated == 1,
+            )
+        )
+    ).scalar_one_or_none()
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI comment not found")
+    return comment
+
+
 class BatchDeleteRequest(BaseModel):
     entry_ids: list[str] = Field(..., min_length=1, max_length=200)
 
 
 class LibraryEntryIdsRequest(BaseModel):
     entry_ids: list[str] = Field(default_factory=list)
+
+
+class BatchTagsRequest(BaseModel):
+    entry_ids: list[str] = Field(..., min_length=1, max_length=200)
+    add_tags: list[str] = Field(default_factory=list, max_length=20)
+    remove_tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+def _clean_tags(tags: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        text = str(tag).strip()
+        if not text or text in seen:
+            continue
+        cleaned.append(text)
+        seen.add(text)
+    return cleaned
+
+
+@router.get("/tags", response_model=list[str])
+async def list_tags(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+) -> list[str]:
+    rows = (
+        await db.execute(
+            select(BibEntry.user_tags_json).where(BibEntry.owner_user_id == user.id)
+        )
+    ).scalars().all()
+    tags: list[str] = []
+    seen: set[str] = set()
+    for value in rows:
+        for tag in _clean_tags(_json_list(value)):
+            normalized = tag.casefold()
+            if normalized not in seen:
+                seen.add(normalized)
+                tags.append(tag)
+    return sorted(tags, key=str.casefold)
 
 
 @router.post("/entries/batch-delete")
@@ -240,10 +310,52 @@ async def batch_delete_entries(
     return {"deleted": len(found_ids), "not_found": len(ids) - len(found_ids)}
 
 
+@router.post("/entries/batch-tags")
+async def batch_update_tags(
+    body: BatchTagsRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    add_tags = _clean_tags(body.add_tags)
+    remove_tags = set(_clean_tags(body.remove_tags))
+    if not add_tags and not remove_tags:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one tag change is required.",
+        )
+
+    rows = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.id.in_(body.entry_ids),
+                BibEntry.owner_user_id == user.id,
+            )
+        )
+    ).scalars().all()
+    changed = 0
+    for row in rows:
+        original_tags = _clean_tags(_json_list(row.user_tags_json))
+        next_tags = [tag for tag in original_tags if tag not in remove_tags]
+        for tag in add_tags:
+            if tag not in next_tags:
+                next_tags.append(tag)
+        if next_tags != original_tags:
+            row.user_tags_json = json.dumps(next_tags, ensure_ascii=False)
+            changed += 1
+
+    await db.commit()
+    return {
+        "matched": len(rows),
+        "changed": changed,
+        "not_found": len(body.entry_ids) - len(rows),
+    }
+
+
 @router.get("/entries", response_model=list[LibraryEntrySummary])
 async def list_entries(
     search: str = Query(default=""),
     journal: str = Query(default=""),
+    tags: str = Query(default=""),
     reading_status: str = Query(default=""),
     pinned_only: bool = Query(default=False),
     sort_by: str = Query(default="updated"),
@@ -258,6 +370,7 @@ async def list_entries(
         user=user,
         search=search,
         journal=journal,
+        tags=_clean_tags(tags.split(",")),
         reading_status=reading_status,
         pinned_only=pinned_only,
         sort_by=sort_by,
@@ -271,6 +384,7 @@ async def list_entries_by_ids(
     request: LibraryEntryIdsRequest,
     search: str = Query(default=""),
     journal: str = Query(default=""),
+    tags: str = Query(default=""),
     reading_status: str = Query(default=""),
     pinned_only: bool = Query(default=False),
     sort_by: str = Query(default="updated"),
@@ -286,6 +400,7 @@ async def list_entries_by_ids(
         user=user,
         search=search,
         journal=journal,
+        tags=_clean_tags(tags.split(",")),
         reading_status=reading_status,
         pinned_only=pinned_only,
         sort_by=sort_by,
@@ -300,6 +415,7 @@ async def _list_entries(
     user: User,
     search: str,
     journal: str,
+    tags: list[str],
     reading_status: str,
     pinned_only: bool,
     sort_by: str,
@@ -355,7 +471,11 @@ async def _list_entries(
         stmt = stmt.order_by(BibEntry.is_pinned.desc(), BibEntry.updated_at.desc(), BibEntry.created_at.desc())
 
     rows = (await db.execute(stmt)).all()
-    return [build_entry_summary(entry, source_file, max_score) for entry, source_file, max_score in rows]
+    summaries = [build_entry_summary(entry, source_file, max_score) for entry, source_file, max_score in rows]
+    if tags:
+        expected_tags = set(tags)
+        summaries = [summary for summary in summaries if expected_tags.issubset(set(summary.tags))]
+    return summaries
 
 
 @router.get("/entries/{entry_id}", response_model=LibraryEntryDetail)
@@ -427,6 +547,30 @@ async def get_entry_detail(
             )
         )
 
+    ai_comment_rows = (
+        await db.execute(
+            select(Annotation)
+            .where(
+                Annotation.owner_user_id == user.id,
+                Annotation.bib_entry_id == entry.id,
+                Annotation.source_type == "library_note",
+                Annotation.is_ai_generated == 1,
+            )
+            .order_by(Annotation.created_at.desc(), Annotation.id.desc())
+        )
+    ).scalars().all()
+    ai_comments = [
+        LibraryAiComment(
+            id=annotation.id,
+            source_id=annotation.source_id,
+            question=annotation.selected_text,
+            note=annotation.note,
+            created_at=_dt(annotation.created_at),
+            updated_at=_dt(annotation.updated_at),
+        )
+        for annotation in ai_comment_rows
+    ]
+
     summary = build_entry_summary(entry, source_file)
     return LibraryEntryDetail(
         **summary.model_dump(),
@@ -434,6 +578,7 @@ async def get_entry_detail(
         keywords=_json_list(entry.keywords_json),
         timeline=list(grouped.values()),
         filter_evaluations=filter_evaluations,
+        ai_comments=ai_comments,
     )
 
 
@@ -471,6 +616,46 @@ async def update_entry(
 
     await db.commit()
     return await get_entry_detail(entry_id, user=user, db=db)
+
+
+@router.patch("/ai-comments/{comment_id}", response_model=LibraryAiComment)
+async def update_ai_comment(
+    comment_id: str,
+    request: LibraryAiCommentUpdateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LibraryAiComment:
+    comment = await get_owned_ai_comment(db, user, comment_id)
+    note = request.note.strip()
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="AI comment cannot be empty.",
+        )
+    comment.note = note
+    comment.updated_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(comment)
+    return LibraryAiComment(
+        id=comment.id,
+        source_id=comment.source_id,
+        question=comment.selected_text,
+        note=comment.note,
+        created_at=_dt(comment.created_at),
+        updated_at=_dt(comment.updated_at),
+    )
+
+
+@router.delete("/ai-comments/{comment_id}")
+async def delete_ai_comment(
+    comment_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    comment = await get_owned_ai_comment(db, user, comment_id)
+    await db.delete(comment)
+    await db.commit()
+    return {"ok": True}
 
 
 # ============================================================

@@ -45,6 +45,7 @@ type LibraryEntryDetail = LibraryEntrySummary & {
   keywords: string[]
   timeline: LibraryTimelineItem[]
   filter_evaluations: LibraryFilterEvaluation[]
+  ai_comments: LibraryAiComment[]
 }
 
 type LibraryFilterEvaluation = {
@@ -54,6 +55,15 @@ type LibraryFilterEvaluation = {
   reason: string | null
   abstract_translation: string | null
   created_at: string | null
+}
+
+type LibraryAiComment = {
+  id: string
+  source_id: string
+  question: string | null
+  note: string
+  created_at: string | null
+  updated_at: string | null
 }
 
 type EditDraft = {
@@ -87,6 +97,22 @@ type LibraryChatIntent = {
   year_from: number | null
   year_to: number | null
   authors: string[]
+  tag_action: {
+    type: 'add_tags' | 'remove_tags'
+    tags: string[]
+  } | null
+}
+
+type LibraryChatActionProposal = {
+  type: 'add_tags' | 'remove_tags'
+  tags: string[]
+  entryIds: string[]
+  entryTitles: string[]
+  count: number
+  scope: Exclude<LibraryChatScope, 'auto'>
+  journal: string | null
+  status: 'pending' | 'running' | 'done' | 'cancelled' | 'error'
+  message: string
 }
 
 type LibraryChatTurn = {
@@ -100,6 +126,9 @@ type LibraryChatTurn = {
   scope: Exclude<LibraryChatScope, 'auto'> | null
   intent: LibraryChatIntent | null
   citations: LibraryChatCitation[]
+  actionProposal: LibraryChatActionProposal | null
+  commentSaveStatus: 'idle' | 'saving' | 'done' | 'error'
+  commentSaveMessage: string
 }
 
 async function parseJsonOrThrow<T>(response: Response): Promise<T> {
@@ -279,6 +308,10 @@ function buildDraft(detail: LibraryEntryDetail): EditDraft {
 export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [search, setSearch] = useState('')
   const [journalFilter, setJournalFilter] = useState('')
+  const [tagOptions, setTagOptions] = useState<string[]>([])
+  const [tagFilterQuery, setTagFilterQuery] = useState('')
+  const [tagFilters, setTagFilters] = useState<string[]>([])
+  const [tagFilterOpen, setTagFilterOpen] = useState(false)
   const [readingStatus, setReadingStatus] = useState('')
   const [pinnedOnly, setPinnedOnly] = useState(false)
   const [sortBy, setSortBy] = useState('updated')
@@ -295,6 +328,13 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [saveMessage, setSaveMessage] = useState('')
   const [expandedTimeline, setExpandedTimeline] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [editingAiCommentId, setEditingAiCommentId] = useState<string | null>(null)
+  const [editingAiCommentText, setEditingAiCommentText] = useState('')
+  const [aiCommentBusyId, setAiCommentBusyId] = useState<string | null>(null)
+  const [aiCommentMessage, setAiCommentMessage] = useState('')
+  const [batchTagsText, setBatchTagsText] = useState('')
+  const [batchTagsBusy, setBatchTagsBusy] = useState(false)
+  const [batchTagsMessage, setBatchTagsMessage] = useState('')
 
   const [chatOpen, setChatOpen] = useState(false)
   const [chatQuestion, setChatQuestion] = useState('')
@@ -313,14 +353,26 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     () => new Map((chatFilteredIds || []).map((entryId, index) => [entryId, index + 1])),
     [chatFilteredIds],
   )
+  const matchingTagOptions = useMemo(() => {
+    const query = tagFilterQuery.trim().toLocaleLowerCase()
+    return tagOptions.filter((tag) => {
+      if (tagFilters.includes(tag)) return false
+      return !query || tag.toLocaleLowerCase().includes(query)
+    })
+  }, [tagFilterQuery, tagFilters, tagOptions])
 
-  async function loadEntries(preferredId?: string | null, filteredIds = chatFilteredIds) {
+  async function loadEntries(
+    preferredId?: string | null,
+    filteredIds = chatFilteredIds,
+    filteredTags = tagFilters,
+  ) {
     setListLoading(true)
     setListError('')
     try {
       const params = new URLSearchParams()
       if (search.trim()) params.set('search', search.trim())
       if (journalFilter.trim()) params.set('journal', journalFilter.trim())
+      if (filteredTags.length > 0) params.set('tags', filteredTags.join(','))
       if (readingStatus) params.set('reading_status', readingStatus)
       if (pinnedOnly) params.set('pinned_only', 'true')
       params.set('sort_by', sortBy)
@@ -347,13 +399,36 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
             ? selectedId
             : data[0]?.id || null
       setSelectedId(nextId)
-    } catch (error: any) {
-      setListError(error.message || '加载文献库失败。')
+    } catch (error: unknown) {
+      setListError(error instanceof Error ? error.message : '加载文献库失败。')
       setEntries([])
       setSelectedId(null)
     } finally {
       setListLoading(false)
     }
+  }
+
+  async function loadTagOptions() {
+    try {
+      const response = await fetch('/api/library/tags')
+      setTagOptions(await parseJsonOrThrow<string[]>(response))
+    } catch {
+      setTagOptions([])
+    }
+  }
+
+  function selectTagFilter(tag: string) {
+    const nextTags = [...tagFilters, tag]
+    setTagFilters(nextTags)
+    setTagFilterQuery('')
+    setTagFilterOpen(false)
+    void loadEntries(undefined, chatFilteredIds, nextTags)
+  }
+
+  function removeTagFilter(tag: string) {
+    const nextTags = tagFilters.filter((item) => item !== tag)
+    setTagFilters(nextTags)
+    void loadEntries(undefined, chatFilteredIds, nextTags)
   }
 
   function toggleSelect(id: string) {
@@ -390,8 +465,8 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       setSelectedIds(new Set())
       await loadEntries()
       alert(`已删除 ${data.deleted} 篇文献。`)
-    } catch (e: any) {
-      alert(`批量删除失败：${e.message || e}`)
+    } catch (error: unknown) {
+      alert(`批量删除失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -405,10 +480,10 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       const data = await parseJsonOrThrow<LibraryEntryDetail>(response)
       setDetail(data)
       setDraft(buildDraft(data))
-    } catch (error: any) {
+    } catch (error: unknown) {
       setDetail(null)
       setDraft(null)
-      setDetailError(error.message || '加载文献详情失败。')
+      setDetailError(error instanceof Error ? error.message : '加载文献详情失败。')
     } finally {
       setDetailLoading(false)
     }
@@ -418,6 +493,10 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     void loadEntries()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readingStatus, pinnedOnly, sortBy, sortOrder])
+
+  useEffect(() => {
+    void loadTagOptions()
+  }, [])
 
   useEffect(() => {
     if (!selectedId) {
@@ -473,10 +552,47 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       setDraft(buildDraft(updated))
       setSaveMessage('保存成功。')
       await loadEntries(updated.id)
-    } catch (error: any) {
-      setSaveMessage(error.message || '保存失败。')
+      void loadTagOptions()
+    } catch (error: unknown) {
+      setSaveMessage(error instanceof Error ? error.message : '保存失败。')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleBatchTags(operation: 'add' | 'remove') {
+    const tags = splitCsv(batchTagsText)
+    if (selectedIds.size === 0 || tags.length === 0 || batchTagsBusy) return
+
+    setBatchTagsBusy(true)
+    setBatchTagsMessage('')
+    try {
+      const response = await fetch('/api/library/entries/batch-tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entry_ids: Array.from(selectedIds),
+          add_tags: operation === 'add' ? tags : [],
+          remove_tags: operation === 'remove' ? tags : [],
+        }),
+      })
+      const data = await parseJsonOrThrow<{
+        matched: number
+        changed: number
+        not_found: number
+      }>(response)
+      setBatchTagsMessage(
+        operation === 'add'
+          ? `已为 ${data.changed} 篇文献添加标签。`
+          : `已从 ${data.changed} 篇文献移除标签。`,
+      )
+      await loadEntries(selectedId)
+      void loadTagOptions()
+      if (selectedId) void loadDetail(selectedId)
+    } catch (error: unknown) {
+      setBatchTagsMessage(error instanceof Error ? error.message : '批量更新标签失败。')
+    } finally {
+      setBatchTagsBusy(false)
     }
   }
 
@@ -504,6 +620,9 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       scope: null,
       intent: null,
       citations: [],
+      actionProposal: null,
+      commentSaveStatus: 'idle',
+      commentSaveMessage: '',
     }
     setChatTurns((turns) => [...turns, nextTurn])
     setChatQuestion('')
@@ -572,6 +691,27 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
             updateLastChatTurn(turns, turnId, (turn) => ({
               ...turn,
               citations: Array.isArray(data.links) ? data.links : [],
+            })),
+          )
+        } else if (event === 'action_proposal') {
+          const actionType =
+            data.type === 'add_tags' || data.type === 'remove_tags' ? data.type : null
+          if (!actionType) return
+          setChatTurns((turns) =>
+            updateLastChatTurn(turns, turnId, (turn) => ({
+              ...turn,
+              actionProposal: {
+                type: actionType,
+                tags: Array.isArray(data.tags) ? data.tags : [],
+                entryIds: Array.isArray(data.entry_ids) ? data.entry_ids : [],
+                entryTitles: Array.isArray(data.entry_titles) ? data.entry_titles : [],
+                count: Number(data.count || 0),
+                scope:
+                  data.scope === 'previous_results' ? 'previous_results' : 'library',
+                journal: typeof data.journal === 'string' ? data.journal : null,
+                status: 'pending',
+                message: '',
+              },
             })),
           )
         } else if (event === 'report') {
@@ -646,6 +786,193 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     focusReportEntry(turn, entryNumber)
   }
 
+  async function executeChatProposal(turnId: string, proposal: LibraryChatActionProposal) {
+    if (proposal.status !== 'pending' || proposal.count === 0) return
+
+    setChatTurns((turns) =>
+      updateLastChatTurn(turns, turnId, (turn) => ({
+        ...turn,
+        actionProposal: turn.actionProposal
+          ? { ...turn.actionProposal, status: 'running', message: '' }
+          : null,
+      })),
+    )
+    try {
+      const response = await fetch('/api/library/entries/batch-tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entry_ids: proposal.entryIds,
+          add_tags: proposal.type === 'add_tags' ? proposal.tags : [],
+          remove_tags: proposal.type === 'remove_tags' ? proposal.tags : [],
+        }),
+      })
+      const data = await parseJsonOrThrow<{ changed: number }>(response)
+      setChatTurns((turns) =>
+        updateLastChatTurn(turns, turnId, (turn) => ({
+          ...turn,
+          actionProposal: turn.actionProposal
+            ? {
+                ...turn.actionProposal,
+                status: 'done',
+                message:
+                  proposal.type === 'add_tags'
+                    ? `已为 ${data.changed} 篇文献添加标签。`
+                    : `已从 ${data.changed} 篇文献移除标签。`,
+              }
+            : null,
+        })),
+      )
+      setChatFilteredIds(proposal.entryIds)
+      await loadEntries(selectedId, proposal.entryIds)
+      void loadTagOptions()
+      if (selectedId) void loadDetail(selectedId)
+    } catch (error: unknown) {
+      setChatTurns((turns) =>
+        updateLastChatTurn(turns, turnId, (turn) => ({
+          ...turn,
+          actionProposal: turn.actionProposal
+            ? {
+                ...turn.actionProposal,
+                status: 'error',
+                message: error instanceof Error ? error.message : '标签操作执行失败。',
+              }
+            : null,
+        })),
+      )
+    }
+  }
+
+  function cancelChatProposal(turnId: string) {
+    setChatTurns((turns) =>
+      updateLastChatTurn(turns, turnId, (turn) => ({
+        ...turn,
+        actionProposal: turn.actionProposal
+          ? { ...turn.actionProposal, status: 'cancelled', message: '已取消。' }
+          : null,
+      })),
+    )
+  }
+
+  async function saveChatTurnComments(turnId: string) {
+    const turnIndex = chatTurns.findIndex((turn) => turn.id === turnId)
+    const turn = turnIndex >= 0 ? chatTurns[turnIndex] : null
+    if (!turn || !turn.report.trim() || turn.entryIds.length === 0 || turn.commentSaveStatus === 'saving') {
+      return
+    }
+
+    setChatTurns((turns) =>
+      updateLastChatTurn(turns, turnId, (item) => ({
+        ...item,
+        commentSaveStatus: 'saving',
+        commentSaveMessage: '',
+      })),
+    )
+    try {
+      const history = chatTurns.slice(0, turnIndex).map((item) => ({
+        question: item.question,
+        report: item.report,
+        entry_ids: item.entryIds,
+        entry_titles: item.entryTitles,
+        keywords: item.keywords,
+        result_count: item.resultCount,
+      }))
+      const response = await fetch('/api/library/chat/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          turn_id: turn.id,
+          question: turn.question,
+          report: turn.report,
+          entry_ids: turn.entryIds,
+          history,
+          api_key: apiKey,
+        }),
+      })
+      const data = await parseJsonOrThrow<{
+        matched: number
+        saved: number
+        skipped: number
+      }>(response)
+      setChatTurns((turns) =>
+        updateLastChatTurn(turns, turnId, (item) => ({
+          ...item,
+          commentSaveStatus: 'done',
+          commentSaveMessage:
+            data.skipped > 0
+              ? `已保存 ${data.saved} 条 AI 点评，跳过 ${data.skipped} 篇不适合写入的点评。`
+              : `已保存本轮 ${data.saved} 条 AI 点评。`,
+        })),
+      )
+      if (selectedId && turn.entryIds.includes(selectedId)) {
+        void loadDetail(selectedId)
+      }
+    } catch (error: unknown) {
+      setChatTurns((turns) =>
+        updateLastChatTurn(turns, turnId, (item) => ({
+          ...item,
+          commentSaveStatus: 'error',
+          commentSaveMessage: error instanceof Error ? error.message : '保存本轮 AI 点评失败。',
+        })),
+      )
+    }
+  }
+
+  function startEditAiComment(comment: LibraryAiComment) {
+    setEditingAiCommentId(comment.id)
+    setEditingAiCommentText(comment.note)
+    setAiCommentMessage('')
+  }
+
+  async function updateAiComment(commentId: string) {
+    const note = editingAiCommentText.trim()
+    if (!note || aiCommentBusyId) return
+
+    setAiCommentBusyId(commentId)
+    setAiCommentMessage('')
+    try {
+      await parseJsonOrThrow<LibraryAiComment>(
+        await fetch(`/api/library/ai-comments/${encodeURIComponent(commentId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note }),
+        }),
+      )
+      setEditingAiCommentId(null)
+      setEditingAiCommentText('')
+      setAiCommentMessage('AI 点评已更新。')
+      if (selectedId) await loadDetail(selectedId)
+    } catch (error: unknown) {
+      setAiCommentMessage(error instanceof Error ? error.message : '更新 AI 点评失败。')
+    } finally {
+      setAiCommentBusyId(null)
+    }
+  }
+
+  async function deleteAiComment(commentId: string) {
+    if (aiCommentBusyId || !confirm('确定删除这条 AI 点评吗？')) return
+
+    setAiCommentBusyId(commentId)
+    setAiCommentMessage('')
+    try {
+      await parseJsonOrThrow<{ ok: boolean }>(
+        await fetch(`/api/library/ai-comments/${encodeURIComponent(commentId)}`, {
+          method: 'DELETE',
+        }),
+      )
+      if (editingAiCommentId === commentId) {
+        setEditingAiCommentId(null)
+        setEditingAiCommentText('')
+      }
+      setAiCommentMessage('AI 点评已删除。')
+      if (selectedId) await loadDetail(selectedId)
+    } catch (error: unknown) {
+      setAiCommentMessage(error instanceof Error ? error.message : '删除 AI 点评失败。')
+    } finally {
+      setAiCommentBusyId(null)
+    }
+  }
+
   return (
     <div className="w-full space-y-4">
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -665,7 +992,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_140px_auto_auto_auto]">
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_140px_auto_auto_auto]">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-500">搜索标题 / DOI / 期刊</span>
             <input
@@ -697,6 +1024,69 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               placeholder="例如：American Economic Review"
             />
           </label>
+
+          <div className="relative block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">按标签筛选</span>
+            <div className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 focus-within:border-emerald-500">
+              {tagFilters.length > 0 && (
+                <div className="mb-1 flex flex-wrap gap-1">
+                  {tagFilters.map((tag) => (
+                    <span
+                      key={`tag-filter-${tag}`}
+                      className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700"
+                    >
+                      #{tag}
+                      <button
+                        type="button"
+                        onClick={() => removeTagFilter(tag)}
+                        className="text-violet-400 hover:text-violet-700"
+                        title="移除筛选标签"
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <input
+                value={tagFilterQuery}
+                onChange={(event) => {
+                  setTagFilterQuery(event.target.value)
+                  setTagFilterOpen(true)
+                }}
+                onFocus={() => setTagFilterOpen(true)}
+                onBlur={() => window.setTimeout(() => setTagFilterOpen(false), 120)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && matchingTagOptions[0]) {
+                    event.preventDefault()
+                    selectTagFilter(matchingTagOptions[0])
+                  }
+                  if (event.key === 'Escape') setTagFilterOpen(false)
+                }}
+                className="w-full px-1 py-0.5 text-sm focus:outline-none"
+                placeholder={tagFilters.length > 0 ? '继续搜索标签' : '搜索或选择标签'}
+              />
+            </div>
+            {tagFilterOpen && (
+              <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+                {matchingTagOptions.length > 0 ? (
+                  matchingTagOptions.slice(0, 40).map((tag) => (
+                    <button
+                      key={`tag-option-${tag}`}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectTagFilter(tag)}
+                      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-gray-700 hover:bg-violet-50 hover:text-violet-700"
+                    >
+                      <span className="truncate">#{tag}</span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-2 py-2 text-xs text-gray-400">没有匹配标签</div>
+                )}
+              </div>
+            )}
+          </div>
 
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-500">阅读状态</span>
@@ -791,15 +1181,49 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               </div>
             </div>
             {selectedIds.size > 0 && (
-              <button
-                onClick={() => void handleBatchDelete()}
-                className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
-                type="button"
-              >
-                删除选中 ({selectedIds.size})
-              </button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <label className="min-w-[160px]">
+                  <span className="sr-only">批量标签</span>
+                  <input
+                    value={batchTagsText}
+                    onChange={(event) => setBatchTagsText(event.target.value)}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 focus:border-emerald-400 focus:outline-none"
+                    placeholder="批量标签，逗号分隔"
+                  />
+                </label>
+                <button
+                  onClick={() => void handleBatchTags('add')}
+                  disabled={batchTagsBusy || splitCsv(batchTagsText).length === 0}
+                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
+                  type="button"
+                >
+                  加标签
+                </button>
+                <button
+                  onClick={() => void handleBatchTags('remove')}
+                  disabled={batchTagsBusy || splitCsv(batchTagsText).length === 0}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-amber-200 hover:text-amber-700 disabled:opacity-40"
+                  type="button"
+                >
+                  删标签
+                </button>
+                <button
+                  onClick={() => void handleBatchDelete()}
+                  className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
+                  type="button"
+                >
+                  删除选中 ({selectedIds.size})
+                </button>
+              </div>
             )}
           </div>
+          {batchTagsMessage && (
+            <div className={`border-t border-gray-100 px-5 py-2 text-xs ${
+              batchTagsMessage.includes('失败') ? 'text-red-600' : 'text-emerald-700'
+            }`}>
+              {batchTagsMessage}
+            </div>
+          )}
 
           <div className="max-h-[70vh] overflow-y-auto 2xl:max-h-[74vh]">
             {entries.length === 0 && !listLoading ? (
@@ -867,6 +1291,14 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                           <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] font-medium text-cyan-700">
                             {sourceFileTypeLabel(entry.source_file_type)}
                           </span>
+                          {entry.tags.map((tag) => (
+                            <span
+                              key={`${entry.id}-${tag}`}
+                              className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700"
+                            >
+                              #{tag}
+                            </span>
+                          ))}
                         </div>
                       </div>
                       <div className="text-right text-xs text-gray-400">
@@ -1109,6 +1541,97 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                     <span className={`text-sm ${saveMessage === '保存成功。' ? 'text-emerald-600' : 'text-red-600'}`}>
                       {saveMessage}
                     </span>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-gray-100 bg-emerald-50/40 px-4 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-gray-800">AI 点评</h4>
+                    {aiCommentMessage && (
+                      <span
+                        className={`text-xs ${
+                          aiCommentMessage.includes('失败') ? 'text-red-600' : 'text-emerald-700'
+                        }`}
+                      >
+                        {aiCommentMessage}
+                      </span>
+                    )}
+                  </div>
+                  {detail.ai_comments.length === 0 ? (
+                    <div className="mt-3 rounded-lg border border-dashed border-emerald-100 bg-white px-3 py-4 text-sm text-gray-400">
+                      还没有保存到这篇文献的 AI 点评。
+                    </div>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {detail.ai_comments.map((comment) => (
+                        <div key={comment.id} className="rounded-lg bg-white px-3 py-3 shadow-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                              AI 文献助手
+                            </span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs text-gray-400">{formatTime(comment.created_at)}</span>
+                              <button
+                                type="button"
+                                onClick={() => startEditAiComment(comment)}
+                                disabled={aiCommentBusyId === comment.id}
+                                className="rounded-md border border-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600 hover:border-emerald-200 hover:text-emerald-700 disabled:opacity-40"
+                              >
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void deleteAiComment(comment.id)}
+                                disabled={aiCommentBusyId === comment.id}
+                                className="rounded-md border border-red-100 px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </div>
+                          {comment.question && (
+                            <div className="mt-2 text-xs text-emerald-800">
+                              本轮问题：{comment.question}
+                            </div>
+                          )}
+                          {editingAiCommentId === comment.id ? (
+                            <div className="mt-2 space-y-2">
+                              <textarea
+                                value={editingAiCommentText}
+                                onChange={(event) => setEditingAiCommentText(event.target.value)}
+                                rows={4}
+                                className="w-full rounded-lg border border-emerald-200 px-3 py-2 text-sm leading-6 text-gray-700 focus:border-emerald-500 focus:outline-none"
+                              />
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void updateAiComment(comment.id)}
+                                  disabled={!editingAiCommentText.trim() || aiCommentBusyId === comment.id}
+                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+                                >
+                                  保存
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingAiCommentId(null)
+                                    setEditingAiCommentText('')
+                                  }}
+                                  disabled={aiCommentBusyId === comment.id}
+                                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 disabled:opacity-40"
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-700">
+                              {comment.note}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
 
@@ -1371,6 +1894,79 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                       </div>
                     )}
 
+                    {turn.actionProposal && (
+                      <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-emerald-800">待确认标签操作</div>
+                            <div className="mt-1 text-sm text-emerald-950">
+                              {turn.actionProposal.type === 'add_tags' ? '添加' : '移除'}标签{' '}
+                              {turn.actionProposal.tags.map((tag) => (
+                                <span
+                                  key={`${turn.id}-proposal-${tag}`}
+                                  className="mx-0.5 inline-flex rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-emerald-700 shadow-sm"
+                                >
+                                  #{tag}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="mt-1 text-xs text-emerald-800">
+                              范围：{turn.actionProposal.scope === 'library' ? '全库检索结果' : '当前结果内检索'}
+                              {turn.actionProposal.journal ? ` · 期刊条件：${turn.actionProposal.journal}` : ''}
+                              {` · 将影响 ${turn.actionProposal.count} 篇文献`}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {turn.actionProposal.status === 'pending' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void executeChatProposal(turn.id, turn.actionProposal!)}
+                                  disabled={turn.actionProposal.count === 0}
+                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+                                >
+                                  确认执行
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => cancelChatProposal(turn.id)}
+                                  className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                                >
+                                  取消
+                                </button>
+                              </>
+                            )}
+                            {turn.actionProposal.status === 'running' && (
+                              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-emerald-700 shadow-sm">
+                                执行中...
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {turn.actionProposal.entryTitles.length > 0 && (
+                          <div className="mt-3 grid gap-1 text-xs text-emerald-900 md:grid-cols-2">
+                            {turn.actionProposal.entryTitles.slice(0, 6).map((title, index) => (
+                              <div key={`${turn.id}-proposal-title-${index}`} className="truncate rounded-md bg-white/80 px-2 py-1">
+                                [{index + 1}] {title}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {turn.actionProposal.entryTitles.length > 6 && (
+                          <div className="mt-1 text-xs text-emerald-700">
+                            另有 {turn.actionProposal.entryTitles.length - 6} 篇文献。
+                          </div>
+                        )}
+                        {turn.actionProposal.message && (
+                          <div className={`mt-2 text-xs ${
+                            turn.actionProposal.status === 'error' ? 'text-red-600' : 'text-emerald-800'
+                          }`}>
+                            {turn.actionProposal.message}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {turn.report ? (
                       <div
                         className="mt-4 max-w-none overflow-x-auto rounded-lg bg-white px-4 py-4 text-sm leading-7 text-gray-700 [&_button[data-chat-entry-number]]:mx-0.5 [&_button[data-chat-entry-number]]:inline-flex [&_button[data-chat-entry-number]]:items-center [&_button[data-chat-entry-number]]:rounded-md [&_button[data-chat-entry-number]]:bg-sky-100 [&_button[data-chat-entry-number]]:px-1.5 [&_button[data-chat-entry-number]]:py-0.5 [&_button[data-chat-entry-number]]:font-semibold [&_button[data-chat-entry-number]]:leading-5 [&_button[data-chat-entry-number]]:text-sky-700 [&_button[data-chat-entry-number]]:transition-colors hover:[&_button[data-chat-entry-number]]:bg-sky-200 [&_h1]:mb-3 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:text-sm [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_ol]:space-y-1 [&_p]:mb-3 [&_table]:min-w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-2 [&_th]:py-1 [&_ul]:space-y-1"
@@ -1380,6 +1976,27 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                     ) : (
                       <div className="mt-4 rounded-lg bg-white px-4 py-5 text-sm text-gray-400">
                         {chatLoading && turn.id === chatTurns[chatTurns.length - 1]?.id ? '正在生成报告...' : '本轮暂无报告内容。'}
+                      </div>
+                    )}
+                    {turn.report && turn.entryIds.length > 0 && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void saveChatTurnComments(turn.id)}
+                          disabled={turn.commentSaveStatus === 'saving' || chatLoading}
+                          className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
+                        >
+                          {turn.commentSaveStatus === 'saving' ? '保存点评中...' : '保存本轮 AI 点评'}
+                        </button>
+                        {turn.commentSaveMessage && (
+                          <span
+                            className={`text-xs ${
+                              turn.commentSaveStatus === 'error' ? 'text-red-600' : 'text-emerald-700'
+                            }`}
+                          >
+                            {turn.commentSaveMessage}
+                          </span>
+                        )}
                       </div>
                     )}
                   </article>

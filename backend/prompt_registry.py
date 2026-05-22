@@ -137,6 +137,10 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
             "title": "报告生成",
             "file_path": "prompts/library_chat/report_writer.md",
         },
+        "paper_comment_writer": {
+            "title": "逐篇点评保存",
+            "file_path": "prompts/library_chat/paper_comment_writer.md",
+        },
     },
 }
 

@@ -112,6 +112,8 @@
   - DeepSeek 先解析检索意图，再对当前用户文献库召回题录元数据与摘要生成报告
   - 命中文献同步筛选文献列表，并在报告、列表、详情区保持同一 `[n]` 编号
   - 报告编号可点击，按该轮命中集合定位到对应文献
+  - AI 可先给出批量标签提议，用户确认后由批量标签接口写库；标签筛选框支持全标签搜索下拉
+  - 每轮报告可单独保存逐篇 AI 点评到 `annotations(library_note)`，文献详情支持编辑或删除已保存点评
 - **在线元数据匹配**（2026-05-03 新增）
   - PDF 前 1-3 页文本提取
   - DeepSeek 结构化元数据抽取
@@ -688,12 +690,16 @@
 关键函数：
 
 - `list_entries(...)`
-  - 文献库列表，支持 `sort_by`（updated/score/year/journal）和 `sort_order`（desc/asc）
+  - 文献库列表，支持 `sort_by`（updated/score/year/journal）、`sort_order`（desc/asc）和标签筛选
   - 通过子查询关联 `bib_filter_links` 获取最高筛选评分 `filter_score`
 - `get_entry_detail(...)`
-  - 单篇详情
+  - 单篇详情，聚合筛选评估、AI 点评和任务时间线
+- `list_tags(...)` / `batch_update_tags(...)`
+  - 返回当前用户标签候选、批量加删文献标签
 - `update_entry(...)`
   - 修改元数据
+- `update_ai_comment(...)` / `delete_ai_comment(...)`
+  - 只编辑或删除文献库里已保存的 AI 点评
 - `match_online(...)`
   - 对单篇文献执行在线元数据匹配（Crossref + OpenAlex）
 - `apply_match(...)`
@@ -711,6 +717,7 @@
 
 - 摘要与关键词
 - 筛选评价列表
+- 已保存 AI 点评（`annotations.source_type='library_note'` 且 `is_ai_generated=1`）
 - 时间线与关联产物
 
 ## 5.10 历史记录：`backend/routers/history.py`
@@ -1175,6 +1182,8 @@ export_20260506_username.dra
   - 加载详情
 - `handleSave()`
   - 保存元数据
+- `saveChatTurnComments()`
+  - 只保存当前 turn 中值得写入条目的逐篇 AI 点评
 - `buildDraft(...)`
   - 将详情转换成表单草稿
 

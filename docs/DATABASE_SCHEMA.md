@@ -166,7 +166,7 @@ CREATE INDEX idx_prompt_templates_type_key ON prompt_templates (prompt_type, pro
 - 当前阶段仍只允许固定槽位，不开放任意自定义 key
 - 运行时优先级：`用户覆盖 → 系统默认 → prompts/ 文件兜底 → 代码内置兜底`
 - 首批系统默认值从现有 `prompts/` 目录幂等导入数据库
-- `library_chat` 于 migration `016` 加入，包含查询解析和报告生成两个提示词槽位
+- `library_chat` 于 migration `016` 加入，当前包含查询解析、报告生成和逐篇点评保存三个提示词槽位
 - 系统默认提示词若尚未被管理员编辑，会在默认种子同步时跟随托管提示词文件更新
 
 ### 3.5 `files` — 物理文件
@@ -1115,7 +1115,7 @@ backend/migrations/versions/
 | 引文计数/h-index | `bib_entries.citation_count` |
 | 参考文献梳理与正文引用对齐 | `bib_references` + `bib_reference_citations` + `jobs.job_type/artifacts.artifact_type` 扩展 |
 | 全文翻译（中文重述） | `jobs.job_type='translation'` + `artifacts.artifact_type` 新增 `translation_md`/`translation_glossary` + `prompt_templates.prompt_type` 新增 `translation`（v1.6 migration 014） |
-| 文献库 AI 查询 | `prompt_templates.prompt_type` 新增 `library_chat`（v1.7 migration 016）；命中集合复用 `bib_entries`、`bib_references`、`reading_items` |
+| 文献库 AI 查询 | `prompt_templates.prompt_type` 新增 `library_chat`（v1.7 migration 016）；命中集合复用 `bib_entries`、`bib_references`、`reading_items`；标签复用 `bib_entries.user_tags_json`，保存点评复用 `annotations(source_type='library_note')` |
 | 引用网络分析 / 共引分析 | 依赖 `bib_references.source_bib_entry_id -> matched_bib_entry_id` 关系继续向上扩展 |
 | VIP 试用期 | `users.vip_expires_at` |
 | 团队/共享空间 | 不在本期，需要新增 `workspaces` 中间层（暂不规划） |
@@ -1134,7 +1134,7 @@ backend/migrations/versions/
 | 对比综述 | `jobs(compare/synthesis)`、`job_bib_entries` | `artifacts(compare_md/synthesis_md)` |
 | 参考文献梳理 | `bib_references`、`bib_reference_citations` | `artifacts(references_excel/citation_trace_md)` |
 | 提示词管理 | `prompt_templates` | — |
-| 文献库 AI 查询 | `bib_entries` | `bib_references`、`reading_items`、`prompt_templates(library_chat)` |
+| 文献库 AI 查询 | `bib_entries` | `bib_references`、`reading_items`、`prompt_templates(library_chat)`、`annotations(library_note)` |
 | 维度集合（用户自建） | `dimension_sets`、`dimension_items` | — |
 | 维度模板（系统预设） | `dimension_templates`、`template_items` | — |
 

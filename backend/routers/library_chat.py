@@ -2,20 +2,21 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Literal, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from openai import OpenAI
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from auth.dependencies import current_user
 from backend.utils.api_key import validate_deepseek_key
 from db import get_db
-from db.models import BibEntry, BibReference, ReadingItem, User
+from db.models import Annotation, BibEntry, BibReference, ReadingItem, User
 from prompt_service import get_effective_prompt_text
 
 router = APIRouter()
@@ -35,6 +36,15 @@ class LibraryChatRequest(BaseModel):
     api_key: Optional[str] = None
     history: list[LibraryChatTurn] = Field(default_factory=list, max_length=12)
     scope_mode: Literal["auto", "library", "previous_results"] = "auto"
+
+
+class LibraryChatCommentRequest(BaseModel):
+    turn_id: str = Field(min_length=1, max_length=128)
+    question: str = Field(min_length=1, max_length=4000)
+    report: str = Field(min_length=1, max_length=80000)
+    entry_ids: list[str] = Field(min_length=1, max_length=200)
+    history: list[LibraryChatTurn] = Field(default_factory=list, max_length=12)
+    api_key: Optional[str] = None
 
 
 def sse_event(event: str, data: dict) -> str:
@@ -63,6 +73,18 @@ def _clean_terms(value) -> list[str]:
             seen.add(normalized)
             result.append(text)
     return result
+
+
+def _tag_action(value) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    action_type = value.get("type")
+    if action_type not in {"add_tags", "remove_tags"}:
+        return None
+    tags = _clean_terms(value.get("tags"))[:20]
+    if not tags:
+        return None
+    return {"type": action_type, "tags": tags}
 
 
 def _optional_year(value) -> int | None:
@@ -157,6 +179,46 @@ def _build_report_user_message(
     )
 
 
+def _build_comment_user_message(
+    req: LibraryChatCommentRequest,
+    rows: list[BibEntry],
+) -> str:
+    payload = {
+        "current_question": req.question.strip(),
+        "current_report": req.report.strip(),
+        "history": _history_for_report(req.history),
+        "papers": [
+            {
+                "entry_id": row.id,
+                "title": row.title,
+                "authors": _json_list(row.authors_json),
+                "journal": row.journal,
+                "year": row.year,
+                "keywords": _json_list(row.keywords_json),
+                "abstract": row.abstract,
+            }
+            for row in rows
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _parse_comment_rows(value, allowed_entry_ids: set[str]) -> dict[str, str]:
+    rows = value.get("comments") if isinstance(value, dict) else None
+    if not isinstance(rows, list):
+        return {}
+
+    comments: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        entry_id = str(row.get("entry_id") or "").strip()
+        note = str(row.get("comment") or "").strip()
+        if entry_id in allowed_entry_ids and note:
+            comments[entry_id] = note
+    return comments
+
+
 @router.post("")
 async def library_chat(
     req: LibraryChatRequest,
@@ -212,6 +274,7 @@ async def library_chat(
             search_terms = _clean_terms([*core_keywords, *expanded_keywords])
             journal = str(query_data.get("journal") or "").strip() or None
             authors = _clean_terms(query_data.get("authors"))
+            tag_action = _tag_action(query_data.get("tag_action"))
             year_from = _optional_year(query_data.get("year_from"))
             year_to = _optional_year(query_data.get("year_to"))
             intent = {
@@ -222,6 +285,7 @@ async def library_chat(
                 "year_from": year_from,
                 "year_to": year_to,
                 "authors": authors,
+                "tag_action": tag_action,
             }
             yield sse_event("intent", intent)
 
@@ -262,6 +326,19 @@ async def library_chat(
                     "scope": scope,
                 },
             )
+            if tag_action:
+                yield sse_event(
+                    "action_proposal",
+                    {
+                        "type": tag_action["type"],
+                        "tags": tag_action["tags"],
+                        "entry_ids": entry_ids,
+                        "entry_titles": titles,
+                        "count": len(entry_ids),
+                        "scope": scope,
+                        "journal": journal,
+                    },
+                )
 
             ref_rows = []
             if entry_ids:
@@ -335,3 +412,92 @@ async def library_chat(
             yield sse_event("error", {"message": str(exc)})
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@router.post("/comments")
+async def save_library_chat_comments(
+    req: LibraryChatCommentRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        api_key = validate_deepseek_key(req.api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    requested_ids = list(dict.fromkeys(entry_id.strip() for entry_id in req.entry_ids if entry_id.strip()))
+    rows = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.id.in_(requested_ids),
+                BibEntry.owner_user_id == user.id,
+            )
+        )
+    ).scalars().all()
+    rows_by_id = {row.id: row for row in rows}
+    ordered_rows = [rows_by_id[entry_id] for entry_id in requested_ids if entry_id in rows_by_id]
+    if not ordered_rows:
+        raise HTTPException(status_code=404, detail="No owned bibliography entries found for this chat turn.")
+
+    comment_prompt = await get_effective_prompt_text(
+        db,
+        user_id=user.id,
+        prompt_type="library_chat",
+        prompt_key="paper_comment_writer",
+    )
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.deepseek.com",
+        timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
+    )
+
+    comments: dict[str, str] = {}
+    chunk_size = 30
+    for start in range(0, len(ordered_rows), chunk_size):
+        chunk = ordered_rows[start : start + chunk_size]
+        response = client.chat.completions.create(
+            model="deepseek-v4-flash",
+            extra_body={"thinking": {"type": "disabled"}},
+            messages=[
+                {"role": "system", "content": comment_prompt},
+                {"role": "user", "content": _build_comment_user_message(req, chunk)},
+            ],
+            temperature=0.2,
+            max_tokens=12000,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or "{}"
+        parsed = json.loads(content)
+        comments.update(_parse_comment_rows(parsed, {row.id for row in chunk}))
+
+    await db.execute(
+        delete(Annotation).where(
+            Annotation.owner_user_id == user.id,
+            Annotation.source_type == "library_note",
+            Annotation.source_id == req.turn_id,
+            Annotation.is_ai_generated == 1,
+        )
+    )
+    for entry_id in requested_ids:
+        note = comments.get(entry_id)
+        if not note or entry_id not in rows_by_id:
+            continue
+        db.add(
+            Annotation(
+                id=str(uuid.uuid4()),
+                owner_user_id=user.id,
+                source_type="library_note",
+                source_id=req.turn_id,
+                bib_entry_id=entry_id,
+                selected_text=req.question.strip(),
+                note=note,
+                is_ai_generated=1,
+            )
+        )
+    await db.commit()
+    return {
+        "requested": len(requested_ids),
+        "matched": len(ordered_rows),
+        "saved": len(comments),
+        "skipped": len(ordered_rows) - len(comments),
+    }

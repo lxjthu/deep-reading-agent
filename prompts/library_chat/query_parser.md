@@ -9,7 +9,11 @@
   "journal": null,
   "year_from": null,
   "year_to": null,
-  "authors": []
+  "authors": [],
+  "tag_action": {
+    "type": "none",
+    "tags": []
+  }
 }
 
 规则：
@@ -23,3 +27,7 @@
 7. 不要为了扩展而输出“算法”“智能”“研究”“影响”等极泛词。
 8. journal、年份范围、作者只有在用户问题或上下文明确提到时填写。
 9. 中英文文献可能共存，核心概念需要时可同时保留中英文表达。
+10. 只有用户明确要求批量“加标签 / 添加标签 / 打标签 / 删除标签 / 移除标签”时，才填写 tag_action。
+11. tag_action.type 只能是 `none`、`add_tags` 或 `remove_tags`；tags 只放用户要求新增或移除的标签文本。
+12. 标签动作中的标签词不是检索关键词。例如“给这些 Management Science 文章加待精读标签”中，`待精读` 只能进入 tag_action.tags，不能进入 core_keywords 或 expanded_keywords。
+13. 对删除文献、改题录、改摘要、改精读状态等未授权操作，tag_action.type 必须返回 `none`。

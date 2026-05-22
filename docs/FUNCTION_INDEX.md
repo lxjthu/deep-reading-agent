@@ -238,8 +238,12 @@
 |---|---|---|
 | `list_entries(...)` | 返回文献库列表 | 列表筛选、排序、搜索、期刊筛选问题 |
 | `list_entries_by_ids(...)` | 用 JSON body 按 AI 命中 ID 集合拉文献列表 | AI 报告已出但文献列表同步筛选失败 |
-| `get_entry_detail(...)` | 返回单篇文献详情和时间线 | 文献详情、产物列表、筛选评价问题 |
+| `list_tags(...)` | 返回当前用户全部文献标签候选 | 标签搜索下拉为空或标签候选不刷新 |
+| `batch_update_tags(...)` | 对选中文献确定性批量加删标签 | AI 标签提议确认后未写库、批量标签按钮异常 |
+| `get_entry_detail(...)` | 返回单篇文献详情、AI 点评和时间线 | 文献详情、点评、产物列表、筛选评价问题 |
 | `update_entry(...)` | 更新文献元数据 | 文献库编辑保存问题 |
+| `update_ai_comment(...)` | 编辑文献库已保存 AI 点评 | 点评编辑保存失败 |
+| `delete_ai_comment(...)` | 删除文献库已保存 AI 点评 | 点评删除失败 |
 | `match_online(...)` | 对单篇文献执行在线元数据匹配 | 在线匹配失败、候选结果异常 |
 | `apply_match(...)` | 应用候选元数据到文献（重新搜索 → 只补空字段 → 更新 dedup_key 和 metadata_completeness） | 应用匹配结果失败 |
 
@@ -253,7 +257,9 @@
 |---|---|---|
 | `_build_papers_text(...)` | 给本轮命中文献生成带 `[n]` 编号的报告上下文 | 报告编号与文献列表编号对不上 |
 | `_build_report_user_message(...)` | 拼装多轮上下文、检索意图、引用关系和命中文献全集 | 报告依据缺字段或上下文不连续 |
+| `_build_comment_user_message(...)` | 拼装当前 turn 的问题、报告与逐篇元数据 | 保存点评缺少本轮依据 |
 | `library_chat(...)` | 解析查询意图、检索文献、流式输出 AI 报告 | AI 文献助手 SSE、检索范围或 DeepSeek 调用失败 |
+| `save_library_chat_comments(...)` | 保存当前 turn 值得写入文献条目的逐篇 AI 点评 | 保存点评失败、重复保存同轮点评异常 |
 
 ## 2.13.2 `backend/services/pdf_metadata_extract.py`
 
