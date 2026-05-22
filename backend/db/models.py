@@ -278,6 +278,7 @@ class BibEntry(Base):
     doi: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     journal: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     abstract: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    abstract_cn: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
     keywords_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     venue_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     citation_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
