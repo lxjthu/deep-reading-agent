@@ -42,6 +42,7 @@ type LibraryTimelineItem = {
 
 type LibraryEntryDetail = LibraryEntrySummary & {
   abstract: string | null
+  abstract_cn: string | null
   keywords: string[]
   timeline: LibraryTimelineItem[]
   filter_evaluations: LibraryFilterEvaluation[]
@@ -1701,6 +1702,15 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                         {detail.abstract || '当前记录暂无摘要。'}
                       </div>
                     </div>
+
+                    {detail.abstract_cn && (
+                      <div>
+                        <div className="text-xs font-medium text-gray-500">中文摘要</div>
+                        <div className="mt-1 whitespace-pre-wrap rounded-lg bg-blue-50 px-3 py-2 text-sm text-gray-700">
+                          {detail.abstract_cn}
+                        </div>
+                      </div>
+                    )}
 
                     {detail.filter_evaluations.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-4 text-sm text-gray-400">
