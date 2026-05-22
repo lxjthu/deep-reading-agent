@@ -209,6 +209,10 @@ class BatchDeleteRequest(BaseModel):
     entry_ids: list[str] = Field(..., min_length=1, max_length=200)
 
 
+class LibraryEntryIdsRequest(BaseModel):
+    entry_ids: list[str] = Field(default_factory=list)
+
+
 @router.post("/entries/batch-delete")
 async def batch_delete_entries(
     body: BatchDeleteRequest,
@@ -244,8 +248,63 @@ async def list_entries(
     pinned_only: bool = Query(default=False),
     sort_by: str = Query(default="updated"),
     sort_order: str = Query(default="desc"),
+    entry_ids: str = Query(default=""),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
+) -> list[LibraryEntrySummary]:
+    ids_list = [eid.strip() for eid in entry_ids.split(",") if eid.strip()]
+    return await _list_entries(
+        db=db,
+        user=user,
+        search=search,
+        journal=journal,
+        reading_status=reading_status,
+        pinned_only=pinned_only,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        entry_ids=ids_list,
+    )
+
+
+@router.post("/entries/by-ids", response_model=list[LibraryEntrySummary])
+async def list_entries_by_ids(
+    request: LibraryEntryIdsRequest,
+    search: str = Query(default=""),
+    journal: str = Query(default=""),
+    reading_status: str = Query(default=""),
+    pinned_only: bool = Query(default=False),
+    sort_by: str = Query(default="updated"),
+    sort_order: str = Query(default="desc"),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LibraryEntrySummary]:
+    entry_ids = [entry_id.strip() for entry_id in request.entry_ids if entry_id.strip()]
+    if not entry_ids:
+        return []
+    return await _list_entries(
+        db=db,
+        user=user,
+        search=search,
+        journal=journal,
+        reading_status=reading_status,
+        pinned_only=pinned_only,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        entry_ids=entry_ids,
+    )
+
+
+async def _list_entries(
+    *,
+    db: AsyncSession,
+    user: User,
+    search: str,
+    journal: str,
+    reading_status: str,
+    pinned_only: bool,
+    sort_by: str,
+    sort_order: str,
+    entry_ids: list[str],
 ) -> list[LibraryEntrySummary]:
     score_subq = (
         select(BibFilterLink.bib_entry_id, func.max(BibFilterLink.score).label("max_score"))
@@ -274,6 +333,8 @@ async def list_entries(
         stmt = stmt.where(BibEntry.reading_status == reading_status.strip())
     if pinned_only:
         stmt = stmt.where(BibEntry.is_pinned == 1)
+    if entry_ids:
+        stmt = stmt.where(BibEntry.id.in_(entry_ids))
 
     if sort_by == "score":
         if sort_order == "desc":

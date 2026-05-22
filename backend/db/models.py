@@ -100,7 +100,7 @@ class PromptTemplate(Base):
             name="ck_prompt_templates_scope",
         ),
         CheckConstraint(
-            "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template','translation')",
+            "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template','translation','library_chat')",
             name="ck_prompt_templates_type",
         ),
         UniqueConstraint(

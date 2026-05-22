@@ -23,6 +23,7 @@ PROMPT_TYPE_LABELS: dict[str, str] = {
     "synthesis": "AI 综述",
     "ai_template": "AI 模板生成",
     "translation": "全文翻译",
+    "library_chat": "文献库 AI 查询",
 }
 
 PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
@@ -127,6 +128,16 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
             "file_path": "prompts/translation/restate.md",
         },
     },
+    "library_chat": {
+        "query_parser": {
+            "title": "查询解析",
+            "file_path": "prompts/library_chat/query_parser.md",
+        },
+        "report_writer": {
+            "title": "报告生成",
+            "file_path": "prompts/library_chat/report_writer.md",
+        },
+    },
 }
 
 FILTER_FALLBACK_TEMPLATE = """你是一位学术文献筛选助手。请围绕研究主题“{topic}”评估下面这篇文献，并严格输出 JSON。
@@ -214,4 +225,6 @@ def get_builtin_fallback(prompt_type: str, prompt_key: str) -> str:
         return slot_defaults.get(prompt_key, "请直接输出分析内容，不要客套开场白。")
     if prompt_type == "translation":
         return "请直接输出分析内容，不要客套开场白。"
+    if prompt_type == "library_chat":
+        return "你是一位学术文献库助手。请严格基于用户提供的文献信息完成当前任务。"
     return "请直接输出分析内容，不要客套开场白。"

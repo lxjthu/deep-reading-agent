@@ -1,0 +1,337 @@
+"""Library AI chat router for natural-language bibliography queries."""
+from __future__ import annotations
+
+import json
+from typing import Literal, Optional
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from openai import OpenAI
+from pydantic import BaseModel, Field
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import StreamingResponse
+
+from auth.dependencies import current_user
+from backend.utils.api_key import validate_deepseek_key
+from db import get_db
+from db.models import BibEntry, BibReference, ReadingItem, User
+from prompt_service import get_effective_prompt_text
+
+router = APIRouter()
+
+
+class LibraryChatTurn(BaseModel):
+    question: str
+    report: str = ""
+    entry_ids: list[str] = Field(default_factory=list)
+    entry_titles: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    result_count: int = 0
+
+
+class LibraryChatRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+    api_key: Optional[str] = None
+    history: list[LibraryChatTurn] = Field(default_factory=list, max_length=12)
+    scope_mode: Literal["auto", "library", "previous_results"] = "auto"
+
+
+def sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _json_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+
+def _clean_terms(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        text = str(item).strip()
+        normalized = text.casefold()
+        if text and normalized not in seen:
+            seen.add(normalized)
+            result.append(text)
+    return result
+
+
+def _optional_year(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _history_for_parser(history: list[LibraryChatTurn]) -> list[dict]:
+    return [
+        {
+            "question": turn.question,
+            "result_count": turn.result_count,
+            "keywords": turn.keywords[:24],
+            "entry_titles": turn.entry_titles[:60],
+        }
+        for turn in history[-6:]
+    ]
+
+
+def _history_for_report(history: list[LibraryChatTurn]) -> list[dict]:
+    return [
+        {
+            "question": turn.question,
+            "report": turn.report,
+            "result_count": turn.result_count,
+            "keywords": turn.keywords[:24],
+        }
+        for turn in history[-4:]
+    ]
+
+
+def _build_query_user_message(req: LibraryChatRequest) -> str:
+    payload = {
+        "scope_mode": req.scope_mode,
+        "current_question": req.question.strip(),
+        "history": _history_for_parser(req.history),
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_papers_text(rows: list[BibEntry], read_entry_ids: set[str]) -> str:
+    status_map = {
+        "none": "未进入精读",
+        "has_pdf": "已有关联文件",
+        "reading": "精读中",
+        "read": "已完成精读",
+    }
+    papers: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        reading_label = "有精读条目" if row.id in read_entry_ids else status_map.get(row.reading_status, row.reading_status)
+        authors = ", ".join(_json_list(row.authors_json)) or "作者待补"
+        keywords = ", ".join(_json_list(row.keywords_json)) or "关键词缺失"
+        papers.append(
+            "\n".join(
+                [
+                    "---",
+                    f"**[{index}]** ID：{row.id}",
+                    f"标题：{row.title}",
+                    f"作者：{authors} | 期刊：{row.journal or '未知'} | 年份：{row.year or '未知'}",
+                    f"精读状态：{reading_label}",
+                    f"关键词：{keywords}",
+                    f"摘要：{row.abstract or '摘要缺失'}",
+                    "---",
+                ]
+            )
+        )
+    return "\n\n".join(papers)
+
+
+def _build_report_user_message(
+    req: LibraryChatRequest,
+    intent: dict,
+    rows: list[BibEntry],
+    links: list[dict],
+    read_entry_ids: set[str],
+) -> str:
+    payload = {
+        "history": _history_for_report(req.history),
+        "current_question": req.question.strip(),
+        "search_intent": intent,
+        "result_count": len(rows),
+        "citation_links": links,
+    }
+    return (
+        "## 查询上下文\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n\n"
+        f"## 本轮命中文献全集\n{_build_papers_text(rows, read_entry_ids)}"
+    )
+
+
+@router.post("")
+async def library_chat(
+    req: LibraryChatRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        api_key = validate_deepseek_key(req.api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.deepseek.com",
+        timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
+    )
+    query_prompt = await get_effective_prompt_text(
+        db,
+        user_id=user.id,
+        prompt_type="library_chat",
+        prompt_key="query_parser",
+    )
+    report_prompt = await get_effective_prompt_text(
+        db,
+        user_id=user.id,
+        prompt_type="library_chat",
+        prompt_key="report_writer",
+    )
+
+    async def _stream():
+        try:
+            query_response = client.chat.completions.create(
+                model="deepseek-v4-flash",
+                extra_body={"thinking": {"type": "disabled"}},
+                messages=[
+                    {"role": "system", "content": query_prompt},
+                    {"role": "user", "content": _build_query_user_message(req)},
+                ],
+                temperature=0.1,
+                max_tokens=2000,
+                response_format={"type": "json_object"},
+            )
+            query_raw = query_response.choices[0].message.content or "{}"
+            query_data = json.loads(query_raw)
+            previous_entry_ids = req.history[-1].entry_ids if req.history else []
+            parsed_scope = "previous_results" if query_data.get("scope") == "previous_results" else "library"
+            scope = req.scope_mode if req.scope_mode != "auto" else parsed_scope
+            if scope == "previous_results" and not previous_entry_ids:
+                scope = "library"
+
+            core_keywords = _clean_terms(query_data.get("core_keywords"))
+            expanded_keywords = _clean_terms(query_data.get("expanded_keywords"))
+            search_terms = _clean_terms([*core_keywords, *expanded_keywords])
+            journal = str(query_data.get("journal") or "").strip() or None
+            authors = _clean_terms(query_data.get("authors"))
+            year_from = _optional_year(query_data.get("year_from"))
+            year_to = _optional_year(query_data.get("year_to"))
+            intent = {
+                "scope": scope,
+                "core_keywords": core_keywords,
+                "expanded_keywords": expanded_keywords,
+                "journal": journal,
+                "year_from": year_from,
+                "year_to": year_to,
+                "authors": authors,
+            }
+            yield sse_event("intent", intent)
+
+            stmt = select(BibEntry).where(BibEntry.owner_user_id == user.id)
+            if scope == "previous_results":
+                stmt = stmt.where(BibEntry.id.in_(previous_entry_ids))
+            if search_terms:
+                keyword_conditions = []
+                for term in search_terms:
+                    like = f"%{term}%"
+                    keyword_conditions.append(
+                        or_(
+                            BibEntry.title.ilike(like),
+                            BibEntry.abstract.ilike(like),
+                            BibEntry.keywords_json.ilike(like),
+                        )
+                    )
+                stmt = stmt.where(or_(*keyword_conditions))
+            if journal:
+                stmt = stmt.where(BibEntry.journal.ilike(f"%{journal}%"))
+            if year_from is not None:
+                stmt = stmt.where(BibEntry.year >= year_from)
+            if year_to is not None:
+                stmt = stmt.where(BibEntry.year <= year_to)
+            for author in authors:
+                stmt = stmt.where(BibEntry.authors_json.ilike(f"%{author}%"))
+
+            rows = (await db.execute(stmt.order_by(BibEntry.updated_at.desc(), BibEntry.created_at.desc()))).scalars().all()
+            entry_ids = [row.id for row in rows]
+            titles = [row.title for row in rows]
+            id_to_title = {row.id: row.title for row in rows}
+            yield sse_event(
+                "results",
+                {
+                    "entry_ids": entry_ids,
+                    "entry_titles": titles,
+                    "count": len(entry_ids),
+                    "scope": scope,
+                },
+            )
+
+            ref_rows = []
+            if entry_ids:
+                ref_rows = (
+                    await db.execute(
+                        select(BibReference).where(
+                            BibReference.owner_user_id == user.id,
+                            BibReference.source_bib_entry_id.in_(entry_ids),
+                            BibReference.matched_bib_entry_id.in_(entry_ids),
+                        )
+                    )
+                ).scalars().all()
+            links = [
+                {
+                    "from_id": ref.source_bib_entry_id,
+                    "to_id": ref.matched_bib_entry_id,
+                    "from_title": id_to_title.get(ref.source_bib_entry_id, ""),
+                    "to_title": id_to_title.get(ref.matched_bib_entry_id or "", ""),
+                }
+                for ref in ref_rows
+            ]
+            yield sse_event("citations", {"links": links})
+
+            reading_rows = []
+            if entry_ids:
+                reading_rows = (
+                    await db.execute(
+                        select(ReadingItem.bib_entry_id)
+                        .where(
+                            ReadingItem.bib_entry_id.in_(entry_ids),
+                            ReadingItem.owner_user_id == user.id,
+                        )
+                        .distinct()
+                    )
+                ).scalars().all()
+            report_stream = client.chat.completions.create(
+                model="deepseek-v4-flash",
+                extra_body={"thinking": {"type": "disabled"}},
+                messages=[
+                    {"role": "system", "content": report_prompt},
+                    {
+                        "role": "user",
+                        "content": _build_report_user_message(
+                            req,
+                            intent,
+                            rows,
+                            links,
+                            set(reading_rows),
+                        ),
+                    },
+                ],
+                temperature=0.65,
+                max_tokens=16000,
+                stream=True,
+            )
+            for chunk in report_stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    yield sse_event("report", {"content": delta.content})
+            yield sse_event(
+                "done",
+                {
+                    "entry_ids": entry_ids,
+                    "entry_titles": titles,
+                    "keywords": search_terms,
+                    "count": len(entry_ids),
+                    "scope": scope,
+                },
+            )
+        except Exception as exc:
+            yield sse_event("error", {"message": str(exc)})
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")

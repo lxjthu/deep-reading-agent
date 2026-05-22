@@ -37,30 +37,38 @@ async def ensure_builtin_prompt_templates(db: AsyncSession) -> None:
             )
         )
     ).scalars().all()
-    existing = {(row.prompt_type, row.prompt_key) for row in existing_rows}
+    existing = {(row.prompt_type, row.prompt_key): row for row in existing_rows}
 
-    created = False
+    changed = False
     for slot in iter_prompt_slots():
         key = (slot["type"], slot["key"])
-        if key in existing:
-            continue
         content = load_prompt_from_file(slot["type"], slot["key"]) or get_builtin_fallback(
             slot["type"], slot["key"]
         )
-        db.add(
-            PromptTemplate(
-                owner_user_id=None,
-                scope="system",
-                prompt_type=slot["type"],
-                prompt_key=slot["key"],
-                title=slot["title"],
-                content=content,
-                updated_by_user_id=None,
+        row = existing.get(key)
+        if row is None:
+            db.add(
+                PromptTemplate(
+                    owner_user_id=None,
+                    scope="system",
+                    prompt_type=slot["type"],
+                    prompt_key=slot["key"],
+                    title=slot["title"],
+                    content=content,
+                    updated_by_user_id=None,
+                )
             )
-        )
-        created = True
+            changed = True
+            continue
 
-    if created:
+        if row.updated_by_user_id is None and (
+            row.title != slot["title"] or row.content != content
+        ):
+            row.title = slot["title"]
+            row.content = content
+            changed = True
+
+    if changed:
         await db.commit()
 
 

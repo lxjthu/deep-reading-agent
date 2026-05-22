@@ -237,12 +237,25 @@
 | 函数 | 作用 | 什么时候优先看 |
 |---|---|---|
 | `list_entries(...)` | 返回文献库列表 | 列表筛选、排序、搜索、期刊筛选问题 |
+| `list_entries_by_ids(...)` | 用 JSON body 按 AI 命中 ID 集合拉文献列表 | AI 报告已出但文献列表同步筛选失败 |
 | `get_entry_detail(...)` | 返回单篇文献详情和时间线 | 文献详情、产物列表、筛选评价问题 |
 | `update_entry(...)` | 更新文献元数据 | 文献库编辑保存问题 |
 | `match_online(...)` | 对单篇文献执行在线元数据匹配 | 在线匹配失败、候选结果异常 |
 | `apply_match(...)` | 应用候选元数据到文献（重新搜索 → 只补空字段 → 更新 dedup_key 和 metadata_completeness） | 应用匹配结果失败 |
 
-## 2.13.1 `backend/services/pdf_metadata_extract.py`
+## 2.13.1 `backend/routers/library_chat.py`
+
+文件：
+
+- [library_chat.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/routers/library_chat.py)
+
+| 函数 | 作用 | 什么时候优先看 |
+|---|---|---|
+| `_build_papers_text(...)` | 给本轮命中文献生成带 `[n]` 编号的报告上下文 | 报告编号与文献列表编号对不上 |
+| `_build_report_user_message(...)` | 拼装多轮上下文、检索意图、引用关系和命中文献全集 | 报告依据缺字段或上下文不连续 |
+| `library_chat(...)` | 解析查询意图、检索文献、流式输出 AI 报告 | AI 文献助手 SSE、检索范围或 DeepSeek 调用失败 |
+
+## 2.13.2 `backend/services/pdf_metadata_extract.py`
 
 文件：
 
@@ -257,7 +270,7 @@
 | `extract_isbns(text)` | 从文本中正则提取 ISBN | ISBN 提取问题 |
 | `extract_page_header(page)` | 提取页面页眉区域 | 页眉提取不准确 |
 
-## 2.13.2 `backend/services/pdf_metadata_llm.py`
+## 2.13.3 `backend/services/pdf_metadata_llm.py`
 
 文件：
 

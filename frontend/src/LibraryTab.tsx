@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { marked } from 'marked'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import MetadataMatchPanel from './MetadataMatchPanel'
 
@@ -67,6 +68,38 @@ type EditDraft = {
   note: string
   isPinned: boolean
   language: string
+}
+
+type LibraryChatScope = 'auto' | 'library' | 'previous_results'
+
+type LibraryChatCitation = {
+  from_id: string
+  to_id: string | null
+  from_title: string
+  to_title: string
+}
+
+type LibraryChatIntent = {
+  scope: Exclude<LibraryChatScope, 'auto'>
+  core_keywords: string[]
+  expanded_keywords: string[]
+  journal: string | null
+  year_from: number | null
+  year_to: number | null
+  authors: string[]
+}
+
+type LibraryChatTurn = {
+  id: string
+  question: string
+  report: string
+  entryIds: string[]
+  entryTitles: string[]
+  keywords: string[]
+  resultCount: number
+  scope: Exclude<LibraryChatScope, 'auto'> | null
+  intent: LibraryChatIntent | null
+  citations: LibraryChatCitation[]
 }
 
 async function parseJsonOrThrow<T>(response: Response): Promise<T> {
@@ -144,6 +177,28 @@ function sourceDbLabel(sourceDb: string) {
       other: '其他来源',
     }[sourceDb] || sourceDb
   )
+}
+
+function markdownHtml(raw: string, entryCount = 0): string {
+  const reportWithEntryLinks = (raw || '').replace(/\[(\d+)\]/g, (label, rawNumber) => {
+    const entryNumber = Number(rawNumber)
+    if (!Number.isInteger(entryNumber) || entryNumber < 1 || entryNumber > entryCount) {
+      return label
+    }
+    return `<button type="button" data-chat-entry-number="${entryNumber}" title="定位到文献列表">[${entryNumber}]</button>`
+  })
+  let html = marked.parse(reportWithEntryLinks, { async: false }) as string
+  html = html.replace(/<table>/g, '<div class="overflow-x-auto"><table>')
+  html = html.replace(/<\/table>/g, '</table></div>')
+  return html
+}
+
+function updateLastChatTurn(
+  turns: LibraryChatTurn[],
+  turnId: string,
+  update: (turn: LibraryChatTurn) => LibraryChatTurn,
+) {
+  return turns.map((turn) => (turn.id === turnId ? update(turn) : turn))
 }
 
 function languageLabel(language: LibraryEntrySummary['language']) {
@@ -241,12 +296,25 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [expandedTimeline, setExpandedTimeline] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatQuestion, setChatQuestion] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState('')
+  const [chatScopeMode, setChatScopeMode] = useState<LibraryChatScope>('auto')
+  const [chatTurns, setChatTurns] = useState<LibraryChatTurn[]>([])
+  const [chatFilteredIds, setChatFilteredIds] = useState<string[] | null>(null)
+  const [pendingChatEntryId, setPendingChatEntryId] = useState<string | null>(null)
+
   const selectedSummary = useMemo(
     () => entries.find((entry) => entry.id === selectedId) || null,
     [entries, selectedId],
   )
+  const chatEntryNumberById = useMemo(
+    () => new Map((chatFilteredIds || []).map((entryId, index) => [entryId, index + 1])),
+    [chatFilteredIds],
+  )
 
-  async function loadEntries(preferredId?: string | null) {
+  async function loadEntries(preferredId?: string | null, filteredIds = chatFilteredIds) {
     setListLoading(true)
     setListError('')
     try {
@@ -259,7 +327,17 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       params.set('sort_order', sortOrder)
 
       const query = params.toString()
-      const response = await fetch(`/api/library/entries${query ? `?${query}` : ''}`)
+      const response =
+        filteredIds === null
+          ? await fetch(`/api/library/entries${query ? `?${query}` : ''}`)
+          : await fetch(`/api/library/entries/by-ids${query ? `?${query}` : ''}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ entry_ids: filteredIds }),
+            })
+      if (filteredIds !== null && response.status === 405) {
+        throw new Error('当前后端尚未加载 AI 文献列表筛选接口，请重启后端后重试。')
+      }
       const data = await parseJsonOrThrow<LibraryEntrySummary[]>(response)
       setEntries(data)
       const nextId =
@@ -350,6 +428,20 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     void loadDetail(selectedId)
   }, [selectedId])
 
+  useEffect(() => {
+    if (!pendingChatEntryId || !entries.some((entry) => entry.id === pendingChatEntryId)) {
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`library-entry-${pendingChatEntryId}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setPendingChatEntryId(null)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [entries, pendingChatEntryId])
+
   async function handleSave() {
     if (!detail || !draft) return
     setSaving(true)
@@ -386,6 +478,172 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  async function handleChatSubmit() {
+    const question = chatQuestion.trim()
+    if (!question || chatLoading) return
+
+    const history = chatTurns.map((turn) => ({
+      question: turn.question,
+      report: turn.report,
+      entry_ids: turn.entryIds,
+      entry_titles: turn.entryTitles,
+      keywords: turn.keywords,
+      result_count: turn.resultCount,
+    }))
+    const turnId = crypto.randomUUID()
+    const nextTurn: LibraryChatTurn = {
+      id: turnId,
+      question,
+      report: '',
+      entryIds: [],
+      entryTitles: [],
+      keywords: [],
+      resultCount: 0,
+      scope: null,
+      intent: null,
+      citations: [],
+    }
+    setChatTurns((turns) => [...turns, nextTurn])
+    setChatQuestion('')
+    setChatError('')
+    setChatLoading(true)
+
+    try {
+      const response = await fetch('/api/library/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          api_key: apiKey,
+          history,
+          scope_mode: chatScopeMode,
+        }),
+      })
+      if (!response.ok) {
+        const errorData = (await response.json().catch(() => ({}))) as {
+          detail?: unknown
+          message?: unknown
+        }
+        const detail =
+          typeof errorData.detail === 'string'
+            ? errorData.detail
+            : typeof errorData.message === 'string'
+              ? errorData.message
+              : 'AI 查询请求失败。'
+        throw new Error(detail)
+      }
+      if (!response.body) throw new Error('AI 查询未返回流式内容。')
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      const handleEvent = (event: string, data: Record<string, unknown>) => {
+        const scope =
+          data.scope === 'library' || data.scope === 'previous_results'
+            ? data.scope
+            : null
+        if (event === 'intent') {
+          setChatTurns((turns) =>
+            updateLastChatTurn(turns, turnId, (turn) => ({
+              ...turn,
+              intent: data as LibraryChatIntent,
+              scope: scope || turn.scope,
+            })),
+          )
+        } else if (event === 'results') {
+          const entryIds = Array.isArray(data.entry_ids) ? data.entry_ids : []
+          const entryTitles = Array.isArray(data.entry_titles) ? data.entry_titles : []
+          setChatFilteredIds(entryIds)
+          void loadEntries(undefined, entryIds)
+          setChatTurns((turns) =>
+            updateLastChatTurn(turns, turnId, (turn) => ({
+              ...turn,
+              entryIds,
+              entryTitles,
+              resultCount: Number(data.count || 0),
+              scope: scope || turn.scope,
+            })),
+          )
+        } else if (event === 'citations') {
+          setChatTurns((turns) =>
+            updateLastChatTurn(turns, turnId, (turn) => ({
+              ...turn,
+              citations: Array.isArray(data.links) ? data.links : [],
+            })),
+          )
+        } else if (event === 'report') {
+          const content = typeof data.content === 'string' ? data.content : ''
+          setChatTurns((turns) =>
+            updateLastChatTurn(turns, turnId, (turn) => ({
+              ...turn,
+              report: turn.report + content,
+            })),
+          )
+        } else if (event === 'done') {
+          setChatTurns((turns) =>
+            updateLastChatTurn(turns, turnId, (turn) => ({
+              ...turn,
+              keywords: Array.isArray(data.keywords) ? data.keywords : turn.keywords,
+              scope: scope || turn.scope,
+            })),
+          )
+        } else if (event === 'error') {
+          throw new Error(typeof data.message === 'string' ? data.message : 'AI 查询失败。')
+        }
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const blocks = buffer.split('\n\n')
+        buffer = blocks.pop() || ''
+        for (const block of blocks) {
+          const lines = block.split('\n')
+          const event = lines.find((line) => line.startsWith('event: '))?.slice(7).trim()
+          const dataLine = lines.find((line) => line.startsWith('data: '))?.slice(6)
+          if (event && dataLine) {
+            handleEvent(event, JSON.parse(dataLine) as Record<string, unknown>)
+          }
+        }
+      }
+    } catch (error: unknown) {
+      setChatError(error instanceof Error ? error.message : 'AI 查询失败。')
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  function clearChat() {
+    setChatTurns([])
+    setChatFilteredIds(null)
+    setChatError('')
+    setChatQuestion('')
+    void loadEntries(undefined, null)
+  }
+
+  function focusReportEntry(turn: LibraryChatTurn, entryNumber: number) {
+    const entryId = turn.entryIds[entryNumber - 1]
+    if (!entryId) return
+
+    setChatFilteredIds(turn.entryIds)
+    setSelectedId(entryId)
+    setPendingChatEntryId(entryId)
+    void loadEntries(entryId, turn.entryIds)
+  }
+
+  function handleReportClick(event: ReactMouseEvent<HTMLDivElement>, turn: LibraryChatTurn) {
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLButtonElement>('button[data-chat-entry-number]')
+      : null
+    if (!target) return
+
+    const entryNumber = Number(target.dataset.chatEntryNumber)
+    if (!Number.isInteger(entryNumber)) return
+    focusReportEntry(turn, entryNumber)
   }
 
   return (
@@ -550,6 +808,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               <div className="divide-y divide-gray-100">
                 {entries.map((entry) => (
                   <div
+                    id={`library-entry-${entry.id}`}
                     key={entry.id}
                     className={`flex items-start gap-2 px-5 py-4 transition-colors ${
                       selectedId === entry.id ? 'bg-emerald-50' : 'hover:bg-gray-50'
@@ -570,6 +829,14 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
+                          {chatEntryNumberById.get(entry.id) != null && (
+                            <span
+                              className="shrink-0 rounded-md bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700"
+                              title="AI result number"
+                            >
+                              [{chatEntryNumberById.get(entry.id)}]
+                            </span>
+                          )}
                           <span className="truncate text-sm font-semibold text-gray-900">{entry.title}</span>
                           {entry.is_pinned === 1 && (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
@@ -625,7 +892,18 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
             <div>
               <h3 className="text-sm font-semibold text-gray-800">详情与时间线</h3>
               <p className="mt-1 text-xs text-gray-400">
-                {selectedSummary ? `当前查看：${selectedSummary.title}` : '请选择左侧文献'}
+                {selectedSummary ? (
+                  <>
+                    {chatEntryNumberById.get(selectedSummary.id) != null && (
+                      <span className="mr-1 font-semibold text-sky-700">
+                        [{chatEntryNumberById.get(selectedSummary.id)}]
+                      </span>
+                    )}
+                    {`当前查看：${selectedSummary.title}`}
+                  </>
+                ) : (
+                  '请选择左侧文献'
+                )}
               </p>
             </div>
             {detail && (
@@ -972,6 +1250,173 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
           </div>
         </section>
       </div>
+
+      <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => setChatOpen((open) => !open)}
+          className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left"
+        >
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900">AI 文献助手</h3>
+              {chatFilteredIds !== null && (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                  当前结果 {chatFilteredIds.length} 篇
+                </span>
+              )}
+              {chatTurns.length > 0 && (
+                <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                  {chatTurns.length} 轮
+                </span>
+              )}
+            </div>
+          </div>
+          <span className="text-sm text-gray-400">{chatOpen ? '收起' : '展开'}</span>
+        </button>
+
+        {chatOpen && (
+          <div className="space-y-4 border-t border-gray-100 px-5 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+                {([
+                  ['auto', '自动'],
+                  ['library', '全库'],
+                  ['previous_results', '当前结果'],
+                ] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setChatScopeMode(value)}
+                    disabled={value === 'previous_results' && chatTurns.length === 0}
+                    className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+                      chatScopeMode === value
+                        ? 'bg-white text-emerald-700 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    } disabled:cursor-not-allowed disabled:opacity-40`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {chatFilteredIds !== null && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChatFilteredIds(null)
+                      void loadEntries(undefined, null)
+                    }}
+                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-emerald-300 hover:text-emerald-700"
+                  >
+                    恢复全量列表
+                  </button>
+                )}
+                {chatTurns.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearChat}
+                    disabled={chatLoading}
+                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-red-200 hover:text-red-600 disabled:opacity-50"
+                  >
+                    清空对话
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {chatError && <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{chatError}</div>}
+
+            {chatTurns.length > 0 && (
+              <div className="space-y-4">
+                {chatTurns.map((turn) => (
+                  <article key={turn.id} className="rounded-xl border border-gray-100 bg-slate-50 px-4 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-gray-500">你的问题</div>
+                        <div className="mt-1 whitespace-pre-wrap text-sm font-medium text-gray-900">{turn.question}</div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-[11px]">
+                        {turn.scope && (
+                          <span className="rounded-full bg-white px-2 py-1 font-medium text-gray-600 shadow-sm">
+                            {turn.scope === 'library' ? '全库检索' : '当前结果内检索'}
+                          </span>
+                        )}
+                        <span className="rounded-full bg-white px-2 py-1 font-medium text-emerald-700 shadow-sm">
+                          命中 {turn.resultCount} 篇
+                        </span>
+                      </div>
+                    </div>
+
+                    {turn.intent && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {[...turn.intent.core_keywords, ...turn.intent.expanded_keywords].map((keyword) => (
+                          <span key={`${turn.id}-${keyword}`} className="rounded-full bg-white px-2 py-0.5 text-[11px] text-sky-700 shadow-sm">
+                            {keyword}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {turn.citations.length > 0 && (
+                      <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-3">
+                        <div className="text-xs font-semibold text-indigo-700">命中集合内引用关系</div>
+                        <div className="mt-2 space-y-1 text-xs text-indigo-800">
+                          {turn.citations.map((citation) => (
+                            <div key={`${turn.id}-${citation.from_id}-${citation.to_id}`}>
+                              《{citation.from_title}》 引用了 《{citation.to_title}》
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {turn.report ? (
+                      <div
+                        className="mt-4 max-w-none overflow-x-auto rounded-lg bg-white px-4 py-4 text-sm leading-7 text-gray-700 [&_button[data-chat-entry-number]]:mx-0.5 [&_button[data-chat-entry-number]]:inline-flex [&_button[data-chat-entry-number]]:items-center [&_button[data-chat-entry-number]]:rounded-md [&_button[data-chat-entry-number]]:bg-sky-100 [&_button[data-chat-entry-number]]:px-1.5 [&_button[data-chat-entry-number]]:py-0.5 [&_button[data-chat-entry-number]]:font-semibold [&_button[data-chat-entry-number]]:leading-5 [&_button[data-chat-entry-number]]:text-sky-700 [&_button[data-chat-entry-number]]:transition-colors hover:[&_button[data-chat-entry-number]]:bg-sky-200 [&_h1]:mb-3 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:text-sm [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_ol]:space-y-1 [&_p]:mb-3 [&_table]:min-w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-2 [&_th]:py-1 [&_ul]:space-y-1"
+                        onClick={(event) => handleReportClick(event, turn)}
+                        dangerouslySetInnerHTML={{ __html: markdownHtml(turn.report, turn.entryIds.length) }}
+                      />
+                    ) : (
+                      <div className="mt-4 rounded-lg bg-white px-4 py-5 text-sm text-gray-400">
+                        {chatLoading && turn.id === chatTurns[chatTurns.length - 1]?.id ? '正在生成报告...' : '本轮暂无报告内容。'}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2 md:flex-row md:items-end">
+              <label className="min-w-0 flex-1">
+                <span className="mb-1 block text-xs font-medium text-gray-500">继续提问</span>
+                <textarea
+                  value={chatQuestion}
+                  onChange={(event) => setChatQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      void handleChatSubmit()
+                    }
+                  }}
+                  disabled={chatLoading}
+                  rows={2}
+                  className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
+                  placeholder="例如：这批文献里，哪些研究关注平台治理？"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleChatSubmit()}
+                disabled={chatLoading || !chatQuestion.trim()}
+                className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {chatLoading ? '分析中...' : '提问'}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

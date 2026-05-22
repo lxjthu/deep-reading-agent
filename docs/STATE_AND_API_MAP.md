@@ -40,7 +40,7 @@
 | 筛选 | `FilterTab` | `routers/filter.py` | `jobs`、`bib_entries`、`bib_filter_links`、`artifacts` | `filter_excel` |
 | 精读 | `LongTab / QuantTab / QualTab` | `routers/reading.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `reading_final` |
 | 对比综述 | `CompareView` React 组件 | `routers/compare.py`、`routers/history.py` | `jobs`、`job_bib_entries`、`bib_entries`、`reading_items`、`artifacts` | `compare_md`、`synthesis_md` |
-| 文献库 | `LibraryTab.tsx` | `routers/library.py` | `bib_entries`、`bib_filter_links`、`job_bib_entries`、`artifacts` | 时间线产物 |
+| 文献库 | `LibraryTab.tsx` | `routers/library.py`、`routers/library_chat.py` | `bib_entries`、`bib_filter_links`、`bib_references`、`reading_items`、`job_bib_entries`、`artifacts` | 时间线产物、AI 查询报告 |
 | 维度模板市场 | `DimensionMarketTab` | `routers/dimensions.py` | `dimension_templates`、`template_items`、`dimension_sets`、`dimension_items` | 用户维度集 |
 | 提示词管理 | `PromptsTab` | `routers/prompts.py`、`prompt_service.py` | `prompt_templates` | 无 |
 | 历史记录 / 下载 | `HistoryTab`、`download.ts` | `routers/history.py`、`routers/download.py` | `jobs`、`artifacts` | 各类产物文件 |
@@ -426,16 +426,21 @@ API Key 本身没有单独的后端管理接口。
 - `listError`
 - `detailError`
 - `saveMessage`
+- `chatTurns`
+- `chatScopeMode`
+- `chatFilteredIds`
 
 ## 9.2 API 映射
 
 | 前端动作 | API | 后端函数 |
 |---|---|---|
 | 拉列表 | `GET /api/library/entries` | `library.py.list_entries(...)` |
+| 按 AI 命中 ID 拉列表 | `POST /api/library/entries/by-ids` | `library.py.list_entries_by_ids(...)` |
 | 拉详情 | `GET /api/library/entries/{entry_id}` | `library.py.get_entry_detail(...)` |
 | 保存编辑 | `PATCH /api/library/entries/{entry_id}` | `library.py.update_entry(...)` |
 | 在线匹配 | `POST /api/library/entries/{entry_id}/match-online` | `library.py.match_online(...)` |
 | 应用匹配 | `POST /api/library/entries/{entry_id}/apply-match` | `library.py.apply_match(...)` |
+| AI 文献查询 | `POST /api/library/chat` | `library_chat.py.library_chat(...)` |
 
 ## 9.3 数据库映射
 
@@ -443,6 +448,8 @@ API Key 本身没有单独的后端管理接口。
 
 - `bib_entries`
 - `bib_filter_links`
+- `bib_references`
+- `reading_items`
 - `job_bib_entries`
 - `artifacts`
 
@@ -461,10 +468,17 @@ API Key 本身没有单独的后端管理接口。
 | 页面内容 | 数据来源 |
 |---|---|
 | 左侧文献列表 | `list_entries(...)` |
+| AI 命中文献列表 | `list_entries_by_ids(...)`，body 为本轮命中 `entry_ids` |
 | 右侧详情基础元数据 | `bib_entries` |
 | 筛选评价 | `bib_filter_links` |
 | 时间线 | `jobs + job_bib_entries + artifacts` |
 | 下载按钮 | `download.ts.downloadWithAuth(...)` |
+| AI 报告与范围解析 | `/api/library/chat` 的 SSE `intent/results/report/done` 事件 |
+
+## 9.5 AI 文献助手联动
+
+`LibraryTab.tsx` 用 `chatTurns` 保存多轮问题、报告、命中文献和引用关系，`chatScopeMode` 控制本轮范围。
+每轮 `results.entry_ids` 的顺序就是报告 `[n]` 编号顺序：当前轮会同步筛选文献列表；点击旧报告编号时，前端先恢复那一轮 ID 集合，再选中并滚动到对应文献。
 
 ## 10. 维度模板市场链路
 
@@ -602,6 +616,8 @@ API Key 本身没有单独的后端管理接口。
 2. 系统默认
 3. 文件兜底
 4. 代码兜底
+
+`library_chat.query_parser` 与 `library_chat.report_writer` 也走相同优先级。系统默认提示词中未被管理员编辑过的槽位会跟随托管提示词文件刷新，用户覆盖不受影响。
 
 ## 11.4 页面显示来源
 

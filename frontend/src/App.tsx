@@ -3113,6 +3113,14 @@ function PromptsEditor() {
         { key: 'system_role', title: '模板生成：系统角色' },
       ],
     },
+    {
+      id: 'library_chat',
+      label: '文献库 AI 查询',
+      steps: [
+        { key: 'query_parser', title: '查询解析' },
+        { key: 'report_writer', title: '报告生成' },
+      ],
+    },
   ]
 
   const currentType =

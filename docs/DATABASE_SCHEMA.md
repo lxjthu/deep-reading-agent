@@ -1,7 +1,7 @@
 # 数据库设计文档
 
-> **版本**: v1.6  
-> **日期**: 2026-05-21  
+> **版本**: v1.7
+> **日期**: 2026-05-22
 > **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)、[CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)、[DIMENSION_TEMPLATE_PLAN.md](./DIMENSION_TEMPLATE_PLAN.md)、[TRANSLATION_INTEGRATION_PLAN.md](./TRANSLATION_INTEGRATION_PLAN.md)
 
 ## 1. 选型与约定
@@ -136,14 +136,14 @@ CREATE TABLE user_settings (
 
 ### 3.4 `prompt_templates` — 提示词模板（系统默认 + 用户覆盖）
 
-> 目的：把 `quant / qual / long / filter` 四类提示词从文件系统迁入数据库，支持“系统默认提示词 + 用户个人覆盖”，并统一所有分析链路的读取来源。
+> 目的：把固定提示词槽位从文件系统迁入数据库，支持“系统默认提示词 + 用户个人覆盖”，并统一所有分析链路的读取来源。
 
 ```sql
 CREATE TABLE prompt_templates (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
     scope               TEXT NOT NULL CHECK (scope IN ('system', 'user')),
-    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter', 'compare', 'synthesis', 'ai_template', 'translation')),
+    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter', 'compare', 'synthesis', 'ai_template', 'translation', 'library_chat')),
     prompt_key          TEXT NOT NULL,
     title               TEXT NOT NULL,
     content             TEXT NOT NULL,
@@ -166,6 +166,8 @@ CREATE INDEX idx_prompt_templates_type_key ON prompt_templates (prompt_type, pro
 - 当前阶段仍只允许固定槽位，不开放任意自定义 key
 - 运行时优先级：`用户覆盖 → 系统默认 → prompts/ 文件兜底 → 代码内置兜底`
 - 首批系统默认值从现有 `prompts/` 目录幂等导入数据库
+- `library_chat` 于 migration `016` 加入，包含查询解析和报告生成两个提示词槽位
+- 系统默认提示词若尚未被管理员编辑，会在默认种子同步时跟随托管提示词文件更新
 
 ### 3.5 `files` — 物理文件
 
@@ -1079,6 +1081,9 @@ backend/migrations/versions/
 ├── 010_seed_dimension_templates.py  # 预设模板种子数据导入
 ├── 011_add_edits_and_annotations.py  # reading_item_edits + annotations
 ├── 012_add_dimension_set_reading_availability.py  # dimension_sets 新增 is_available_for_reading
+├── 014_add_translation_prompt_type.py  # prompt_templates 增加 translation
+├── 015_add_bib_entry_language.py  # bib_entries 增加 language
+├── 016_add_library_chat_prompt_type.py  # prompt_templates 增加 library_chat
 └── (后续新增字段时追加)
 ```
 
@@ -1110,6 +1115,7 @@ backend/migrations/versions/
 | 引文计数/h-index | `bib_entries.citation_count` |
 | 参考文献梳理与正文引用对齐 | `bib_references` + `bib_reference_citations` + `jobs.job_type/artifacts.artifact_type` 扩展 |
 | 全文翻译（中文重述） | `jobs.job_type='translation'` + `artifacts.artifact_type` 新增 `translation_md`/`translation_glossary` + `prompt_templates.prompt_type` 新增 `translation`（v1.6 migration 014） |
+| 文献库 AI 查询 | `prompt_templates.prompt_type` 新增 `library_chat`（v1.7 migration 016）；命中集合复用 `bib_entries`、`bib_references`、`reading_items` |
 | 引用网络分析 / 共引分析 | 依赖 `bib_references.source_bib_entry_id -> matched_bib_entry_id` 关系继续向上扩展 |
 | VIP 试用期 | `users.vip_expires_at` |
 | 团队/共享空间 | 不在本期，需要新增 `workspaces` 中间层（暂不规划） |
@@ -1128,6 +1134,7 @@ backend/migrations/versions/
 | 对比综述 | `jobs(compare/synthesis)`、`job_bib_entries` | `artifacts(compare_md/synthesis_md)` |
 | 参考文献梳理 | `bib_references`、`bib_reference_citations` | `artifacts(references_excel/citation_trace_md)` |
 | 提示词管理 | `prompt_templates` | — |
+| 文献库 AI 查询 | `bib_entries` | `bib_references`、`reading_items`、`prompt_templates(library_chat)` |
 | 维度集合（用户自建） | `dimension_sets`、`dimension_items` | — |
 | 维度模板（系统预设） | `dimension_templates`、`template_items` | — |
 
