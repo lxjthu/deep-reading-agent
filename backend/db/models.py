@@ -208,7 +208,7 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "job_type IN ('filter','reading_long','reading_quant','reading_qual',"
-            "'compare','synthesis','reference_trace','translation')",
+            "'compare','synthesis','reference_trace','translation','translate_abstracts')",
             name="ck_jobs_job_type",
         ),
         CheckConstraint(
