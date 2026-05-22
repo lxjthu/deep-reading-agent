@@ -88,6 +88,7 @@ class LibraryAiComment(BaseModel):
 
 class LibraryEntryDetail(LibraryEntrySummary):
     abstract: Optional[str]
+    abstract_cn: Optional[str] = None
     keywords: list[str]
     timeline: list[LibraryTimelineItem]
     filter_evaluations: list[LibraryFilterEvaluation]
@@ -550,7 +551,7 @@ async def get_entry_detail(
                 passed=link.passed,
                 score=link.score,
                 reason=link.reason,
-                abstract_translation=_load_abstract_translation_from_artifact(entry, artifact),
+                abstract_translation=entry.abstract_cn or _load_abstract_translation_from_artifact(entry, artifact),
                 created_at=_dt(link.created_at),
             )
         )
@@ -583,6 +584,7 @@ async def get_entry_detail(
     return LibraryEntryDetail(
         **summary.model_dump(),
         abstract=entry.abstract,
+        abstract_cn=entry.abstract_cn,
         keywords=_json_list(entry.keywords_json),
         timeline=list(grouped.values()),
         filter_evaluations=filter_evaluations,
