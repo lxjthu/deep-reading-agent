@@ -3,19 +3,22 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select, func, desc, asc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import get_db
-from db.models import Annotation, Artifact, BibEntry, BibFilterLink, BibReference, File, Job, JobBibEntry, ReadingItem, User
+from db.models import Annotation, Artifact, BibEntry, BibFilterLink, BibReference, CardNote, File, Job, JobBibEntry, ReadingItem, User
 from db.utils import title_match_score, normalize_doi, compute_metadata_match_score
 from result_storage import resolve_result_path
 from services.crossref_source import CrossrefSource
@@ -27,6 +30,9 @@ from services.pdf_metadata_llm import extract_metadata_with_llm
 from upload_storage import resolve_storage_path
 from backend.utils.api_key import validate_deepseek_key
 from services.abstract_translator import run_batch_translate
+from routers.upload import compute_expires_at, detect_file_type, persist_upload_to_temp
+from upload_storage import build_storage_path, get_user_upload_dir
+from services.card_notes import json_list, read_artifact_markdown, read_markdown_file, strip_frontmatter
 
 router = APIRouter()
 
@@ -45,6 +51,8 @@ class LibraryEntrySummary(BaseModel):
     source_file_id: Optional[str]
     source_file_name: Optional[str]
     source_file_type: Optional[str]
+    markdown_source_file_id: Optional[str] = None
+    markdown_source_file_name: Optional[str] = None
     language: Optional[str]
     tags: list[str]
     note: Optional[str]
@@ -116,6 +124,32 @@ class LibraryAiCommentUpdateRequest(BaseModel):
 class BatchTranslateRequest(BaseModel):
     entry_ids: list[str] = Field(..., min_length=1, max_length=200)
     api_key: str
+
+
+class ReaderVersion(BaseModel):
+    version: str
+    label: str
+    available: bool
+
+
+class ReaderCardSummary(BaseModel):
+    id: str
+    title: str
+    summary: Optional[str]
+    tags: list[str]
+    source_version: str
+    created_at: Optional[str]
+
+
+class ReaderResponse(BaseModel):
+    entry: dict
+    current_version: str
+    versions: list[ReaderVersion]
+    markdown: str
+    source_markdown_file_id: Optional[str] = None
+    source_translation_artifact_id: Optional[int] = None
+    cards: list[ReaderCardSummary]
+    citations: dict
 
 
 def _json_list(value: str | None) -> list[str]:
@@ -196,7 +230,13 @@ def _load_abstract_translation_from_artifact(entry: BibEntry, artifact: Artifact
     return None
 
 
-def build_entry_summary(entry: BibEntry, source_file: File | None, filter_score: Optional[float] = None) -> LibraryEntrySummary:
+def build_entry_summary(
+    entry: BibEntry,
+    source_file: File | None,
+    filter_score: Optional[float] = None,
+    markdown_file: File | None = None,
+) -> LibraryEntrySummary:
+    effective_markdown_file = markdown_file or (source_file if source_file and source_file.file_type == "markdown" else None)
     return LibraryEntrySummary(
         id=entry.id,
         title=entry.title,
@@ -211,6 +251,8 @@ def build_entry_summary(entry: BibEntry, source_file: File | None, filter_score:
         source_file_id=entry.source_file_id,
         source_file_name=source_file.original_name if source_file else None,
         source_file_type=source_file.file_type if source_file else None,
+        markdown_source_file_id=entry.markdown_source_file_id or (effective_markdown_file.id if effective_markdown_file else None),
+        markdown_source_file_name=effective_markdown_file.original_name if effective_markdown_file else None,
         language=entry.language,
         tags=_json_list(entry.user_tags_json),
         note=entry.user_note,
@@ -495,6 +537,7 @@ async def get_entry_detail(
 ) -> LibraryEntryDetail:
     entry = await get_owned_entry(db, user, entry_id)
     source_file = await db.get(File, entry.source_file_id) if entry.source_file_id else None
+    markdown_file = await db.get(File, entry.markdown_source_file_id) if entry.markdown_source_file_id else None
 
     timeline_rows = (
         await db.execute(
@@ -580,7 +623,7 @@ async def get_entry_detail(
         for annotation in ai_comment_rows
     ]
 
-    summary = build_entry_summary(entry, source_file)
+    summary = build_entry_summary(entry, source_file, markdown_file=markdown_file)
     return LibraryEntryDetail(
         **summary.model_dump(),
         abstract=entry.abstract,
@@ -626,6 +669,209 @@ async def update_entry(
 
     await db.commit()
     return await get_entry_detail(entry_id, user=user, db=db)
+
+
+@router.post("/entries/{entry_id}/markdown", response_model=LibraryEntryDetail)
+async def upload_entry_markdown(
+    entry_id: str,
+    file: UploadFile = FastAPIFile(...),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LibraryEntryDetail:
+    entry = await get_owned_entry(db, user, entry_id)
+    original_name = (file.filename or "").strip()
+    if not original_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少文件名。")
+    file_ext = Path(original_name).suffix.lower()
+    if file_ext not in {".md", ".markdown"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请上传 Markdown 文件。")
+
+    user_dir = get_user_upload_dir(user.id)
+    temp_path = user_dir / f".{uuid.uuid4()}.uploading"
+    final_path = None
+    try:
+        md5_hash, size_bytes, sample = await persist_upload_to_temp(file, temp_path)
+        if detect_file_type(original_name, sample) != "markdown":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请上传 Markdown 文件。")
+
+        record = (
+            await db.execute(select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash))
+        ).scalar_one_or_none()
+        if record is None:
+            file_id = str(uuid.uuid4())
+            final_path, storage_path = build_storage_path(user.id, file_id, file_ext)
+            shutil.move(str(temp_path), str(final_path))
+            record = File(
+                id=file_id,
+                owner_user_id=user.id,
+                original_name=original_name,
+                file_type="markdown",
+                storage_path=storage_path,
+                size_bytes=size_bytes,
+                md5=md5_hash,
+                expires_at=compute_expires_at(user),
+            )
+            db.add(record)
+            try:
+                await db.flush()
+            except IntegrityError:
+                await db.rollback()
+                if final_path and final_path.exists():
+                    final_path.unlink()
+                record = (
+                    await db.execute(select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash))
+                ).scalar_one_or_none()
+                if record is None:
+                    raise
+        else:
+            if temp_path.exists():
+                temp_path.unlink()
+
+        entry.markdown_source_file_id = record.id
+        if not entry.source_file_id:
+            entry.source_file_id = record.id
+        if entry.reading_status == "none":
+            entry.reading_status = "has_pdf"
+        entry.updated_at = datetime.now(UTC)
+        await db.commit()
+        return await get_entry_detail(entry_id, user=user, db=db)
+    except HTTPException:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
+    finally:
+        await file.close()
+
+
+@router.get("/entries/{entry_id}/reader", response_model=ReaderResponse)
+async def get_entry_reader(
+    entry_id: str,
+    view: str = Query(default="original", pattern="^(original|translated)$"),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReaderResponse:
+    entry = await get_owned_entry(db, user, entry_id)
+    source_file = await db.get(File, entry.source_file_id) if entry.source_file_id else None
+    markdown_file = await db.get(File, entry.markdown_source_file_id) if entry.markdown_source_file_id else None
+    if markdown_file is None and source_file is not None and source_file.file_type == "markdown":
+        markdown_file = source_file
+
+    translation_row = (
+        await db.execute(
+            select(Artifact)
+            .join(Job, Job.id == Artifact.job_id)
+            .join(JobBibEntry, JobBibEntry.job_id == Job.id)
+            .where(
+                JobBibEntry.bib_entry_id == entry.id,
+                Job.owner_user_id == user.id,
+                Artifact.owner_user_id == user.id,
+                Artifact.artifact_type == "translation_md",
+                Job.status == "success",
+            )
+            .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    versions = [
+        ReaderVersion(version="original", label="原文", available=markdown_file is not None),
+        ReaderVersion(version="translated", label="译文", available=translation_row is not None),
+    ]
+    current = view
+    if current == "translated" and translation_row is None:
+        current = "original"
+    if current == "original" and markdown_file is None and translation_row is not None:
+        current = "translated"
+    if current == "original" and markdown_file is None:
+        raise HTTPException(status_code=404, detail="当前文献尚未绑定 Markdown 原文。")
+
+    if current == "translated":
+        markdown = read_artifact_markdown(translation_row.storage_path) if translation_row else ""
+        source_translation_artifact_id = translation_row.id if translation_row else None
+        source_markdown_file_id = None
+    else:
+        markdown = read_markdown_file(markdown_file.storage_path) if markdown_file else ""
+        source_translation_artifact_id = None
+        source_markdown_file_id = markdown_file.id if markdown_file else None
+
+    card_rows = (
+        await db.execute(
+            select(CardNote)
+            .where(CardNote.owner_user_id == user.id, CardNote.source_bib_entry_id == entry.id)
+            .order_by(CardNote.created_at.desc(), CardNote.id.desc())
+        )
+    ).scalars().all()
+    cards = [
+        ReaderCardSummary(
+            id=card.id,
+            title=card.title,
+            summary=card.summary,
+            tags=json_list(card.tags_json),
+            source_version=card.source_version,
+            created_at=_dt(card.created_at),
+        )
+        for card in card_rows
+    ]
+
+    outgoing_refs = (
+        await db.execute(
+            select(BibReference)
+            .where(BibReference.owner_user_id == user.id, BibReference.source_bib_entry_id == entry.id)
+            .order_by(BibReference.reference_order.asc())
+            .limit(20)
+        )
+    ).scalars().all()
+    incoming_refs = (
+        await db.execute(
+            select(BibReference, BibEntry)
+            .join(BibEntry, BibEntry.id == BibReference.source_bib_entry_id)
+            .where(
+                BibReference.owner_user_id == user.id,
+                BibReference.matched_bib_entry_id == entry.id,
+            )
+            .order_by(BibReference.updated_at.desc())
+            .limit(20)
+        )
+    ).all()
+
+    summary = build_entry_summary(entry, source_file, markdown_file=markdown_file)
+    return ReaderResponse(
+        entry={
+            **summary.model_dump(),
+            "abstract": entry.abstract,
+            "keywords": json_list(entry.keywords_json),
+            "volume": entry.volume,
+            "issue": entry.issue,
+            "pages": entry.pages,
+        },
+        current_version=current,
+        versions=versions,
+        markdown=strip_frontmatter(markdown),
+        source_markdown_file_id=source_markdown_file_id,
+        source_translation_artifact_id=source_translation_artifact_id,
+        cards=cards,
+        citations={
+            "outgoing": [
+                {
+                    "id": ref.id,
+                    "order": ref.reference_order,
+                    "title": ref.title,
+                    "raw_text": ref.raw_text,
+                    "matched_bib_entry_id": ref.matched_bib_entry_id,
+                }
+                for ref in outgoing_refs
+            ],
+            "incoming": [
+                {
+                    "reference_id": ref.id,
+                    "source_bib_entry_id": source.id,
+                    "source_title": source.title,
+                    "raw_text": ref.raw_text,
+                }
+                for ref, source in incoming_refs
+            ],
+        },
+    )
 
 
 @router.patch("/ai-comments/{comment_id}", response_model=LibraryAiComment)

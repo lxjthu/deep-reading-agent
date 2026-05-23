@@ -24,6 +24,7 @@ PROMPT_TYPE_LABELS: dict[str, str] = {
     "ai_template": "AI 模板生成",
     "translation": "全文翻译",
     "library_chat": "文献库 AI 查询",
+    "card_note": "Markdown 卡片笔记",
 }
 
 PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
@@ -146,6 +147,12 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
             "file_path": "prompts/library_chat/paper_comment_writer.md",
         },
     },
+    "card_note": {
+        "atomic_card_writer": {
+            "title": "原子阅读卡生成",
+            "file_path": "prompts/card_note/atomic_card_writer.md",
+        },
+    },
 }
 
 FILTER_FALLBACK_TEMPLATE = """你是一位学术文献筛选助手。请围绕研究主题“{topic}”评估下面这篇文献，并严格输出 JSON。
@@ -235,4 +242,22 @@ def get_builtin_fallback(prompt_type: str, prompt_key: str) -> str:
         return "请直接输出分析内容，不要客套开场白。"
     if prompt_type == "library_chat":
         return "你是一位学术文献库助手。请严格基于用户提供的文献信息完成当前任务。"
+    if prompt_type == "card_note":
+        return """你是一位学术阅读卡片助手。请基于用户给出的论文选段、上下文和论文元数据，生成中文“原子阅读卡”。
+
+要求：
+1. 严格基于原文和上下文，不编造论文没有表达的信息。
+2. 将选段压缩成一个可复用的研究笔记单元。
+3. body_markdown 使用 Markdown，包含“核心观点”“依据/证据”“阅读笔记”“启发或用途”四个小节。
+4. tags 输出 2-6 个短标签，不要带 #。
+5. 只输出 JSON，不要输出 Markdown 代码围栏或解释。
+
+JSON 结构：
+{
+  "title": "卡片标题",
+  "summary": "一句话总结",
+  "tags": ["标签一", "标签二"],
+  "body_markdown": "## 核心观点\\n..."
+}
+"""
     return "请直接输出分析内容，不要客套开场白。"

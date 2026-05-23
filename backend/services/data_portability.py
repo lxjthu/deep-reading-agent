@@ -30,6 +30,7 @@ from db.models import (
     BibFilterLink,
     BibReference,
     BibReferenceCitation,
+    CardNote,
     DimensionItem,
     DimensionSet,
     File,
@@ -47,7 +48,7 @@ from upload_storage import get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "019"
+CURRENT_SCHEMA_VERSION = "020"
 
 # FK forward order for export / import
 EXPORT_TABLE_ORDER = [
@@ -67,6 +68,7 @@ EXPORT_TABLE_ORDER = [
     AgentMessage,
     AgentActionProposal,
     Artifact,
+    CardNote,
     BibReference,
     BibReferenceCitation,
 ]
@@ -75,6 +77,7 @@ EXPORT_TABLE_ORDER = [
 IMPORT_CLEAR_ORDER = [
     BibReferenceCitation,
     BibReference,
+    CardNote,
     Annotation,
     ReadingItemEdit,
     ReadingItem,
@@ -195,6 +198,14 @@ async def _serialize_table(db: AsyncSession, model: type, user_id: int) -> tuple
                     row["_file_missing"] = True
                     missing_files.append(str(storage_path))
 
+        if model is CardNote:
+            storage_path = getattr(record, "storage_path", None)
+            if storage_path:
+                physical = get_results_root() / storage_path
+                if not physical.exists():
+                    row["_file_missing"] = True
+                    missing_files.append(str(storage_path))
+
         data.append(row)
 
     return data, missing_files
@@ -207,9 +218,11 @@ async def export_user_data(db: AsyncSession, user: User) -> Path:
     data_dir = tmp_dir / "data"
     files_dir = tmp_dir / "files"
     artifacts_dir = tmp_dir / "artifacts"
+    card_notes_dir = tmp_dir / "card_notes"
     data_dir.mkdir()
     files_dir.mkdir()
     artifacts_dir.mkdir()
+    card_notes_dir.mkdir()
 
     stats: dict[str, int] = {}
     all_missing_files: list[str] = []
@@ -264,6 +277,20 @@ async def export_user_data(db: AsyncSession, user: User) -> Path:
                 shutil.copy2(src, dst)
             except Exception as exc:
                 errors.append(f"copy artifact {record.id}: {exc}")
+
+    # Card note mirrors
+    card_records = await _query_user_records(db, CardNote, user.id)
+    for record in card_records:
+        storage_path = record.storage_path
+        if not storage_path:
+            continue
+        src = results_root / storage_path
+        if src.exists():
+            dst = card_notes_dir / f"{record.id}.md"
+            try:
+                shutil.copy2(src, dst)
+            except Exception as exc:
+                errors.append(f"copy card note {record.id}: {exc}")
 
     # Write manifest
     manifest = {
@@ -467,6 +494,12 @@ async def _deserialize_table(
                             kwargs[col] = str(new_reading_item_id)
                             continue
 
+            if col == "source_translation_artifact_id" and id_map and model is CardNote:
+                new_artifact_id = id_map.get(("artifacts", value))
+                if new_artifact_id is not None:
+                    kwargs[col] = new_artifact_id
+                    continue
+
             try:
                 col_type = _get_column_type(model, col)
                 if col_type is datetime and isinstance(value, str):
@@ -522,6 +555,7 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
         data_dir = tmp_dir / "data"
         files_dir = tmp_dir / "files"
         artifacts_dir = tmp_dir / "artifacts"
+        card_notes_dir = tmp_dir / "card_notes"
 
         # Clear existing data
         logger.info("[import] Clearing existing user data...")
@@ -559,6 +593,7 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
         # (collect all needed info while session is still valid)
         files_to_restore: list[tuple[Path, Path]] = []
         artifacts_to_restore: list[tuple[Path, Path]] = []
+        card_notes_to_restore: list[tuple[Path, Path]] = []
 
         upload_root = get_upload_root()
         results_root = get_results_root()
@@ -606,6 +641,19 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
                     dst = results_root / record.storage_path
                     artifacts_to_restore.append((src_path, dst))
 
+        # Collect card note mirror restoration info
+        if card_notes_dir.exists():
+            for src_path in card_notes_dir.iterdir():
+                if not src_path.is_file():
+                    continue
+                card_id = src_path.stem
+                result = await db.execute(select(CardNote).where(CardNote.id == card_id))
+                record = result.scalars().first()
+                if record is None or getattr(record, "_file_missing", False) or not record.storage_path:
+                    continue
+                dst = results_root / record.storage_path
+                card_notes_to_restore.append((src_path, dst))
+
         # Restore physical files (outside transaction, best-effort)
         files_restored = 0
         files_missing = 0
@@ -629,6 +677,16 @@ async def import_user_data(db: AsyncSession, user: User, dra_path: Path) -> dict
             except Exception as exc:
                 files_missing += 1
                 logger.error("[import] Failed to restore artifact %s: %s", src_path, exc)
+
+        for src_path, dst_path in card_notes_to_restore:
+            try:
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+                files_restored += 1
+                logger.info("[import] Restored card note: %s -> %s", src_path, dst_path)
+            except Exception as exc:
+                files_missing += 1
+                logger.error("[import] Failed to restore card note %s: %s", src_path, exc)
 
         logger.info("[import] Import completed. restored=%d, missing=%d", files_restored, files_missing)
         return {

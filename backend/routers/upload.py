@@ -131,6 +131,8 @@ async def bind_uploaded_file_to_existing_bib(db: AsyncSession, user: User, recor
     if matched is None:
         return None
 
+    if record.file_type == "markdown" and not matched.markdown_source_file_id:
+        matched.markdown_source_file_id = record.id
     if not matched.source_file_id:
         matched.source_file_id = record.id
     if matched.reading_status == "none":

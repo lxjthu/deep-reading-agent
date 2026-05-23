@@ -196,7 +196,7 @@ class PromptTemplate(Base):
             name="ck_prompt_templates_scope",
         ),
         CheckConstraint(
-            "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template','translation','library_chat')",
+            "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template','translation','library_chat','card_note')",
             name="ck_prompt_templates_type",
         ),
         UniqueConstraint(
@@ -393,6 +393,9 @@ class BibEntry(Base):
     source_file_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("files.id"), nullable=True
     )
+    markdown_source_file_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("files.id"), nullable=True
+    )
 
     # User annotations
     user_tags_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
@@ -423,6 +426,7 @@ Index("idx_bib_owner", BibEntry.owner_user_id)
 Index("idx_bib_status", BibEntry.reading_status)
 Index("idx_bib_doi", BibEntry.doi)
 Index("idx_bib_expires", BibEntry.expires_at)
+Index("idx_bib_markdown_source", BibEntry.markdown_source_file_id)
 
 
 # --------------------------------------------------------------------------
@@ -675,6 +679,54 @@ class Annotation(Base):
 Index("idx_annotations_owner", Annotation.owner_user_id)
 Index("idx_annotations_source", Annotation.source_type, Annotation.source_id)
 Index("idx_annotations_bib", Annotation.bib_entry_id)
+
+
+class CardNote(Base):
+    __tablename__ = "card_notes"
+    __table_args__ = (
+        CheckConstraint(
+            "source_version IN ('original','translated')",
+            name="ck_card_notes_source_version",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    source_bib_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("bib_entries.id", ondelete="CASCADE"), nullable=False
+    )
+    source_version: Mapped[str] = mapped_column(String, nullable=False)
+    source_markdown_file_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("files.id"), nullable=True
+    )
+    source_translation_artifact_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("artifacts.id"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tags_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    selected_text: Mapped[str] = mapped_column(Text, nullable=False)
+    context_before: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    context_after: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    user_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    body_markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+Index("idx_card_notes_owner", CardNote.owner_user_id)
+Index("idx_card_notes_bib", CardNote.source_bib_entry_id)
+Index("idx_card_notes_created", CardNote.created_at)
+Index("idx_card_notes_expires", CardNote.expires_at)
+Index("idx_card_notes_translation", CardNote.source_translation_artifact_id)
 
 
 # --------------------------------------------------------------------------

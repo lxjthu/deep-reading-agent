@@ -79,10 +79,13 @@ class WoSParser(BaseParser):
 
             pages = r.get('BP', '')
             ep = r.get('EP', '')
+            page_count = r.get('PG', '')
             if pages and ep:
                 pages = f"{pages}-{ep}"
             elif not pages and ep:
                 pages = ep
+            elif not pages and page_count:
+                pages = page_count
 
             entry = {
                 'Title': r.get('TI', ''),

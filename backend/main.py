@@ -28,7 +28,7 @@ from db import AsyncSessionLocal
 from dimension_seed import ensure_default_dimension_sets
 from prompt_service import ensure_builtin_prompt_templates
 from template_seed import ensure_dimension_templates
-from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions, translation
+from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions, translation, cards
 from routers import agent
 from routers import library_chat
 
@@ -132,6 +132,7 @@ app.include_router(download.router, prefix="/api/download", tags=["Download"])
 app.include_router(history.router, prefix="/api/history", tags=["History"])
 app.include_router(compare.router, prefix="/api/compare", tags=["Compare"])
 app.include_router(library.router, prefix="/api/library", tags=["Library"])
+app.include_router(cards.router, prefix="/api/cards", tags=["Cards"])
 app.include_router(references.router, prefix="/api/references", tags=["References"])
 app.include_router(data.router, prefix="/api/data", tags=["Data"])
 app.include_router(dimensions.router, prefix="/api/dimensions", tags=["Dimensions"])

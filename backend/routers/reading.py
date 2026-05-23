@@ -313,6 +313,8 @@ async def get_or_create_bib_entry(db: AsyncSession, user: User, file_record: Fil
         )
     ).scalars().first()
     if existing is not None:
+        if file_record.file_type == "markdown" and not existing.markdown_source_file_id:
+            existing.markdown_source_file_id = file_record.id
         if existing.reading_status == "none":
             existing.reading_status = "has_pdf"
         return existing
@@ -342,6 +344,8 @@ async def get_or_create_bib_entry(db: AsyncSession, user: User, file_record: Fil
             existing_by_title = best_entry
 
     if existing_by_title is not None:
+        if file_record.file_type == "markdown" and not existing_by_title.markdown_source_file_id:
+            existing_by_title.markdown_source_file_id = file_record.id
         if not existing_by_title.source_file_id:
             existing_by_title.source_file_id = file_record.id
         if existing_by_title.reading_status == "none":
@@ -363,6 +367,7 @@ async def get_or_create_bib_entry(db: AsyncSession, user: User, file_record: Fil
         source_db=infer_bib_source_db(file_record),
         source_filter_job_id=None,
         source_file_id=file_record.id,
+        markdown_source_file_id=file_record.id if file_record.file_type == "markdown" else None,
         user_tags_json="[]",
         user_note=None,
         is_pinned=0,

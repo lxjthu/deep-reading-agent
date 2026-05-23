@@ -3,7 +3,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useMemo } from 'react'
 import { marked } from 'marked'
 import './index.css'
+import CardLibrary from './CardLibrary'
 import LibraryTab from './LibraryTab'
+import MarkdownReader from './MarkdownReader'
 import ReferenceTraceTab from './ReferenceTraceTab'
 import TemplateMarket from './TemplateMarket'
 import TranslationTab from './TranslationTab'
@@ -29,6 +31,7 @@ const TABS = [
   { id: 'history', label: '历史记录', icon: '📁' },
 ]
 
+const CARD_TAB = { id: 'cards', label: '卡片笔记', icon: '▣' }
 const AGENT_TAB = { id: 'agent', label: 'AI 助手', icon: 'AI' }
 const TAB_IDS = new Set(TABS.map((tab) => tab.id))
 const LEGACY_API_KEY_STORAGE = 'deepseek_api_key'
@@ -39,6 +42,9 @@ function getApiKeyStorageKey(username?: string | null) {
 }
 
 function getInitialTab(pathname: string, search: string): string {
+  if (pathname.startsWith('/workspace/cards')) {
+    return 'cards'
+  }
   if (pathname.startsWith('/workspace/library')) {
     return 'library'
   }
@@ -87,10 +93,11 @@ function App() {
   const [inputFolderDraft, setInputFolderDraft] = useState('')
   const [inputFolderStatus, setInputFolderStatus] = useState('')
 
-  const visibleTabs = useMemo(
-    () => (agentTabVisible ? [...TABS, AGENT_TAB] : TABS),
-    [agentTabVisible],
-  )
+  const cardTabVisible = activeTab === 'cards' || location.pathname.startsWith('/workspace/cards')
+  const visibleTabs = useMemo(() => {
+    const tabs = cardTabVisible ? [...TABS, CARD_TAB] : TABS
+    return agentTabVisible ? [...tabs, AGENT_TAB] : tabs
+  }, [agentTabVisible, cardTabVisible])
 
   useEffect(() => {
     const storageKey = getApiKeyStorageKey(user?.username)
@@ -148,6 +155,12 @@ function App() {
     if (tabId === 'library') {
       if (location.pathname !== '/workspace/library') {
         navigate('/workspace/library')
+      }
+      return
+    }
+    if (tabId === 'cards') {
+      if (location.pathname !== '/workspace/cards') {
+        navigate('/workspace/cards')
       }
       return
     }
@@ -635,6 +648,8 @@ function App() {
           {activeTab === 'translation' && <TranslationTab apiKey={apiKey} />}
           {activeTab === 'agent' && <AgentTab apiKey={apiKey} />}
           {activeTab === 'library' && <LibraryTab apiKey={apiKey} />}
+          {activeTab === 'cards' && location.pathname.includes('/reader') && <MarkdownReader apiKey={apiKey} />}
+          {activeTab === 'cards' && !location.pathname.includes('/reader') && <CardLibrary />}
           {activeTab === 'references' && <ReferenceTraceTab apiKey={apiKey} />}
           {activeTab === 'prompts' && <PromptsTab apiKey={apiKey} />}
           {activeTab === 'history' && <HistoryTab />}

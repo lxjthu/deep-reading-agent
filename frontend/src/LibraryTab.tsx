@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { marked } from 'marked'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import MetadataMatchPanel from './MetadataMatchPanel'
@@ -17,6 +18,8 @@ type LibraryEntrySummary = {
   source_file_id: string | null
   source_file_name: string | null
   source_file_type: 'pdf' | 'markdown' | string | null
+  markdown_source_file_id: string | null
+  markdown_source_file_name: string | null
   language: 'en' | 'zh' | 'other' | null
   tags: string[]
   note: string | null
@@ -307,6 +310,8 @@ function buildDraft(detail: LibraryEntryDetail): EditDraft {
 }
 
 export default function LibraryTab({ apiKey }: { apiKey: string }) {
+  const navigate = useNavigate()
+  const markdownInputRef = useRef<HTMLInputElement | null>(null)
   const [search, setSearch] = useState('')
   const [journalFilter, setJournalFilter] = useState('')
   const [tagOptions, setTagOptions] = useState<string[]>([])
@@ -338,6 +343,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [batchTagsMessage, setBatchTagsMessage] = useState('')
   const [translating, setTranslating] = useState(false)
   const [translateProgress, setTranslateProgress] = useState('')
+  const [markdownUploading, setMarkdownUploading] = useState(false)
 
   const [chatOpen, setChatOpen] = useState(false)
   const [chatQuestion, setChatQuestion] = useState('')
@@ -352,6 +358,16 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     () => entries.find((entry) => entry.id === selectedId) || null,
     [entries, selectedId],
   )
+  const hasMarkdownReaderSource = Boolean(
+    detail?.markdown_source_file_id || detail?.source_file_type === 'markdown',
+  )
+  const hasTranslatedReaderSource = Boolean(
+    detail?.timeline.some((item) =>
+      item.status === 'success' &&
+      item.artifacts.some((artifact) => artifact.artifact_type === 'translation_md'),
+    ),
+  )
+  const readerDefaultView = hasMarkdownReaderSource ? 'original' : 'translated'
   const chatEntryNumberById = useMemo(
     () => new Map((chatFilteredIds || []).map((entryId, index) => [entryId, index + 1])),
     [chatFilteredIds],
@@ -606,6 +622,29 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       setSaveMessage(error instanceof Error ? error.message : '保存失败。')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleMarkdownUpload(file: File | null) {
+    if (!detail || !file) return
+    setMarkdownUploading(true)
+    setSaveMessage('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const response = await fetch(`/api/library/entries/${encodeURIComponent(detail.id)}/markdown`, {
+        method: 'POST',
+        body: formData,
+      })
+      const updated = await parseJsonOrThrow<LibraryEntryDetail>(response)
+      setDetail(updated)
+      setDraft(buildDraft(updated))
+      setSaveMessage('Markdown 原文已挂载。')
+      await loadEntries(updated.id)
+    } catch (error: unknown) {
+      setSaveMessage(error instanceof Error ? error.message : 'Markdown 原文挂载失败。')
+    } finally {
+      setMarkdownUploading(false)
     }
   }
 
@@ -1544,9 +1583,47 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                       <span>{sourceFileTypeLabel(detail.source_file_type)}</span>
                     </div>
                     <div className="break-all">关联原文：{detail.source_file_name || '未绑定'}</div>
+                    <div className="break-all">
+                      Markdown 原文：{detail.markdown_source_file_name || (detail.source_file_type === 'markdown' ? detail.source_file_name : '未挂载')}
+                    </div>
+                    {hasTranslatedReaderSource && <div>译文阅读版：已生成</div>}
                     <div>任务时间线：{detail.timeline.length} 条</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={markdownInputRef}
+                      type="file"
+                      accept=".md,.markdown,text/markdown"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] || null
+                        event.currentTarget.value = ''
+                        void handleMarkdownUpload(file)
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={markdownUploading}
+                      className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                      onClick={() => markdownInputRef.current?.click()}
+                    >
+                      {markdownUploading ? '挂载中...' : detail.markdown_source_file_id ? '替换 Markdown' : '挂载 Markdown'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!hasMarkdownReaderSource && !hasTranslatedReaderSource}
+                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300"
+                      onClick={() => navigate(`/workspace/cards/reader/${detail.id}?view=${readerDefaultView}`)}
+                    >
+                      阅读并制卡
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                      onClick={() => navigate('/workspace/cards')}
+                    >
+                      卡片库
+                    </button>
                     {detail.source_file_id && detail.source_file_name && detail.source_file_type && (
                       <>
                         <button

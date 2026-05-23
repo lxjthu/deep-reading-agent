@@ -143,7 +143,7 @@ CREATE TABLE prompt_templates (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
     scope               TEXT NOT NULL CHECK (scope IN ('system', 'user')),
-    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter', 'compare', 'synthesis', 'ai_template', 'translation', 'library_chat')),
+    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter', 'compare', 'synthesis', 'ai_template', 'translation', 'library_chat', 'card_note')),
     prompt_key          TEXT NOT NULL,
     title               TEXT NOT NULL,
     content             TEXT NOT NULL,
@@ -167,6 +167,7 @@ CREATE INDEX idx_prompt_templates_type_key ON prompt_templates (prompt_type, pro
 - 运行时优先级：`用户覆盖 → 系统默认 → prompts/ 文件兜底 → 代码内置兜底`
 - 首批系统默认值从现有 `prompts/` 目录幂等导入数据库
 - `library_chat` 于 migration `016` 加入，当前包含查询解析、报告生成、标签目标选择和逐篇点评保存四个提示词槽位
+- `card_note` 于 migration `020` 加入，当前包含 Markdown 选段生成原子阅读卡的提示词槽位
 - 系统默认提示词若尚未被管理员编辑，会在默认种子同步时跟随托管提示词文件更新
 
 ### 3.5 `files` — 物理文件
@@ -260,6 +261,7 @@ CREATE TABLE bib_entries (
 
     -- 关联文件（用户为这篇文献提供的可读文件，PDF 或 MD）
     source_file_id  TEXT REFERENCES files(id),                   -- 重命名自原 pdf_file_id
+    markdown_source_file_id TEXT REFERENCES files(id),            -- Markdown 原文阅读/制卡专用绑定
 
     -- 用户标记
     user_tags_json  TEXT NOT NULL DEFAULT '[]',                  -- 标签数组
@@ -286,6 +288,7 @@ CREATE INDEX idx_bib_owner ON bib_entries (owner_user_id);
 CREATE INDEX idx_bib_status ON bib_entries (reading_status);
 CREATE INDEX idx_bib_doi ON bib_entries (doi);
 CREATE INDEX idx_bib_expires ON bib_entries (expires_at);
+CREATE INDEX idx_bib_markdown_source ON bib_entries (markdown_source_file_id);
 ```
 
 **`dedup_key` 计算规则**：
@@ -631,7 +634,46 @@ CREATE INDEX idx_artifacts_expires ON artifacts (expires_at);
 - `references_json`
   - 供调试、审计和潜在前端二次渲染使用
 
-### 3.14 `dimension_sets` — 用户维度集合（v1.4 新增）
+### 3.14 `card_notes` — Markdown 原文/译文卡片笔记（v1.8 新增）
+
+> 目的：保存用户在 Markdown 阅读器中基于选段生成的 AI 原子阅读卡，并同步维护 Obsidian 友好的 Markdown 文件镜像。
+
+```sql
+CREATE TABLE card_notes (
+    id              TEXT PRIMARY KEY,                            -- UUID
+    owner_user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_bib_entry_id TEXT NOT NULL REFERENCES bib_entries(id) ON DELETE CASCADE,
+    source_version  TEXT NOT NULL CHECK (source_version IN ('original', 'translated')),
+    source_markdown_file_id TEXT REFERENCES files(id),           -- 原文卡片来源
+    source_translation_artifact_id INTEGER REFERENCES artifacts(id), -- 译文卡片来源
+    title           TEXT NOT NULL,
+    summary         TEXT,
+    tags_json       TEXT NOT NULL DEFAULT '[]',
+    selected_text   TEXT NOT NULL,
+    context_before  TEXT,
+    context_after   TEXT,
+    user_prompt     TEXT,
+    body_markdown   TEXT NOT NULL,
+    storage_path    TEXT,                                        -- cards/card-*.md 镜像
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    expires_at      DATETIME
+);
+
+CREATE INDEX idx_card_notes_owner ON card_notes (owner_user_id);
+CREATE INDEX idx_card_notes_bib ON card_notes (source_bib_entry_id);
+CREATE INDEX idx_card_notes_created ON card_notes (created_at);
+CREATE INDEX idx_card_notes_expires ON card_notes (expires_at);
+CREATE INDEX idx_card_notes_translation ON card_notes (source_translation_artifact_id);
+```
+
+**约定**：
+
+- `source_version='original'` 时记录 `source_markdown_file_id`。
+- `source_version='translated'` 时记录对应 `translation_md` 的 `source_translation_artifact_id`。
+- `.dra` 导出/导入包含该表和 Markdown 镜像，当前 `CURRENT_SCHEMA_VERSION = "020"`。
+
+### 3.15 `dimension_sets` — 用户维度集合（v1.4 新增）
 
 > 目的：支持用户自定义长文本精读的分析维度集合。每个用户可创建多个命名集合（如"计量论文专用"、"理论论文专用"），系统自动为每个用户创建一个不可删除的默认集合。
 
@@ -1087,7 +1129,9 @@ backend/migrations/versions/
 ├── 015_add_bib_entry_language.py  # bib_entries 增加 language
 ├── 016_add_library_chat_prompt_type.py  # prompt_templates 增加 library_chat
 ├── 017_add_bib_entry_abstract_cn.py  # bib_entries 新增 abstract_cn（摘要中文翻译）
-└── 018_add_translate_abstracts_job_type.py  # jobs CHECK 约束新增 translate_abstracts
+├── 018_add_translate_abstracts_job_type.py  # jobs CHECK 约束新增 translate_abstracts
+├── 019_add_agent_sessions.py  # Agent assistant 会话持久化
+└── 020_add_markdown_card_notes.py  # Markdown 原文绑定 + card_notes + card_note 提示词类型
 ```
 
 > 说明：`admin` 账号继续通过 `backend/scripts/seed_admin.py` 初始化，不放入 Alembic 迁移。
@@ -1119,6 +1163,7 @@ backend/migrations/versions/
 | 参考文献梳理与正文引用对齐 | `bib_references` + `bib_reference_citations` + `jobs.job_type/artifacts.artifact_type` 扩展 |
 | 全文翻译（中文重述） | `jobs.job_type='translation'` + `artifacts.artifact_type` 新增 `translation_md`/`translation_glossary` + `prompt_templates.prompt_type` 新增 `translation`（v1.6 migration 014） |
 | 文献库 AI 查询 | `prompt_templates.prompt_type` 新增 `library_chat`（v1.7 migration 016）；命中集合复用 `bib_entries`、`bib_references`、`reading_items`；标签复用 `bib_entries.user_tags_json`，保存点评复用 `annotations(source_type='library_note')` |
+| Markdown 卡片笔记 | `bib_entries.markdown_source_file_id` + `card_notes` + `prompt_templates.prompt_type='card_note'`；导出包包含 cards/papers Markdown |
 | 引用网络分析 / 共引分析 | 依赖 `bib_references.source_bib_entry_id -> matched_bib_entry_id` 关系继续向上扩展 |
 | VIP 试用期 | `users.vip_expires_at` |
 | 团队/共享空间 | 不在本期，需要新增 `workspaces` 中间层（暂不规划） |
@@ -1138,6 +1183,7 @@ backend/migrations/versions/
 | 参考文献梳理 | `bib_references`、`bib_reference_citations` | `artifacts(references_excel/citation_trace_md)` |
 | 提示词管理 | `prompt_templates` | — |
 | 文献库 AI 查询 | `bib_entries` | `bib_references`、`reading_items`、`prompt_templates(library_chat)`、`annotations(library_note)` |
+| Markdown 卡片笔记 | `card_notes` | `bib_entries`、`files(markdown)`、`artifacts(translation_md)`、`prompt_templates(card_note)` |
 | 维度集合（用户自建） | `dimension_sets`、`dimension_items` | — |
 | 维度模板（系统预设） | `dimension_templates`、`template_items` | — |
 
@@ -1152,7 +1198,7 @@ backend/migrations/versions/
 
 Migration: `019_add_agent_sessions.py`
 
-These tables persist the AI literature assistant conversation, tool events, and execution proposals. They are user data and are included in `.dra` export/import via `backend/services/data_portability.py` with `CURRENT_SCHEMA_VERSION = "019"`.
+These tables persist the AI literature assistant conversation, tool events, and execution proposals. They are user data and are included in `.dra` export/import via `backend/services/data_portability.py` with `CURRENT_SCHEMA_VERSION = "020"`.
 
 ### `agent_sessions`
 

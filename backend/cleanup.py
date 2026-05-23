@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db import AsyncSessionLocal, DB_DIR, PROJECT_ROOT
 from sqlalchemy import delete as sa_delete, select, update
 
-from db.models import Annotation, Artifact, BibEntry, File, Job, ReadingItem, ReadingItemEdit, UploadBatch
+from db.models import Annotation, Artifact, BibEntry, CardNote, File, Job, ReadingItem, ReadingItemEdit, UploadBatch
 from upload_storage import get_upload_root, resolve_storage_path
 
 
@@ -70,7 +70,7 @@ async def reapply_user_retention(
 ) -> datetime | None:
     """Recompute expires_at for all user-owned records after a role change."""
     expires_at = compute_expires_at_for_role(role, now)
-    for model in (UploadBatch, File, BibEntry, Job, Artifact):
+    for model in (UploadBatch, File, BibEntry, Job, Artifact, CardNote):
         await db.execute(
             update(model)
             .where(model.owner_user_id == user_id)
@@ -124,6 +124,7 @@ async def _cleanup_with_session(
     stats = {
         "dry_run": dry_run,
         "artifacts_deleted": 0,
+        "card_notes_deleted": 0,
         "jobs_deleted": 0,
         "bib_entries_deleted": 0,
         "files_deleted": 0,
@@ -149,6 +150,23 @@ async def _cleanup_with_session(
             stats["physical_files_deleted"] += 1
         await db.delete(artifact)
         stats["artifacts_deleted"] += 1
+
+    expired_cards = (
+        await db.execute(
+            select(CardNote).where(CardNote.expires_at.is_not(None), CardNote.expires_at <= now)
+        )
+    ).scalars().all()
+    for card in expired_cards:
+        file_path = results_root / card.storage_path if card.storage_path else None
+        if dry_run:
+            stats["card_notes_deleted"] += 1
+            if file_path and file_path.exists():
+                stats["physical_files_deleted"] += 1
+            continue
+        if file_path and _remove_file_if_exists(file_path):
+            stats["physical_files_deleted"] += 1
+        await db.delete(card)
+        stats["card_notes_deleted"] += 1
 
     expired_jobs = (
         await db.execute(
@@ -246,6 +264,7 @@ async def _cleanup_normal_with_session(
     stats = {
         "dry_run": dry_run,
         "artifacts_deleted": 0,
+        "card_notes_deleted": 0,
         "jobs_deleted": 0,
         "bib_entries_deleted": 0,
         "files_deleted": 0,
@@ -302,6 +321,23 @@ async def _cleanup_normal_with_session(
     if not dry_run:
         await db.execute(sa_delete(ReadingItemEdit).where(ReadingItemEdit.owner_user_id.in_(normal_user_ids)))
         await db.execute(sa_delete(Annotation).where(Annotation.owner_user_id.in_(normal_user_ids)))
+
+    cards = (
+        await db.execute(
+            sa_select(CardNote).where(CardNote.owner_user_id.in_(normal_user_ids))
+        )
+    ).scalars().all()
+    for card in cards:
+        file_path = results_root / card.storage_path if card.storage_path else None
+        if dry_run:
+            stats["card_notes_deleted"] += 1
+            if file_path and file_path.exists():
+                stats["physical_files_deleted"] += 1
+            continue
+        if file_path and _remove_file_if_exists(file_path):
+            stats["physical_files_deleted"] += 1
+        await db.delete(card)
+        stats["card_notes_deleted"] += 1
 
     # 3. BibEntries
     bibs = (

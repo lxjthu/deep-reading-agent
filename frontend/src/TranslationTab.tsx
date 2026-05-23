@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { apiFetch } from './lib/api-fetch'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 
@@ -40,6 +41,7 @@ function getStageLabel(stage: string): string {
 }
 
 export default function TranslationTab({ apiKey }: { apiKey: string }) {
+  const navigate = useNavigate()
   const [entries, setEntries] = useState<TranslatableEntry[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -404,6 +406,14 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
                   >
                     下载
                   </button>
+                  {art.artifact_type === 'translation_md' && selected && (
+                    <button
+                      onClick={() => navigate(`/workspace/cards/reader/${selected.bib_entry_id}?view=translated`)}
+                      className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-700 transition-colors"
+                    >
+                      阅读译文并制卡
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
