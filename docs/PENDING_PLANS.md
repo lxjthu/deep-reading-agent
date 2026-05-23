@@ -7,6 +7,7 @@
 
 | 优先级 | 事项 | 当前状态 | 前置依赖 | 关联文档 | 备注 |
 |---|---|---|---|---|---|
+| P14 | Markdown 原文阅读与 AI 卡片笔记 | 已讨论，待实施 | Markdown 原文或翻译产物可挂载到文献条目 | [详细方案](./2026-05-22-markdown-card-notes-plan.md) | 在隐藏阅读页基于原文/译文选段生成系统内卡片库，并导出 Obsidian 兼容的卡片与论文 Markdown。 |
 | ~~P0~~ | ~~参考文献梳理标签页 + 引用关系入库~~ | **已完成（2026-05）** | 无 | [REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md) | 全链路已实现：后端 7 个 API 端点（`/api/references/*`）、DeepSeek v4-flash 提取+追踪服务、`bib_references` + `bib_reference_citations` 表+迁移、前端 `ReferenceTraceTab` 组件。 |
 | P0.5 | 双栏 PDF 参考文献提取修复 | **已完成（2026-05-03）** | 建议在 P0 进入实施前先修 | [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | pypdf 对 CJK 编码双栏 PDF 的文本提取完全失败（中文乱码），需切换为 pdfplumber。影响所有中文学术期刊论文的参考文献提取。 |
 | P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
