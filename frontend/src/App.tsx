@@ -1,5 +1,7 @@
 ﻿import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { useMemo } from 'react'
+import { marked } from 'marked'
 import './index.css'
 import LibraryTab from './LibraryTab'
 import ReferenceTraceTab from './ReferenceTraceTab'
@@ -27,6 +29,7 @@ const TABS = [
   { id: 'history', label: '历史记录', icon: '📁' },
 ]
 
+const AGENT_TAB = { id: 'agent', label: 'AI 助手', icon: 'AI' }
 const TAB_IDS = new Set(TABS.map((tab) => tab.id))
 const LEGACY_API_KEY_STORAGE = 'deepseek_api_key'
 
@@ -42,6 +45,9 @@ function getInitialTab(pathname: string, search: string): string {
   const fromQuery = new URLSearchParams(search).get('tab') || ''
   if (fromQuery === 'compare') {
     return 'compare-long'
+  }
+  if (fromQuery === 'agent') {
+    return 'agent'
   }
   return TAB_IDS.has(fromQuery) && fromQuery !== 'library' ? fromQuery : 'filter'
 }
@@ -76,6 +82,15 @@ function App() {
   const [importResult, setImportResult] = useState<Record<string, unknown> | null>(null)
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null)
   const [canShutdownApp, setCanShutdownApp] = useState(false)
+  const [agentTabVisible, setAgentTabVisible] = useState(false)
+  const [inputFolderPath, setInputFolderPath] = useState('')
+  const [inputFolderDraft, setInputFolderDraft] = useState('')
+  const [inputFolderStatus, setInputFolderStatus] = useState('')
+
+  const visibleTabs = useMemo(
+    () => (agentTabVisible ? [...TABS, AGENT_TAB] : TABS),
+    [agentTabVisible],
+  )
 
   useEffect(() => {
     const storageKey = getApiKeyStorageKey(user?.username)
@@ -90,7 +105,11 @@ function App() {
   }, [user?.username])
 
   useEffect(() => {
-    setActiveTab(getInitialTab(location.pathname, location.search))
+    const nextTab = getInitialTab(location.pathname, location.search)
+    if (nextTab === 'agent') {
+      setAgentTabVisible(true)
+    }
+    setActiveTab(nextTab)
   }, [location.pathname, location.search])
 
   useEffect(() => {
@@ -107,6 +126,22 @@ function App() {
       ignore = true
     }
   }, [])
+
+  useEffect(() => {
+    let ignore = false
+    fetch('/api/agent/settings')
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (ignore || !data) return
+        const path = data.input_folder_path || ''
+        setInputFolderPath(path)
+        setInputFolderDraft(path)
+      })
+      .catch(() => {})
+    return () => {
+      ignore = true
+    }
+  }, [user?.username])
 
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId)
@@ -145,6 +180,32 @@ function App() {
     }
     localStorage.removeItem(LEGACY_API_KEY_STORAGE)
     setShowKeyInput(false)
+  }
+
+  const handleOpenAgent = () => {
+    setAgentTabVisible(true)
+    setShowKeyInput(false)
+    handleTabChange('agent')
+  }
+
+  const handleSaveInputFolder = async () => {
+    setInputFolderStatus('保存中...')
+    try {
+      const response = await fetch('/api/agent/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input_folder_path: inputFolderDraft.trim() }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.detail || `保存失败（HTTP ${response.status}）`)
+      }
+      setInputFolderPath(data.input_folder_path || '')
+      setInputFolderDraft(data.input_folder_path || '')
+      setInputFolderStatus(data.input_folder_path ? '已保存为 Agent 可操作白名单。' : '已清空 input 文件夹白名单。')
+    } catch (err) {
+      setInputFolderStatus(err instanceof Error ? err.message : '保存失败。')
+    }
   }
 
   const roleBadgeClass =
@@ -325,6 +386,13 @@ function App() {
                       <span className={apiKey ? 'text-emerald-600' : 'text-gray-400'}>{apiKey ? '已设置' : '未设置'}</span>
                     </button>
                     <button
+                      onClick={handleOpenAgent}
+                      className="flex w-full items-center justify-between rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-100"
+                    >
+                      <span>唤起 AI 助手</span>
+                      <span>AI</span>
+                    </button>
+                    <button
                       onClick={handleExport}
                       disabled={exporting}
                       className="flex w-full items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-50"
@@ -407,6 +475,54 @@ function App() {
                   收起
                 </button>
               </div>
+
+              <div className="mt-5 border-t border-gray-100 pt-4">
+                <h3 className="mb-2 text-sm font-semibold text-gray-700">Agent input 文件夹白名单</h3>
+                <input
+                  type="text"
+                  value={inputFolderDraft}
+                  onChange={(event) => {
+                    setInputFolderDraft(event.target.value)
+                    setInputFolderStatus('')
+                  }}
+                  placeholder="例如：D:\\papers\\input"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-gray-400">
+                  保存后，AI 助手只能扫描这个文件夹中的 PDF/Markdown，不会接受模型临时指定的任意路径。
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => void handleSaveInputFolder()}
+                    className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-emerald-700"
+                  >
+                    保存路径
+                  </button>
+                  {inputFolderPath && (
+                    <button
+                      onClick={() => {
+                        setInputFolderDraft('')
+                        setInputFolderStatus('')
+                      }}
+                      className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200"
+                    >
+                      清空输入框
+                    </button>
+                  )}
+                  <button
+                    onClick={handleOpenAgent}
+                    className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                  >
+                    打开 AI 助手
+                  </button>
+                </div>
+                {inputFolderStatus && (
+                  <div className="mt-2 text-xs text-gray-600">{inputFolderStatus}</div>
+                )}
+                {inputFolderPath && !inputFolderStatus && (
+                  <div className="mt-2 break-all text-xs text-emerald-700">当前白名单：{inputFolderPath}</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -488,7 +604,7 @@ function App() {
       <nav className="border-b border-gray-200 bg-white sticky top-0 z-10">
         <div className="mx-auto w-full max-w-[1800px] px-2 sm:px-3 lg:px-6 xl:px-8">
           <div className="no-scrollbar flex gap-1 overflow-x-auto py-1">
-            {TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
@@ -517,6 +633,7 @@ function App() {
           {activeTab === 'compare-7step' && <CompareView mode="quant" apiKey={apiKey || null} />}
           {activeTab === 'compare-4step' && <CompareView mode="qual" apiKey={apiKey || null} />}
           {activeTab === 'translation' && <TranslationTab apiKey={apiKey} />}
+          {activeTab === 'agent' && <AgentTab apiKey={apiKey} />}
           {activeTab === 'library' && <LibraryTab apiKey={apiKey} />}
           {activeTab === 'references' && <ReferenceTraceTab apiKey={apiKey} />}
           {activeTab === 'prompts' && <PromptsTab apiKey={apiKey} />}
@@ -3021,6 +3138,791 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
             onCancel={() => { setBatchConflictInfo(null); setStage('已取消'); setIsRunning(false) }}
           />
         )}
+      </div>
+    </div>
+  )
+}
+
+type AgentChatEvent = {
+  id: string
+  type: 'tool_call' | 'tool_result' | 'answer' | 'error' | 'proposal'
+  title: string
+  body: string
+  payload?: unknown
+}
+
+type AgentChatTurn = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+type AgentProposal = {
+  proposal_id: string
+  action_type: string
+  status: string
+  preview?: any
+  arguments?: any
+}
+
+function tryParseJson(text: string): unknown | null {
+  const trimmed = text.trim()
+  if (!trimmed || !['{', '['].includes(trimmed[0])) return null
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+}
+
+function formatJsonScalar(value: unknown): string {
+  if (value === null) return 'null'
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'number') return String(value)
+  return String(value)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function JsonHtmlView({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span className="text-xs text-gray-400">空列表</span>
+    }
+    const compactCards = value.every((item) => isRecord(item))
+    return (
+      <div className={compactCards ? 'grid gap-2 md:grid-cols-2' : 'space-y-2'}>
+        {value.map((item, index) => (
+          <div key={index} className="rounded-md border border-gray-200 bg-gray-50/70 p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">#{index + 1}</div>
+            <JsonHtmlView value={item} depth={depth + 1} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (isRecord(value)) {
+    const entries = Object.entries(value)
+    if (entries.length === 0) {
+      return <span className="text-xs text-gray-400">空对象</span>
+    }
+    return (
+      <div className="space-y-2">
+        {entries.map(([key, child]) => {
+          const nested = Array.isArray(child) || isRecord(child)
+          return (
+            <div key={key} className={nested ? 'rounded-md border border-gray-100 bg-white p-3' : 'grid gap-2 sm:grid-cols-[160px_1fr]'}>
+              <div className="break-words text-xs font-semibold text-gray-500">{key}</div>
+              <div className="min-w-0">
+                {nested ? (
+                  <JsonHtmlView value={child} depth={depth + 1} />
+                ) : (
+                  <span
+                    className={`break-words text-sm ${
+                      typeof child === 'boolean'
+                        ? child ? 'text-emerald-700' : 'text-rose-700'
+                        : typeof child === 'number'
+                          ? 'font-mono text-blue-700'
+                          : 'text-gray-800'
+                    }`}
+                  >
+                    {formatJsonScalar(child)}
+                  </span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  return <span className="text-sm text-gray-800">{formatJsonScalar(value)}</span>
+}
+
+function AgentMdContent({ raw }: { raw: string }) {
+  const elRef = useRef<HTMLDivElement>(null)
+  const html = useMemo(() => {
+    let h = marked.parse(raw || '', { async: false }) as string
+    h = h.replace(/<table>/g, '<div class="agent-md-table-wrap"><table>')
+    h = h.replace(/<\/table>/g, '</table></div>')
+    return h
+  }, [raw])
+  useEffect(() => {
+    if (elRef.current && typeof (window as any).renderMathInElement === 'function') {
+      ;(window as any).renderMathInElement(elRef.current, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$', right: '$', display: false },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '\\[', right: '\\]', display: true },
+        ],
+      })
+    }
+  }, [html])
+  return (
+    <div
+      ref={elRef}
+      className="agent-md-content text-sm leading-relaxed text-gray-700"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
+type ToolGroup = { kind: 'group'; events: AgentChatEvent[] }
+type SingleEvent = { kind: 'single'; event: AgentChatEvent }
+type EventBlock = ToolGroup | SingleEvent
+
+function groupEvents(events: AgentChatEvent[]): EventBlock[] {
+  const blocks: EventBlock[] = []
+  let buf: AgentChatEvent[] = []
+  const flush = () => {
+    if (buf.length) {
+      blocks.push({ kind: 'group', events: [...buf] })
+      buf = []
+    }
+  }
+  for (const ev of events) {
+    if (ev.type === 'tool_call' || ev.type === 'tool_result') {
+      buf.push(ev)
+    } else {
+      flush()
+      blocks.push({ kind: 'single', event: ev })
+    }
+  }
+  flush()
+  return blocks
+}
+
+function AgentToolGroup({ events, selectable, selectedIds, onToggle }: {
+  events: AgentChatEvent[]
+  selectable?: boolean
+  selectedIds?: Set<string>
+  onToggle?: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const toolNames = events
+    .filter((e) => e.type === 'tool_call')
+    .map((e) => e.title.replace(/^调用工具：/, ''))
+  const summary = toolNames.length > 0 ? toolNames.join(' → ') : '工具调用'
+  const allSelected = selectable && events.every((e) => selectedIds?.has(e.id))
+  const someSelected = selectable && events.some((e) => selectedIds?.has(e.id))
+  const handleGroupToggle = () => {
+    if (!onToggle) return
+    if (allSelected) {
+      events.forEach((e) => { if (selectedIds?.has(e.id)) onToggle(e.id) })
+    } else {
+      events.forEach((e) => { if (!selectedIds?.has(e.id)) onToggle(e.id) })
+    }
+  }
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50/40 shadow-sm">
+      {selectable && (
+        <label className="flex cursor-pointer items-center gap-2 border-b border-blue-100 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={(el) => { if (el) el.indeterminate = !!(someSelected && !allSelected) }}
+            onChange={handleGroupToggle}
+            className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+          />
+          <span className="font-medium">{summary}</span>
+          <span className="ml-auto text-xs text-blue-400">{events.length} 步</span>
+        </label>
+      )}
+      {!selectable && (
+        <details
+          open={open}
+          onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary className="flex cursor-pointer select-none items-center gap-2 px-4 py-2.5 text-sm font-medium text-blue-700 hover:bg-blue-50 [&::-webkit-details-marker]:hidden">
+            <svg
+              className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path d="M6 4l8 6-8 6V4z" />
+            </svg>
+            <span>{summary}</span>
+            <span className="ml-auto text-xs text-blue-400">{events.length} 步</span>
+          </summary>
+          <div className="space-y-2 border-t border-blue-100 px-4 py-3">
+            {events.map((ev) => (
+              <div key={ev.id}>
+                <div className="mb-1 text-xs font-semibold text-gray-500">{ev.title}</div>
+                <AgentEventBody event={ev} />
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function AgentEventList({ events, selectable, selectedIds, onToggle }: {
+  events: AgentChatEvent[]
+  selectable?: boolean
+  selectedIds?: Set<string>
+  onToggle?: (id: string) => void
+}) {
+  const blocks = useMemo(() => groupEvents(events), [events])
+  return (
+    <>
+      {blocks.map((block, i) =>
+        block.kind === 'group' ? (
+          <AgentToolGroup
+            key={`g-${i}`}
+            events={block.events}
+            selectable={selectable}
+            selectedIds={selectedIds}
+            onToggle={onToggle}
+          />
+        ) : (
+          <div
+            key={block.event.id}
+            className={`rounded-lg border bg-white p-4 shadow-sm ${
+              block.event.type === 'error'
+                ? 'border-red-200'
+                : 'border-emerald-200'
+            }`}
+          >
+            {selectable && (
+              <label className="mb-2 flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedIds?.has(block.event.id) ?? false}
+                  onChange={() => onToggle?.(block.event.id)}
+                  className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="text-sm font-semibold text-gray-800">{block.event.title}</span>
+              </label>
+            )}
+            {!selectable && (
+              <div className="mb-2 text-sm font-semibold text-gray-800">{block.event.title}</div>
+            )}
+            <AgentEventBody event={block.event} />
+          </div>
+        ),
+      )}
+    </>
+  )
+}
+
+function AgentEventBody({ event }: { event: AgentChatEvent }) {
+  const parsed = event.payload ?? tryParseJson(event.body)
+  if (isRecord(parsed) && Array.isArray(parsed.papers) && isRecord(parsed.library_counts)) {
+    const papers = parsed.papers as any[]
+    const counts = parsed.library_counts as Record<string, unknown>
+    const badgeClass = (status: string) => {
+      if (status === 'in_library') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      if (status === 'possible_match') return 'bg-amber-50 text-amber-700 border-amber-200'
+      if (status === 'not_in_library') return 'bg-blue-50 text-blue-700 border-blue-200'
+      return 'bg-gray-50 text-gray-600 border-gray-200'
+    }
+    const statusText = (status: string) => ({
+      in_library: '已在库',
+      possible_match: '疑似匹配',
+      not_in_library: '未入库',
+      file_exists_no_bib_entry: '文件已存在',
+    }[status] || status || '未知')
+
+    return (
+      <div className="space-y-3">
+        <div className="grid gap-2 sm:grid-cols-4">
+          {([
+            ['已在库', counts.in_library],
+            ['疑似匹配', counts.possible_match],
+            ['未入库', counts.not_in_library],
+            ['文件已存在', counts.file_exists_no_bib_entry],
+          ] as Array<[string, unknown]>).map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+              <div className="text-[11px] font-medium text-gray-500">{label}</div>
+              <div className="mt-1 text-lg font-semibold text-gray-900">{String(value ?? 0)}</div>
+            </div>
+          ))}
+        </div>
+        <div className="overflow-hidden rounded-lg border border-gray-200">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500">
+              <tr>
+                <th className="px-3 py-2">状态</th>
+                <th className="px-3 py-2">标题</th>
+                <th className="px-3 py-2">文件</th>
+                <th className="px-3 py-2">相关性</th>
+                <th className="px-3 py-2">匹配到的库内标题</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {papers.slice(0, 80).map((paper, index) => {
+                const match = paper.library_match || {}
+                return (
+                  <tr key={`${paper.filename || index}-${index}`} className="align-top">
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${badgeClass(match.status)}`}>
+                        {statusText(match.status)}
+                      </span>
+                    </td>
+                    <td className="max-w-xs px-3 py-2 font-medium text-gray-900">{paper.title}</td>
+                    <td className="max-w-xs break-all px-3 py-2 text-gray-600">{paper.filename}</td>
+                    <td className="px-3 py-2 text-gray-600">{paper.relevant ? `相关 ${Math.round((paper.confidence || 0) * 100)}%` : '不相关'}</td>
+                    <td className="max-w-xs px-3 py-2 text-gray-600">{match.library_title || '-'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+  if (parsed !== null && parsed !== undefined) {
+    return (
+      <div className="max-h-[520px] overflow-auto rounded-lg border border-gray-100 bg-white p-3">
+        <JsonHtmlView value={parsed} />
+      </div>
+    )
+  }
+  if (event.type === 'answer' && event.title === 'AI 助手' && event.body.trim()) {
+    return <AgentMdContent raw={event.body} />
+  }
+  return <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{event.body}</pre>
+}
+
+function AgentTab({ apiKey }: { apiKey: string }) {
+  const [message, setMessage] = useState('')
+  const [events, setEvents] = useState<AgentChatEvent[]>([])
+  const [history, setHistory] = useState<AgentChatTurn[]>([])
+  const [sessionId, setSessionId] = useState('')
+  const [pendingProposal, setPendingProposal] = useState<AgentProposal | null>(null)
+  const [confirmingProposal, setConfirmingProposal] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [exportMode, setExportMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  const appendEvent = (event: Omit<AgentChatEvent, 'id'>) => {
+    setEvents((prev) => [...prev, { ...event, id: `${Date.now()}-${Math.random()}` }])
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    const loadLatestSession = async () => {
+      try {
+        const sessionsResponse = await fetch('/api/agent/sessions')
+        if (!sessionsResponse.ok) return
+        const sessions = await sessionsResponse.json()
+        const latest = Array.isArray(sessions) ? sessions[0] : null
+        if (!latest?.id) return
+        const detailResponse = await fetch(`/api/agent/sessions/${latest.id}`)
+        if (!detailResponse.ok) return
+        const detail = await detailResponse.json()
+        if (cancelled) return
+        setSessionId(detail.id)
+        const restoredEvents: AgentChatEvent[] = (detail.messages || []).map((item: any) => {
+          const payload = item.payload
+          if (item.event_type === 'tool_call') {
+            return { id: item.id, type: 'tool_call', title: `调用工具：${item.tool_name}`, body: JSON.stringify(payload || {}, null, 2), payload }
+          }
+          if (item.event_type === 'proposal') {
+            return { id: item.id, type: 'proposal', title: `执行提案：${item.tool_name}`, body: JSON.stringify(payload || {}, null, 2), payload }
+          }
+          if (item.event_type === 'tool_result') {
+            return { id: item.id, type: 'tool_result', title: `工具结果：${item.tool_name || '执行结果'}`, body: JSON.stringify(payload || {}, null, 2), payload }
+          }
+          return {
+            id: item.id,
+            type: item.role === 'user' ? 'answer' : item.event_type === 'error' ? 'error' : 'answer',
+            title: item.role === 'user' ? '你' : 'AI 助手',
+            body: item.content || '',
+          }
+        })
+        setEvents(restoredEvents)
+        setHistory(
+          (detail.messages || [])
+            .filter((item: any) => item.event_type === 'message' && ['user', 'assistant'].includes(item.role))
+            .map((item: any) => ({ role: item.role, content: item.content }))
+            .slice(-12),
+        )
+        const openProposal = (detail.proposals || []).find((proposal: AgentProposal) => proposal.status === 'pending')
+        setPendingProposal(openProposal || null)
+      } catch {
+        // Session restore is best-effort.
+      }
+    }
+    void loadLatestSession()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const sendMessage = async () => {
+    const text = message.trim()
+    if (!text || loading) return
+    if (!apiKey) {
+      setError('请先在右上角设置 DeepSeek API Key。')
+      return
+    }
+    setLoading(true)
+    setError('')
+    setMessage('')
+    setEvents((prev) => [
+      ...prev,
+      { id: `${Date.now()}-user`, type: 'answer', title: '你', body: text },
+    ])
+
+    let answer = ''
+    try {
+      const response = await fetch('/api/agent/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId || undefined,
+          message: text,
+          api_key: apiKey,
+          history: history.slice(-8),
+        }),
+      })
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null)
+        throw new Error(detail?.detail || 'AI 助手请求失败。')
+      }
+      if (!response.body) throw new Error('AI 助手未返回流式内容。')
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      const handleBlock = (block: string) => {
+        const eventLine = block.split('\n').find((line) => line.startsWith('event: '))
+        const dataLine = block.split('\n').find((line) => line.startsWith('data: '))
+        if (!eventLine || !dataLine) return
+        const eventName = eventLine.slice(7).trim()
+        const data = JSON.parse(dataLine.slice(6))
+        if (eventName === 'session') {
+          if (data.session_id) setSessionId(data.session_id)
+        } else if (eventName === 'tool_call') {
+          appendEvent({
+            type: 'tool_call',
+            title: `调用工具：${data.name}`,
+            body: JSON.stringify(data.arguments || {}, null, 2),
+            payload: data.arguments || {},
+          })
+        } else if (eventName === 'tool_result') {
+          const result = data.result || {}
+          appendEvent({
+            type: 'tool_result',
+            title: `工具结果：${data.name}`,
+            body: JSON.stringify(result, null, 2).slice(0, 8000),
+            payload: result,
+          })
+          if (result?.proposal_id) {
+            setPendingProposal(result)
+          }
+        } else if (eventName === 'proposal') {
+          setPendingProposal(data)
+          appendEvent({
+            type: 'proposal',
+            title: `执行提案：${data.action_type}`,
+            body: JSON.stringify(data, null, 2),
+            payload: data,
+          })
+        } else if (eventName === 'answer') {
+          answer += data.content || ''
+          appendEvent({
+            type: 'answer',
+            title: 'AI 助手',
+            body: data.content || '',
+          })
+        } else if (eventName === 'error') {
+          throw new Error(data.message || 'AI 助手执行失败。')
+        }
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const blocks = buffer.split('\n\n')
+        buffer = blocks.pop() || ''
+        blocks.forEach(handleBlock)
+      }
+      if (buffer.trim()) handleBlock(buffer)
+
+      setHistory((prev) => [
+        ...prev,
+        { role: 'user' as const, content: text },
+        { role: 'assistant' as const, content: answer || '已完成工具调用。' },
+      ].slice(-12))
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : 'AI 助手执行失败。'
+      setError(messageText)
+      appendEvent({ type: 'error', title: '错误', body: messageText })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleConfirmProposal = async () => {
+    if (!pendingProposal || confirmingProposal) return
+    if (!apiKey) {
+      setError('请先在右上角设置 DeepSeek API Key。')
+      return
+    }
+    setConfirmingProposal(true)
+    try {
+      const response = await fetch(`/api/agent/proposals/${pendingProposal.proposal_id}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: apiKey }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.detail || `确认执行失败（HTTP ${response.status}）`)
+      }
+      appendEvent({
+        type: 'tool_result',
+        title: '确认执行结果',
+        body: JSON.stringify(data.result || data, null, 2),
+        payload: data.result || data,
+      })
+      setPendingProposal(null)
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : '确认执行失败。'
+      setError(messageText)
+      appendEvent({ type: 'error', title: '错误', body: messageText })
+    } finally {
+      setConfirmingProposal(false)
+    }
+  }
+
+  const handleRejectProposal = async () => {
+    if (!pendingProposal || confirmingProposal) return
+    setConfirmingProposal(true)
+    try {
+      const response = await fetch(`/api/agent/proposals/${pendingProposal.proposal_id}/reject`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => null)
+        throw new Error(data?.detail || `取消失败（HTTP ${response.status}）`)
+      }
+      appendEvent({
+        type: 'answer',
+        title: 'AI 助手',
+        body: '已取消这次执行提案。',
+      })
+      setPendingProposal(null)
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : '取消失败。'
+      setError(messageText)
+      appendEvent({ type: 'error', title: '错误', body: messageText })
+    } finally {
+      setConfirmingProposal(false)
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectAll = () => setSelectedIds(new Set(events.map((e) => e.id)))
+  const deselectAll = () => setSelectedIds(new Set())
+
+  const exportSelected = () => {
+    const selected = events.filter((e) => selectedIds.has(e.id))
+    if (!selected.length) return
+    const lines: string[] = ['# AI 文献助手对话记录', '']
+    for (const ev of selected) {
+      if (ev.type === 'answer' && ev.title === '你') {
+        lines.push(`## 👤 ${ev.title}`, '', ev.body, '')
+      } else if (ev.type === 'answer' && ev.title === 'AI 助手') {
+        lines.push(`## 🤖 ${ev.title}`, '', ev.body, '')
+      } else if (ev.type === 'tool_call') {
+        lines.push(`<details><summary>🔧 ${ev.title}</summary>`, '', '```json', ev.body, '```', '</details>', '')
+      } else if (ev.type === 'tool_result') {
+        lines.push(`<details><summary>📋 ${ev.title}</summary>`, '', '```json', ev.body, '```', '</details>', '')
+      } else if (ev.type === 'proposal') {
+        lines.push(`<details><summary>⚡ ${ev.title}</summary>`, '', '```json', ev.body, '```', '</details>', '')
+      } else if (ev.type === 'error') {
+        lines.push(`> ❌ ${ev.title}: ${ev.body}`, '')
+      }
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `AI文献助手_${new Date().toISOString().slice(0, 10)}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+    setExportMode(false)
+    setSelectedIds(new Set())
+  }
+
+  const eventsEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [events, pendingProposal])
+
+  return (
+    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+      <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">AI 文献助手</h2>
+            <p className="mt-1 text-sm text-gray-500">可检索文献库、读取精读结果、启动精读任务并整理对比综述。</p>
+          </div>
+          <div className="flex gap-2">
+            {events.length > 0 && !exportMode && (
+              <button
+                onClick={() => {
+                  setExportMode(true)
+                  setSelectedIds(new Set(events.map((e) => e.id)))
+                }}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                导出对话
+              </button>
+            )}
+            {exportMode && (
+              <>
+                <button
+                  onClick={() => { setExportMode(false); setSelectedIds(new Set()) }}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => selectedIds.size === events.length ? deselectAll() : selectAll()}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  {selectedIds.size === events.length ? '取消全选' : '全选'}
+                </button>
+                <button
+                  onClick={exportSelected}
+                  disabled={selectedIds.size === 0}
+                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  导出 ({selectedIds.size})
+                </button>
+              </>
+            )}
+            {!exportMode && (
+              <button
+                onClick={() => {
+                  const idToArchive = sessionId
+                  setEvents([])
+                  setHistory([])
+                  setError('')
+                  setSessionId('')
+                  setPendingProposal(null)
+                  if (idToArchive) {
+                    fetch(`/api/agent/sessions/${idToArchive}/archive`, { method: 'PATCH' }).catch(() => {})
+                  }
+                }}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                清空会话
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {events.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+            还没有会话。你可以让它先查文献、再启动精读，或者基于已有精读结果写综述。
+          </div>
+        ) : (
+          <AgentEventList
+            events={events}
+            selectable={exportMode}
+            selectedIds={selectedIds}
+            onToggle={toggleSelect}
+          />
+        )}
+      </div>
+
+      {pendingProposal && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-amber-900">需要确认后才会执行</div>
+              <div className="mt-1 text-sm text-amber-800">
+                {pendingProposal.action_type === 'import_folder_and_start_reading'
+                  ? '将导入文件夹中的候选文献并启动精读任务。'
+                  : pendingProposal.action_type === 'start_batch_reading'
+                    ? '将启动批量精读任务。'
+                    : '将启动精读任务。'}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => void handleRejectProposal()}
+                disabled={confirmingProposal}
+                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => void handleConfirmProposal()}
+                disabled={confirmingProposal}
+                className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {confirmingProposal ? '执行中...' : '确认执行'}
+              </button>
+            </div>
+          </div>
+          <div className="mt-3">
+            <AgentEventBody
+              event={{
+                id: pendingProposal.proposal_id,
+                type: 'proposal',
+                title: '执行提案',
+                body: JSON.stringify(pendingProposal.preview || pendingProposal, null, 2),
+                payload: pendingProposal.preview || pendingProposal,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div ref={eventsEndRef} />
+
+      <div className="sticky bottom-0 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+        {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+        <div className="flex gap-2">
+          <textarea
+            ref={inputRef}
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault()
+                void sendMessage()
+              }
+            }}
+            className="min-h-20 flex-1 resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            placeholder="例如：列出我库里制度经济学相关且已精读的文献，并基于精读结果写一段对比综述。（Ctrl+Enter 发送）"
+          />
+          <button
+            onClick={() => void sendMessage()}
+            disabled={loading || !message.trim()}
+            className="h-20 self-end rounded-lg bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? '处理中...' : '发送'}
+          </button>
+        </div>
       </div>
     </div>
   )

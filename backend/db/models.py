@@ -88,6 +88,102 @@ class UserSettings(Base):
     )
 
 
+class AgentSession(Base):
+    __tablename__ = "agent_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active','archived')",
+            name="ck_agent_sessions_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default="active")
+    last_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_state_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+Index("idx_agent_sessions_owner", AgentSession.owner_user_id)
+Index("idx_agent_sessions_updated", AgentSession.updated_at)
+Index("idx_agent_sessions_expires", AgentSession.expires_at)
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('user','assistant','tool','system')",
+            name="ck_agent_messages_role",
+        ),
+        CheckConstraint(
+            "event_type IN ('message','tool_call','tool_result','proposal','confirmation','error')",
+            name="ck_agent_messages_event_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    tool_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+Index("idx_agent_messages_session", AgentMessage.session_id)
+Index("idx_agent_messages_owner", AgentMessage.owner_user_id)
+Index("idx_agent_messages_expires", AgentMessage.expires_at)
+
+
+class AgentActionProposal(Base):
+    __tablename__ = "agent_action_proposals"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','confirmed','rejected','expired','executed','failed')",
+            name="ck_agent_proposals_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    action_type: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    arguments_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    preview_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+Index("idx_agent_proposals_session", AgentActionProposal.session_id)
+Index("idx_agent_proposals_status", AgentActionProposal.status)
+Index("idx_agent_proposals_owner", AgentActionProposal.owner_user_id)
+Index("idx_agent_proposals_expires", AgentActionProposal.expires_at)
+
+
 # --------------------------------------------------------------------------
 # Prompt templates
 # --------------------------------------------------------------------------

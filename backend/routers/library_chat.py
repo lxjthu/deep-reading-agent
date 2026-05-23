@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Literal, Optional
 
@@ -238,18 +239,46 @@ def _build_tag_target_user_message(
     return json.dumps(payload, ensure_ascii=False)
 
 
-def _parse_target_entry_ids(value, allowed_entry_ids: set[str]) -> list[str]:
-    rows = value.get("entry_ids") if isinstance(value, dict) else None
-    if not isinstance(rows, list):
-        return []
-
+def _entry_ids_from_question_numbers(question: str, candidate_numbers: dict[str, int]) -> list[str]:
+    number_to_entry_id = {number: entry_id for entry_id, number in candidate_numbers.items()}
     entry_ids: list[str] = []
     seen: set[str] = set()
-    for row in rows:
+    for match in re.finditer(r"(?:\[(\d{1,6})\]|(?<!\d)(\d{1,6})\s*号|第\s*(\d{1,6})\s*(?:篇|篇文献|文献))", question):
+        number = int(match.group(1) or match.group(2) or match.group(3))
+        entry_id = number_to_entry_id.get(number)
+        if entry_id and entry_id not in seen:
+            seen.add(entry_id)
+            entry_ids.append(entry_id)
+    return entry_ids
+
+
+def _parse_target_entry_ids(
+    value,
+    allowed_entry_ids: set[str],
+    candidate_numbers: dict[str, int],
+) -> list[str]:
+    rows = value.get("entry_ids") if isinstance(value, dict) else None
+    candidate_rows = value.get("candidate_numbers") if isinstance(value, dict) else None
+    if not isinstance(rows, list) and not isinstance(candidate_rows, list):
+        return []
+
+    number_to_entry_id = {str(number): entry_id for entry_id, number in candidate_numbers.items()}
+    entry_ids: list[str] = []
+    seen: set[str] = set()
+
+    for row in rows or []:
         entry_id = str(row or "").strip()
+        entry_id = number_to_entry_id.get(entry_id, entry_id)
         if entry_id in allowed_entry_ids and entry_id not in seen:
             seen.add(entry_id)
             entry_ids.append(entry_id)
+
+    for row in candidate_rows or []:
+        entry_id = number_to_entry_id.get(str(row or "").strip())
+        if entry_id in allowed_entry_ids and entry_id not in seen:
+            seen.add(entry_id)
+            entry_ids.append(entry_id)
+
     return entry_ids
 
 
@@ -384,6 +413,7 @@ async def library_chat(
                     if scope == "previous_results"
                     else {row.id: index + 1 for index, row in enumerate(rows)}
                 )
+                explicit_target_ids = _entry_ids_from_question_numbers(req.question, candidate_numbers)
                 target_response = client.chat.completions.create(
                     model="deepseek-v4-flash",
                     extra_body={"thinking": {"type": "disabled"}},
@@ -404,7 +434,15 @@ async def library_chat(
                     response_format={"type": "json_object"},
                 )
                 target_raw = target_response.choices[0].message.content or "{}"
-                target_ids = _parse_target_entry_ids(json.loads(target_raw), {row.id for row in rows})
+                target_ids = [
+                    *explicit_target_ids,
+                    *_parse_target_entry_ids(
+                        json.loads(target_raw),
+                        {row.id for row in rows},
+                        candidate_numbers,
+                    ),
+                ]
+                target_ids = list(dict.fromkeys(target_ids))
                 target_id_set = set(target_ids)
                 rows_by_id = {row.id: row for row in rows if row.id in target_id_set}
                 rows = [rows_by_id[entry_id] for entry_id in target_ids if entry_id in rows_by_id]

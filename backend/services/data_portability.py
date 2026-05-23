@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 from cleanup import compute_expires_at_for_role, utcnow_naive
 from db.models import (
     Artifact,
+    AgentActionProposal,
+    AgentMessage,
+    AgentSession,
     BibEntry,
     BibFilterLink,
     BibReference,
@@ -44,7 +47,7 @@ from upload_storage import get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "018"
+CURRENT_SCHEMA_VERSION = "019"
 
 # FK forward order for export / import
 EXPORT_TABLE_ORDER = [
@@ -60,6 +63,9 @@ EXPORT_TABLE_ORDER = [
     ReadingItem,
     ReadingItemEdit,
     Annotation,
+    AgentSession,
+    AgentMessage,
+    AgentActionProposal,
     Artifact,
     BibReference,
     BibReferenceCitation,
@@ -73,6 +79,9 @@ IMPORT_CLEAR_ORDER = [
     ReadingItemEdit,
     ReadingItem,
     Artifact,
+    AgentActionProposal,
+    AgentMessage,
+    AgentSession,
     JobBibEntry,
     BibFilterLink,
     Job,

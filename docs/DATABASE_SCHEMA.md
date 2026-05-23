@@ -1148,3 +1148,81 @@ backend/migrations/versions/
 3. **API Key 不入库**：DeepSeek API Key 完全在前端 `localStorage` 由用户自管，服务端不存、不清理、不审计。优点：泄漏面缩小；缺点：用户清浏览器缓存就要重输。
 4. **dedup_key 冲突**：理论上仍可能误合并不同文献。前端"我的文献"页提供"取消合并 / 拆分"功能（v1.1 再做）。
 5. **24h 清理误删**：清理任务需写日志到 `db/cleanup.log`，保留 7 天，便于事故复盘。
+## 2026-05-23 Agent assistant persistence tables
+
+Migration: `019_add_agent_sessions.py`
+
+These tables persist the AI literature assistant conversation, tool events, and execution proposals. They are user data and are included in `.dra` export/import via `backend/services/data_portability.py` with `CURRENT_SCHEMA_VERSION = "019"`.
+
+### `agent_sessions`
+
+```sql
+CREATE TABLE agent_sessions (
+    id              TEXT PRIMARY KEY,
+    owner_user_id   INTEGER NOT NULL REFERENCES users(id),
+    title           TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active','archived')),
+    last_summary    TEXT,
+    last_state_json TEXT NOT NULL DEFAULT '{}',
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at      DATETIME
+);
+
+CREATE INDEX idx_agent_sessions_owner ON agent_sessions(owner_user_id);
+CREATE INDEX idx_agent_sessions_updated ON agent_sessions(updated_at);
+CREATE INDEX idx_agent_sessions_expires ON agent_sessions(expires_at);
+```
+
+`last_state_json` stores compact reusable state such as the most recent folder scan, pending proposal, or execution result so later turns can reference "the previous list".
+
+### `agent_messages`
+
+```sql
+CREATE TABLE agent_messages (
+    id           TEXT PRIMARY KEY,
+    session_id   TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    owner_user_id INTEGER NOT NULL REFERENCES users(id),
+    role         TEXT NOT NULL CHECK (role IN ('user','assistant','tool','system')),
+    event_type   TEXT NOT NULL CHECK (
+        event_type IN ('message','tool_call','tool_result','proposal','confirmation','error')
+    ),
+    tool_name    TEXT,
+    content      TEXT NOT NULL DEFAULT '',
+    payload_json TEXT,
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at   DATETIME
+);
+
+CREATE INDEX idx_agent_messages_session ON agent_messages(session_id);
+CREATE INDEX idx_agent_messages_owner ON agent_messages(owner_user_id);
+CREATE INDEX idx_agent_messages_expires ON agent_messages(expires_at);
+```
+
+### `agent_action_proposals`
+
+```sql
+CREATE TABLE agent_action_proposals (
+    id             TEXT PRIMARY KEY,
+    session_id     TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    owner_user_id  INTEGER NOT NULL REFERENCES users(id),
+    action_type    TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending'
+                   CHECK (status IN ('pending','confirmed','rejected','expired','executed','failed')),
+    arguments_json TEXT NOT NULL DEFAULT '{}',
+    preview_json   TEXT NOT NULL DEFAULT '{}',
+    result_json    TEXT,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at   DATETIME,
+    expires_at     DATETIME
+);
+
+CREATE INDEX idx_agent_proposals_session ON agent_action_proposals(session_id);
+CREATE INDEX idx_agent_proposals_status ON agent_action_proposals(status);
+CREATE INDEX idx_agent_proposals_owner ON agent_action_proposals(owner_user_id);
+CREATE INDEX idx_agent_proposals_expires ON agent_action_proposals(expires_at);
+```
+
+Execution tools such as folder import and batch reading must create a pending proposal first. Jobs are created only after `/api/agent/proposals/{proposal_id}/confirm` succeeds.

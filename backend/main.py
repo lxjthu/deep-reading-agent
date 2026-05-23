@@ -29,6 +29,7 @@ from dimension_seed import ensure_default_dimension_sets
 from prompt_service import ensure_builtin_prompt_templates
 from template_seed import ensure_dimension_templates
 from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions, translation
+from routers import agent
 from routers import library_chat
 
 _UPLOAD_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "_uploads")
@@ -135,6 +136,7 @@ app.include_router(references.router, prefix="/api/references", tags=["Reference
 app.include_router(data.router, prefix="/api/data", tags=["Data"])
 app.include_router(dimensions.router, prefix="/api/dimensions", tags=["Dimensions"])
 app.include_router(translation.router, prefix="/api/translation", tags=["Translation"])
+app.include_router(agent.router, prefix="/api/agent", tags=["Agent"])
 app.include_router(deploy.router, prefix="/api/deploy", tags=["Deploy"])
 app.include_router(library_chat.router, prefix="/api/library/chat", tags=["LibraryChat"])
 
