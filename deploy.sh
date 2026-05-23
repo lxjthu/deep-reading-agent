@@ -20,7 +20,10 @@ git reset --hard origin/online
 echo "[2/4] 安装依赖..."
 source venv/bin/activate
 pip install -q -r requirements.txt 2>/dev/null || true
-cd frontend && npm install && cd ..
+cd frontend
+npm install
+npm run build
+cd ..
 
 echo "[3/4] 更新数据库结构..."
 cd backend
