@@ -85,6 +85,7 @@ def build_executable():
         ("parsers.py", "."),
         ("smart_literature_filter.py", "."),
         ("extractor.py", "."),
+        ("translation_pipeline.py", "."),
     ]
 
     add_data_args = []
@@ -163,6 +164,14 @@ def build_executable():
         "services.pdf_metadata_extract",
         "services.pdf_metadata_llm",
         "services.queue_manager",
+        "translation_pipeline",
+        "services.card_notes",
+        "services.markdown_preview",
+        "services.abstract_translator",
+        "routers.cards",
+        "routers.agent",
+        "routers.library_chat",
+        "routers.translation",
     ]
 
     hidden_args = [f"--hidden-import={m}" for m in hidden_imports]
@@ -179,7 +188,7 @@ def build_executable():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onedir",
-        "--noconsole",
+        "--console",
         f"--name={EXE_NAME}",
         "--clean",
         "--noconfirm",

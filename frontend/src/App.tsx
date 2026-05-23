@@ -4076,6 +4076,14 @@ function PromptsEditor() {
         { key: 'report_writer', title: '报告生成' },
       ],
     },
+    {
+      id: 'card_note',
+      label: 'Markdown 卡片笔记',
+      steps: [
+        { key: 'atomic_card_writer', title: '原子阅读卡生成' },
+        { key: 'atomic_card_writer_user', title: '原子阅读卡：用户提示词模板' },
+      ],
+    },
   ]
 
   const currentType =

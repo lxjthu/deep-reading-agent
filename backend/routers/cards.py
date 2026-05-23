@@ -149,6 +149,12 @@ async def generate_card_payload(
         prompt_type="card_note",
         prompt_key="atomic_card_writer",
     )
+    user_template = await get_effective_prompt_text(
+        db,
+        user_id=user.id,
+        prompt_type="card_note",
+        prompt_key="atomic_card_writer_user",
+    )
     metadata = {
         "title": entry.title,
         "authors": json_list(entry.authors_json),
@@ -158,30 +164,14 @@ async def generate_card_payload(
         "keywords": json_list(entry.keywords_json),
         "abstract": entry.abstract,
     }
-    user_prompt = f"""
-请基于以下论文选段生成一张中文原子阅读卡。
-
-【当前阅读版本】
-{request.source_version}
-
-【论文元数据】
-{json.dumps(metadata, ensure_ascii=False, indent=2)}
-
-【选中原文】
-{request.selected_text}
-
-【上文】
-{request.context_before}
-
-【下文】
-{request.context_after}
-
-【用户补充要求】
-{request.user_prompt or "无"}
-
-请只输出 JSON，字段必须包含：
-title, summary, tags, body_markdown
-""".strip()
+    user_prompt = user_template.format(
+        source_version=request.source_version,
+        metadata=json.dumps(metadata, ensure_ascii=False, indent=2),
+        selected_text=request.selected_text,
+        context_before=request.context_before,
+        context_after=request.context_after,
+        user_prompt=request.user_prompt or "无",
+    )
 
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com", timeout=180.0)
     response = client.chat.completions.create(

@@ -152,6 +152,10 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
             "title": "原子阅读卡生成",
             "file_path": "prompts/card_note/atomic_card_writer.md",
         },
+        "atomic_card_writer_user": {
+            "title": "原子阅读卡：用户提示词模板",
+            "file_path": "prompts/card_note/atomic_card_writer_user.md",
+        },
     },
 }
 
@@ -243,21 +247,51 @@ def get_builtin_fallback(prompt_type: str, prompt_key: str) -> str:
     if prompt_type == "library_chat":
         return "你是一位学术文献库助手。请严格基于用户提供的文献信息完成当前任务。"
     if prompt_type == "card_note":
-        return """你是一位学术阅读卡片助手。请基于用户给出的论文选段、上下文和论文元数据，生成中文“原子阅读卡”。
-
-要求：
-1. 严格基于原文和上下文，不编造论文没有表达的信息。
-2. 将选段压缩成一个可复用的研究笔记单元。
-3. body_markdown 使用 Markdown，包含“核心观点”“依据/证据”“阅读笔记”“启发或用途”四个小节。
-4. tags 输出 2-6 个短标签，不要带 #。
-5. 只输出 JSON，不要输出 Markdown 代码围栏或解释。
-
-JSON 结构：
-{
-  "title": "卡片标题",
-  "summary": "一句话总结",
-  "tags": ["标签一", "标签二"],
-  "body_markdown": "## 核心观点\\n..."
-}
-"""
+        if prompt_key == "atomic_card_writer":
+            return (
+                "你是一位学术阅读卡片助手。请基于用户给出的论文选段、上下文和论文元数据，"
+                "生成中文\u201c原子阅读卡\u201d。\n"
+                "\n"
+                "要求：\n"
+                "1. 严格基于原文和上下文，不编造论文没有表达的信息。\n"
+                "2. 将选段压缩成一个可复用的研究笔记单元。\n"
+                "3. body_markdown 使用 Markdown，包含\u201c核心观点\u201d\u201c依据/证据\u201d"
+                "\u201c阅读笔记\u201d\u201c启发或用途\u201d四个小节。\n"
+                "4. tags 输出 2-6 个短标签，不要带 #。\n"
+                "5. 只输出 JSON，不要输出 Markdown 代码围栏或解释。\n"
+                "\n"
+                "JSON 结构：\n"
+                "{\n"
+                '  "title": "卡片标题",\n'
+                '  "summary": "一句话总结",\n'
+                '  "tags": ["标签一", "标签二"],\n'
+                '  "body_markdown": "## 核心观点\\n..."\n'
+                "}"
+            )
+        if prompt_key == "atomic_card_writer_user":
+            return (
+                "请基于以下论文选段生成一张中文原子阅读卡。\n"
+                "\n"
+                "【当前阅读版本】\n"
+                "{source_version}\n"
+                "\n"
+                "【论文元数据】\n"
+                "{metadata}\n"
+                "\n"
+                "【选中原文】\n"
+                "{selected_text}\n"
+                "\n"
+                "【上文】\n"
+                "{context_before}\n"
+                "\n"
+                "【下文】\n"
+                "{context_after}\n"
+                "\n"
+                "【用户补充要求】\n"
+                "{user_prompt}\n"
+                "\n"
+                "请只输出 JSON，字段必须包含：\n"
+                "title, summary, tags, body_markdown"
+            )
+        return "请直接输出分析内容，不要客套开场白。"
     return "请直接输出分析内容，不要客套开场白。"

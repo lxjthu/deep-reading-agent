@@ -581,7 +581,7 @@ async def tool_search_library(
     reading_status: str = "",
     limit: int = 20,
 ) -> dict[str, Any]:
-    limit = max(1, min(int(limit or 20), 50))
+    limit = max(1, int(limit or 50))
     stmt = select(BibEntry, File).outerjoin(File, File.id == BibEntry.source_file_id).where(
         BibEntry.owner_user_id == user.id
     )
@@ -1239,7 +1239,7 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "query": {"type": "string"},
                     "reading_status": {"type": "string", "enum": ["", "none", "has_pdf", "reading", "read"]},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                    "limit": {"type": "integer", "minimum": 1},
                 },
             },
         },
