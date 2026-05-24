@@ -187,7 +187,9 @@
 - PDF 相关子模块通过 `--collect-submodules` 收集：`pdfminer`、`pdfplumber`、`pypdf`、`PyPDF2`、`fitz`
 - Excel 读写统一使用 `openpyxl`：筛选导出、参考文献导出、文献库读取筛选产物均显式指定 `engine="openpyxl"`；`xlsxwriter` 是 pandas 可选 warning，不是当前强依赖
 - **PyInstaller 打包后路径解析**：`sys.frozen=True` 时 `Path(__file__).resolve().parents[N]` 不再指向项目根目录（指向 exe 所在目录的上级），必须改用 `Path(sys._MEIPASS)` 获取 `_internal` 目录。受影响文件：`prompt_registry.py`、`db/session.py`、`new_architecture/conversation_engine.py`。新增任何通过 `__file__` 计算路径的代码时，必须同步处理 `sys.frozen` 分支
-- **打包版隐藏控制台**：PyInstaller 加 `--noconsole`（使用 `runw.exe` bootloader），不再弹出黑色终端窗口。stdout/stderr 重定向到 `data/logs/startup.log`。bat 启动器用 `start ""` 后台运行 exe，窗口闪现即消失。用户通过浏览器内「退出」按钮（`POST /shutdown`）停止服务
+- **打包版隐藏控制台**：PyInstaller 加 `--windowed`（使用 `runw.exe` bootloader），不再弹出黑色终端窗口。stdout/stderr 重定向到 `data/logs/startup.log`。bat 启动器用 `start ""` 后台运行 exe，窗口闪现即消失。用户通过浏览器内「退出」按钮（`POST /shutdown`）停止服务
+- **隔离输出目录**：`build_web_dist.py` 支持 `DRA_DIST_DIR` / `DRA_BUILD_DIR` 覆盖 `dist/` 和 `build/`，当旧 `dist` 中 DLL 被 Windows 锁住时，可先输出到 `dist-repack/` 并在该目录测试
+- **发布分发**：Windows ZIP 同步上传 GitHub Release 与阿里云 OSS；OSS 使用 `lxj-pdf-upload/releases/DeepReadingAgent-Web-YYYY-MM-DD.zip`，线上下载入口通过后端动态生成短期签名 URL。复用流程见 `docs/RELEASE_OSS_UPLOAD_RUNBOOK.md`
 - 每次代码改动完成后默认重新运行 `python build_web_dist.py`，并启动打包后的 exe 做 `/health` 冒烟测试
 
 ## 3. 当前架构总览

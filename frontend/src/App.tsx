@@ -720,6 +720,17 @@ function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
     setCurrentStep(0)
   }
 
+  const clearStaleTaskState = (nextStage = '等待上传...') => {
+    stopPolling()
+    persistReadingTaskId(kind, null)
+    setTaskId(null)
+    setIsRunning(false)
+    setProgress(0)
+    peakProgressRef.current = 0
+    setStage(nextStage)
+    setCurrentStep(0)
+  }
+
   const cancelTask = async () => {
     if (taskId) {
       try {
@@ -784,7 +795,17 @@ function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
 
   const fetchStatus = async (runningTaskId: string) => {
     const statusRes = await fetch(`/api/reading/task/${runningTaskId}/status`)
+    if (!statusRes.ok) {
+      throw new Error(
+        statusRes.status === 404
+          ? '上次任务已失效，请重新开始精读'
+          : `读取任务状态失败 (${statusRes.status})`,
+      )
+    }
     const statusData = await statusRes.json()
+    if (!statusData || typeof statusData.status !== 'string') {
+      throw new Error('任务状态响应无效，请重新开始精读')
+    }
     applyStatus(statusData)
     return statusData
   }
@@ -793,13 +814,16 @@ function useReadingTaskTracker(kind: ReadingTaskKind, stepCount = 0) {
     setTaskId(nextTaskId)
     persistReadingTaskId(kind, nextTaskId)
     setIsRunning(true)
-    await fetchStatus(nextTaskId)
+    try {
+      await fetchStatus(nextTaskId)
+    } catch (error) {
+      clearStaleTaskState()
+      throw error
+    }
     stopPolling()
     pollRef.current = window.setInterval(() => {
       void fetchStatus(nextTaskId).catch((error) => {
-        stopPolling()
-        setIsRunning(false)
-        setStage('错误')
+        clearStaleTaskState('等待上传...')
         setLogs((prev) => [...prev, `❌ ${error.message || '读取任务状态失败'}`])
       })
     }, 1000)

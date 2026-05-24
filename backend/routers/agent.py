@@ -579,14 +579,19 @@ async def tool_search_library(
     *,
     query: str = "",
     reading_status: str = "",
-    limit: int = 20,
+    limit: int = 1000,
 ) -> dict[str, Any]:
-    limit = max(1, int(limit or 50))
+    query_text = (query or "").strip()
+    is_broad_query = query_text.casefold() in {"", "*", "all"}
+    requested_limit = int(limit or 1000)
+    if is_broad_query and requested_limit < 1000:
+        requested_limit = 1000
+    limit = max(1, min(requested_limit, 1000))
     stmt = select(BibEntry, File).outerjoin(File, File.id == BibEntry.source_file_id).where(
         BibEntry.owner_user_id == user.id
     )
-    if query.strip():
-        like = f"%{query.strip()}%"
+    if query_text and not is_broad_query:
+        like = f"%{query_text}%"
         stmt = stmt.where(
             or_(
                 BibEntry.title.ilike(like),
@@ -1233,13 +1238,13 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_library",
-            "description": "Search the user's bibliography library by title, abstract, journal, keyword, or tag.",
+            "description": "Search the user's bibliography library by title, abstract, journal, keyword, or tag. Use limit=1000 when listing or scanning the library broadly; do not use 50 as a default.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
                     "reading_status": {"type": "string", "enum": ["", "none", "has_pdf", "reading", "read"]},
-                    "limit": {"type": "integer", "minimum": 1},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
                 },
             },
         },

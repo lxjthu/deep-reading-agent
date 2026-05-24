@@ -21,8 +21,8 @@ import zipfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
-DIST_DIR = PROJECT_ROOT / "dist"
-BUILD_DIR = PROJECT_ROOT / "build"
+DIST_DIR = Path(os.environ.get("DRA_DIST_DIR", PROJECT_ROOT / "dist")).resolve()
+BUILD_DIR = Path(os.environ.get("DRA_BUILD_DIR", PROJECT_ROOT / "build")).resolve()
 PKG_NAME = "DeepReadingAgent-Web"
 PKG_DIR = DIST_DIR / PKG_NAME
 EXE_NAME = "DeepReadingAgent"
@@ -92,7 +92,7 @@ def build_executable():
     for src, dst in datas:
         src_path = PROJECT_ROOT / src
         if src_path.exists():
-            add_data_args.append(f"--add-data={src}{sep}{dst}")
+            add_data_args.append(f"--add-data={src_path}{sep}{dst}")
         else:
             print(f"  WARNING: {src} not found, skipping")
 
@@ -188,10 +188,13 @@ def build_executable():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onedir",
-        "--console",
+        "--windowed",
         f"--name={EXE_NAME}",
         "--clean",
         "--noconfirm",
+        f"--distpath={DIST_DIR}",
+        f"--workpath={BUILD_DIR}",
+        f"--specpath={BUILD_DIR}",
         "--paths=backend",
         *add_data_args,
         *hidden_args,

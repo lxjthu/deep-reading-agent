@@ -506,7 +506,9 @@ PDF 结构复杂度：
 
 背景：
 
-- 当前 Windows 打包产物已上传到阿里云 OSS：`oss://lxj-pdf-upload/releases/DeepReadingAgent-Web-2026-05-18.zip`。
+- 当前 Windows 打包产物已上传到阿里云 OSS：
+  - 2026-05-18：`oss://lxj-pdf-upload/releases/DeepReadingAgent-Web-2026-05-18.zip`
+  - 2026-05-24：`oss://lxj-pdf-upload/releases/DeepReadingAgent-Web-2026-05-24.zip`
 - 私有 bucket 的签名 URL 有有效期，不适合把 7 天链接直接硬编码到 online 前端页面。
 - 若使用公共读固定链接，维护简单但会暴露下载入口，存在流量费用与转发风险。
 
@@ -516,7 +518,7 @@ PDF 结构复杂度：
 2. 服务器环境变量配置 OSS 信息与对象路径：
    - `ALIYUN_OSS_ENDPOINT=https://oss-cn-wuhan-lr.aliyuncs.com`
    - `ALIYUN_OSS_BUCKET=lxj-pdf-upload`
-   - `ALIYUN_OSS_APP_OBJECT=releases/DeepReadingAgent-Web-2026-05-18.zip`
+   - `ALIYUN_OSS_APP_OBJECT=releases/DeepReadingAgent-Web-2026-05-24.zip`
    - `ALIYUN_ACCESS_KEY_ID`
    - `ALIYUN_ACCESS_KEY_SECRET`
 3. 后端接口即时生成短期签名 URL，建议有效期 1 小时到 24 小时。
@@ -533,6 +535,7 @@ PDF 结构复杂度：
 - 上传新 zip 到 `releases/` 目录，文件名带版本或日期。
 - 更新服务器环境变量 `ALIYUN_OSS_APP_OBJECT` 指向新对象。
 - 无需修改前端静态链接，也无需每 7 天重新部署。
+- 具体可复用步骤见 `docs/RELEASE_OSS_UPLOAD_RUNBOOK.md`：包含 GitHub Release 上传、OSS 上传、GET Range 验证、SHA256 记录和临时 GitHub token 清理。
 
 ### 2.12 七步/四步小问题对比解析稳健性
 

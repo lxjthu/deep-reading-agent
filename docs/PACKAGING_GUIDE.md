@@ -73,6 +73,22 @@ python build_web_dist.py
 
 产出文件：`dist/DeepReadingAgent-Web.zip`
 
+### 2.1 隔离输出目录（旧 dist 被锁时）
+
+Windows 有时会锁住旧打包目录中的 DLL（例如 `VCRUNTIME140.dll`），导致 `python build_web_dist.py` 在清理 `dist/` 时失败。`build_web_dist.py` 支持通过环境变量切换输出目录，便于先生成一份干净的 repack 包：
+
+```powershell
+python -c "import os, runpy; os.environ['DRA_DIST_DIR']=r'D:\code\deepagent\deep-reading-agent-online\deep-reading-agent\dist-repack'; os.environ['DRA_BUILD_DIR']=r'D:\code\deepagent\deep-reading-agent-online\deep-reading-agent\build-repack'; runpy.run_path('build_web_dist.py', run_name='__main__')"
+```
+
+产物为 `dist-repack/DeepReadingAgent-Web.zip`。确认可用后，可优先在 `dist-repack/` 内测试；旧 `dist/` 中被锁住的文件不影响 repack 包。
+
+### 2.2 控制台窗口策略
+
+当前打包脚本使用 PyInstaller `--windowed`，生成的 exe 使用 `runw.exe` bootloader，不再弹出黑色控制台窗口。stdout/stderr 会由 `run_web.py` 写入 `data/logs/startup.log`，调试时优先查看该日志。
+
+如果需要临时观察控制台输出，可以把 `build_web_dist.py` 中的 `--windowed` 改回 `--console` 后重新打包；调试完成必须恢复 `--windowed`，避免发布版保留黑窗。
+
 ---
 
 ## 3. 打包架构
@@ -226,6 +242,12 @@ create_launcher()      → 生成 启动DeepReadingAgent.bat
 create_readme()        → 生成 使用说明.txt
 create_distribution()  → 组装 ZIP 包
 ```
+
+脚本还会传入：
+
+- `--windowed`：隐藏打包版控制台窗口。
+- `--distpath`、`--workpath`、`--specpath`：使用 `DIST_DIR` / `BUILD_DIR`，支持 `DRA_DIST_DIR` 与 `DRA_BUILD_DIR` 覆盖。
+- 绝对路径形式的 `--add-data`：避免从不同工作目录运行脚本时资源路径失效。
 
 ---
 
@@ -502,6 +524,26 @@ python -m PyInstaller.utils.cliutils.archive_viewer -l -r -b dist\DeepReadingAge
 
 每次代码改动完成后，默认重新执行 `python build_web_dist.py` 并做至少一次 `GET /health` 冒烟测试，避免“本地源码可用、打包产物缺依赖”的问题再次出现。
 
+### 问题 9：旧打包目录被 DLL 锁住
+
+**现象**：重打包时清理 `dist/` 失败，常见报错为 `PermissionError: [WinError 5]` 或 `The process cannot access the file because it is being used by another process`，文件多为 `_internal/VCRUNTIME140.dll`。
+
+**处理**：
+
+1. 先确认没有 `DeepReadingAgent.exe` 进程：
+
+```powershell
+Get-Process DeepReadingAgent -ErrorAction SilentlyContinue
+```
+
+2. 如果仍被锁住，改用隔离输出目录：
+
+```powershell
+python -c "import os, runpy; os.environ['DRA_DIST_DIR']=r'D:\code\deepagent\deep-reading-agent-online\deep-reading-agent\dist-repack'; os.environ['DRA_BUILD_DIR']=r'D:\code\deepagent\deep-reading-agent-online\deep-reading-agent\build-repack'; runpy.run_path('build_web_dist.py', run_name='__main__')"
+```
+
+3. 在 `dist-repack/` 测试新包，确认后再择机清理旧 `dist/`。
+
 ---
 
 ## 7. 手动打包步骤
@@ -548,14 +590,48 @@ Copy-Item -Recurse -Force backend\routers\*.py dist\DeepReadingAgent\_internal\b
 
 ---
 
+## 7.1 发布到 GitHub Release 与 OSS
+
+打包 ZIP 发布复用 `docs/RELEASE_OSS_UPLOAD_RUNBOOK.md`。
+
+典型流程：
+
+```powershell
+# 1. 上传到 GitHub Release
+gh release upload v2.0.0 "dist-repack\DeepReadingAgent-Web.zip#DeepReadingAgent-Web-2026-05-24.zip" --repo lxjthu/deep-reading-agent --clobber
+
+# 2. 上传到阿里云 OSS，并生成 24 小时签名 URL
+python scripts\upload_release_to_oss.py dist-repack\DeepReadingAgent-Web.zip --object releases/DeepReadingAgent-Web-2026-05-24.zip
+```
+
+OSS 目标约定：
+
+- bucket：`lxj-pdf-upload`
+- endpoint：`https://oss-cn-wuhan-lr.aliyuncs.com`
+- object：`releases/DeepReadingAgent-Web-YYYY-MM-DD.zip`
+
+换包后，线上下载入口只需要更新服务器环境变量：
+
+```text
+ALIYUN_OSS_APP_OBJECT=releases/DeepReadingAgent-Web-YYYY-MM-DD.zip
+```
+
+不要把长期 AccessKey、短期签名 URL 或 GitHub token 写入仓库。若临时使用 `gh auth login --insecure-storage`，上传完成后必须执行：
+
+```powershell
+gh auth logout -h github.com -u lxjthu
+```
+
+---
+
 ## 8. 打包后验证清单
 
 ### 基础启动
 
-- [ ] 双击 `启动DeepReadingAgent.bat`，控制台显示启动信息
+- [ ] 双击 `启动DeepReadingAgent.bat` 后不应保留黑色控制台窗口
 - [ ] 浏览器自动打开 `http://localhost:8000`
 - [ ] 页面显示登录/注册界面（非 API JSON）
-- [ ] 控制台输出 `[static] Serving frontend from ...`
+- [ ] `data/logs/startup.log` 中可看到启动日志与静态资源目录
 
 ### 用户认证
 
@@ -612,10 +688,10 @@ Copy-Item -Recurse -Force backend\routers\*.py dist\DeepReadingAgent\_internal\b
 
 1. **Inno Setup / NSIS 安装程序**：替代 ZIP + bat，提供开始菜单快捷方式、卸载程序
 2. **HTTPS 支持**：嵌入自签名证书或 mkcert
-3. **系统托盘**：最小化到托盘而非保持控制台窗口
+3. **系统托盘**：最小化到托盘并提供托盘菜单
 4. **自动更新**：检查 GitHub Release 新版本并提示
 5. **数据库升级**：打包 Alembic，支持增量迁移
-6. **日志文件**：将 uvicorn 日志输出到 `data/logs/` 而非仅控制台
+6. **日志文件**：进一步结构化 `data/logs/` 中的启动、访问与错误日志
 7. **端口冲突检测**：8000 端口被占用时提示或自动换端口
 
 ---
