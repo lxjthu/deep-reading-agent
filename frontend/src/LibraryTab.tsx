@@ -273,6 +273,15 @@ function artifactTypeLabel(artifactType: string) {
   )
 }
 
+function buildCnkiTitleSearchUrl(title: string) {
+  const query = title.trim()
+  const params = new URLSearchParams({
+    kw: query,
+    korder: 'TI',
+  })
+  return `https://kns.cnki.net/kns8s/defaultresult/index?${params.toString()}`
+}
+
 function jobTypeLabel(jobType: string) {
   return (
     {
@@ -646,6 +655,11 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     } finally {
       setMarkdownUploading(false)
     }
+  }
+
+  function openCnkiTitleSearch(entry: LibraryEntrySummary | LibraryEntryDetail) {
+    const url = buildCnkiTitleSearchUrl(entry.title)
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   async function handleBatchTags(operation: 'add' | 'remove') {
@@ -1608,6 +1622,13 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                       onClick={() => markdownInputRef.current?.click()}
                     >
                       {markdownUploading ? '挂载中...' : detail.markdown_source_file_id ? '替换 Markdown' : '挂载 Markdown'}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                      onClick={() => openCnkiTitleSearch(detail)}
+                    >
+                      知网搜索
                     </button>
                     <button
                       type="button"

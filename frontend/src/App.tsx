@@ -51,6 +51,15 @@ type AgentFolderFile = File & {
   webkitRelativePath?: string
 }
 
+type ImportTaskStatus = {
+  job_id: string
+  status: 'pending' | 'running' | 'success' | 'failed'
+  progress: number
+  current_stage: string
+  error_msg: string | null
+  result: Record<string, unknown> | null
+}
+
 function getAgentFolderFilename(file: File): string {
   const folderFile = file as AgentFolderFile
   return folderFile.webkitRelativePath || file.name || ''
@@ -310,6 +319,7 @@ function App() {
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<Record<string, unknown> | null>(null)
+  const [importStatus, setImportStatus] = useState<ImportTaskStatus | null>(null)
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null)
   const [canShutdownApp, setCanShutdownApp] = useState(false)
   const [agentTabVisible, setAgentTabVisible] = useState(false)
@@ -555,19 +565,22 @@ function App() {
     setImportDialogOpen(true)
     setSelectedImportFile(null)
     setImportResult(null)
+    setImportStatus(null)
   }
 
   const handleImport = async (file: File) => {
     setImporting(true)
+    setImportResult(null)
+    setImportStatus(null)
     const formData = new FormData()
     formData.append('file', file)
     try {
-      const response = await fetch('/api/data/import', {
+      const response = await fetch('/api/data/import/start', {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
       })
-      
+
       let data: any = {}
       const contentType = response.headers.get('content-type')
       if (contentType && contentType.includes('application/json')) {
@@ -580,8 +593,43 @@ function App() {
       if (!response.ok) {
         throw new Error(data.detail || `导入失败（HTTP ${response.status}）`)
       }
-      setImportResult(data)
-      window.alert(`导入成功！已恢复 ${data.files_restored || 0} 个文件。页面即将刷新。`)
+
+      const jobId = data.job_id
+      if (!jobId) throw new Error('导入任务创建失败：后端未返回任务 ID。')
+
+      setImportStatus({
+        job_id: jobId,
+        status: data.status || 'pending',
+        progress: 0,
+        current_stage: data.message || '导入任务已开始。',
+        error_msg: null,
+        result: null,
+      })
+
+      let finalStatus: ImportTaskStatus | null = null
+      while (true) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000))
+        const statusResponse = await fetch(`/api/data/import/${encodeURIComponent(jobId)}/status`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+        const statusData = await statusResponse.json().catch(() => null)
+        if (!statusResponse.ok) {
+          throw new Error(statusData?.detail || `查询导入进度失败（HTTP ${statusResponse.status}）`)
+        }
+        finalStatus = statusData as ImportTaskStatus
+        setImportStatus(finalStatus)
+        if (finalStatus.status === 'success' || finalStatus.status === 'failed') {
+          break
+        }
+      }
+
+      if (finalStatus?.status === 'failed') {
+        throw new Error(finalStatus.error_msg || finalStatus.current_stage || '导入失败。')
+      }
+
+      const result = finalStatus?.result || {}
+      setImportResult(result)
+      window.alert(`导入成功！已恢复 ${result.files_restored || 0} 个文件。页面即将刷新。`)
       window.location.reload()
     } catch (err: any) {
       console.error('[import error]', err)
@@ -867,10 +915,28 @@ function App() {
                   已选择：{selectedImportFile.name}
                 </div>
               )}
+              {importStatus && (
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">
+                      {importStatus.status === 'failed' ? '导入失败' : importStatus.status === 'success' ? '导入完成' : '正在导入'}
+                    </span>
+                    <span>{Math.max(0, Math.min(100, importStatus.progress || 0))}%</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+                    <div
+                      className="h-full rounded-full bg-emerald-600 transition-all"
+                      style={{ width: `${Math.max(0, Math.min(100, importStatus.progress || 0))}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 text-xs">{importStatus.current_stage || '等待导入进度...'}</div>
+                </div>
+              )}
             </div>
             <div className="mt-5 flex gap-3">
               <button
                 onClick={() => setImportDialogOpen(false)}
+                disabled={importing}
                 className="flex-1 rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
               >
                 取消
