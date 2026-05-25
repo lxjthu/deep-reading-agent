@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { marked } from 'marked'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 import MetadataMatchPanel from './MetadataMatchPanel'
+import RefFormatModal from './components/RefFormatModal'
 
 type LibraryEntrySummary = {
   id: string
@@ -367,6 +368,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [saveMessage, setSaveMessage] = useState('')
   const [expandedTimeline, setExpandedTimeline] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [refFormatOpen, setRefFormatOpen] = useState(false)
   const [editingAiCommentId, setEditingAiCommentId] = useState<string | null>(null)
   const [editingAiCommentText, setEditingAiCommentText] = useState('')
   const [aiCommentBusyId, setAiCommentBusyId] = useState<string | null>(null)
@@ -1417,6 +1419,13 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                   {translating ? translateProgress : '翻译摘要'}
                 </button>
                 <button
+                  onClick={() => setRefFormatOpen(true)}
+                  className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-100"
+                  type="button"
+                >
+                  生成参考文献目录
+                </button>
+                <button
                   onClick={() => void handleBatchDelete()}
                   className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
                   type="button"
@@ -2370,6 +2379,13 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
             </div>
           </div>
         </div>
+      )}
+      {refFormatOpen && (
+        <RefFormatModal
+          apiKey={apiKey}
+          entryIds={Array.from(selectedIds)}
+          onClose={() => setRefFormatOpen(false)}
+        />
       )}
     </div>
   )

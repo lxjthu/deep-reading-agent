@@ -40,6 +40,7 @@ from db.models import (
     PromptTemplate,
     ReadingItem,
     ReadingItemEdit,
+    RefFormatPreset,
     UploadBatch,
     User,
 )
@@ -48,7 +49,7 @@ from upload_storage import get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "021"
+CURRENT_SCHEMA_VERSION = "023"
 
 # Deliberately excluded from .dra export/import:
 # - user_feedback
@@ -67,6 +68,7 @@ EXPORT_TABLE_ORDER = [
     PromptTemplate,
     DimensionSet,
     DimensionItem,
+    RefFormatPreset,
     BibEntry,
     Job,
     BibFilterLink,
@@ -99,6 +101,7 @@ IMPORT_CLEAR_ORDER = [
     BibFilterLink,
     Job,
     BibEntry,
+    RefFormatPreset,
     DimensionItem,
     DimensionSet,
     File,

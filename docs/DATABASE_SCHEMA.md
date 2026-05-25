@@ -219,7 +219,7 @@ CREATE TABLE prompt_templates (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
     scope               TEXT NOT NULL CHECK (scope IN ('system', 'user')),
-    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter', 'compare', 'synthesis', 'ai_template', 'translation', 'library_chat', 'card_note')),
+    prompt_type         TEXT NOT NULL CHECK (prompt_type IN ('quant', 'qual', 'long', 'filter', 'compare', 'synthesis', 'ai_template', 'translation', 'library_chat', 'card_note', 'ref_format')),
     prompt_key          TEXT NOT NULL,
     title               TEXT NOT NULL,
     content             TEXT NOT NULL,
@@ -544,10 +544,10 @@ CREATE TABLE jobs (
                          'compare',
                          'synthesis',
                          'reference_trace',   -- 参考文献梳理全链路
-                         'reference_extract', -- 仅抽取参考文献目录
-                         'citation_trace',    -- 仅重跑正文引用核验
-                          'translation'        -- 全文翻译（中文重述）
-                          'translate_abstracts' -- 批量翻译摘要
+                         'translation',       -- 全文翻译（中文重述）
+                         'translate_abstracts', -- 批量翻译摘要
+                         'library_chat',      -- 文献库 AI 查询
+                         'ref_format'         -- 文献库选中文献生成参考文献目录
                          )),
     status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
                         ('pending', 'running', 'success', 'failed', 'canceled')),
@@ -573,6 +573,28 @@ CREATE INDEX idx_jobs_type ON jobs (job_type);
 CREATE INDEX idx_jobs_expires ON jobs (expires_at);
 ```
 
+### 3.11 `ref_format_presets` — 参考文献格式预设
+
+> 目的：保存用户从示例参考文献中解析出的著录格式规则，用于后续在文献库选中文献后直接生成参考文献目录。
+
+```sql
+CREATE TABLE ref_format_presets (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name                 TEXT NOT NULL,
+    description          TEXT,
+    source_text          TEXT,        -- 原始示例参考文献文本，截断保存
+    format_rules         TEXT NOT NULL, -- DeepSeek 解析出的格式规则 JSON/文本
+    detected_format_name TEXT,        -- 如 GB/T 7714-2015、APA 7th
+    entry_count          INTEGER NOT NULL DEFAULT 0,
+    created_at           DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at           DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (owner_user_id, name)
+);
+
+CREATE INDEX idx_rfp_owner ON ref_format_presets (owner_user_id);
+```
+
 **参考文献梳理任务约定**：
 
 - `reference_trace`
@@ -582,7 +604,7 @@ CREATE INDEX idx_jobs_expires ON jobs (expires_at);
 - `citation_trace`
   - 针对已有参考文献条目，仅重跑正文引用候选召回与 LLM 核验
 
-### 3.11 `job_bib_entries` — 任务 ↔ 文献（多对多）
+### 3.12 `job_bib_entries` — 任务 ↔ 文献（多对多）
 
 ```sql
 CREATE TABLE job_bib_entries (
@@ -609,7 +631,7 @@ CREATE INDEX idx_jbe_bib ON job_bib_entries (bib_entry_id);
 - `synthesis` 任务有 ≥1 个 `role='synthesis_member'`
 - `reference_trace/reference_extract/citation_trace` 任务必须仅有一个 `role='reference_source'`
 
-### 3.12 `reading_items` — 精读结构化结果
+### 3.13 `reading_items` — 精读结构化结果
 
 > 目的：把三类精读结果按“模式 / 维度(步骤) / 子问题”拆成结构化记录，供 compare / synthesis / library 直接查询，避免前端继续下载 Markdown 再做字符串解析。
 
@@ -662,7 +684,7 @@ CREATE INDEX idx_reading_items_parent ON reading_items (parent_key);
 - `reading_items` 保留 job 级历史，支持同一篇文献多次精读
 - `artifacts` 继续保存 Markdown 产物，作为下载与人工阅读版本
 
-### 3.13 `artifacts` — 任务产物
+### 3.14 `artifacts` — 任务产物
 
 ```sql
 CREATE TABLE artifacts (
@@ -682,7 +704,9 @@ CREATE TABLE artifacts (
                          'citation_trace_md',-- 引用梳理 Markdown 报告
                          'references_json',  -- 可选：结构化 JSON 产物
                          'translation_md',       -- 全文翻译中文重述 MD
-                         'translation_glossary'  -- 全文翻译术语词典 MD
+                         'translation_glossary', -- 全文翻译术语词典 MD
+                         'library_chat_md',      -- 文献库 AI 查询 Markdown
+                         'ref_format_md'         -- 参考文献目录格式化 Markdown
                          )),
     filename        TEXT NOT NULL,
     storage_path    TEXT NOT NULL,
@@ -710,7 +734,7 @@ CREATE INDEX idx_artifacts_expires ON artifacts (expires_at);
 - `references_json`
   - 供调试、审计和潜在前端二次渲染使用
 
-### 3.14 `card_notes` — Markdown 原文/译文卡片笔记（v1.8 新增）
+### 3.15 `card_notes` — Markdown 原文/译文卡片笔记（v1.8 新增）
 
 > 目的：保存用户在 Markdown 阅读器中基于选段生成的 AI 原子阅读卡，并同步维护 Obsidian 友好的 Markdown 文件镜像。
 
@@ -749,7 +773,7 @@ CREATE INDEX idx_card_notes_translation ON card_notes (source_translation_artifa
 - `source_version='translated'` 时记录对应 `translation_md` 的 `source_translation_artifact_id`。
 - `.dra` 导出/导入包含该表和 Markdown 镜像，当前 `CURRENT_SCHEMA_VERSION = "021"`。
 
-### 3.15 `dimension_sets` — 用户维度集合（v1.4 新增）
+### 3.16 `dimension_sets` — 用户维度集合（v1.4 新增）
 
 > 目的：支持用户自定义长文本精读的分析维度集合。每个用户可创建多个命名集合（如"计量论文专用"、"理论论文专用"），系统自动为每个用户创建一个不可删除的默认集合。
 
@@ -784,7 +808,7 @@ CREATE INDEX idx_dim_sets_shared ON dimension_sets (is_shared);
 
 **种子数据**：应用启动时自动为每个用户创建系统默认集合，并从 `ANALYSIS_DIMENSIONS` 填充 12+1 个维度条目。
 
-### 3.15 `dimension_items` — 维度条目（v1.4 新增）
+### 3.17 `dimension_items` — 维度条目（v1.4 新增）
 
 > 目的：保存每个维度集合内的具体维度定义，包括名称、描述、提示词和默认问题。系统预置维度和用户自建维度共存。
 
@@ -829,7 +853,7 @@ CREATE INDEX idx_dim_items_builtin ON dimension_items (set_id, is_builtin);
 - 用户自建维度的提示词直接存在 `prompt_content` 字段，不经过 `prompt_templates`
 - 详细设计见 [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)
 
-### 3.16 `dimension_templates` — 系统预设维度模板（v1.5 新增）
+### 3.18 `dimension_templates` — 系统预设维度模板（v1.5 新增）
 
 > 目的：保存系统预设的维度模板，供用户快速创建维度集合。模板由管理员维护，用户不能直接修改模板，但可以基于模板创建自己的维度集合副本。
 
@@ -861,7 +885,7 @@ CREATE INDEX idx_dim_tpl_featured ON dimension_templates (is_featured);
 
 **种子数据**：系统启动时从代码或 JSON 文件幂等导入预设模板，管理员可通过 API 增删改模板。
 
-### 3.17 `template_items` — 模板维度条目（v1.5 新增）
+### 3.19 `template_items` — 模板维度条目（v1.5 新增）
 
 > 目的：保存每个预设模板包含的具体维度定义，结构与 `dimension_items` 类似，但不绑定用户，属于系统级数据。
 
@@ -1208,7 +1232,9 @@ backend/migrations/versions/
 ├── 018_add_translate_abstracts_job_type.py  # jobs CHECK 约束新增 translate_abstracts
 ├── 019_add_agent_sessions.py  # Agent assistant 会话持久化
 ├── 020_add_markdown_card_notes.py  # Markdown 原文绑定 + card_notes + card_note 提示词类型
-└── 021_add_feedback_admin_tables.py  # 用户反馈、反馈事件、管理员审计日志
+├── 021_add_feedback_admin_tables.py  # 用户反馈、反馈事件、管理员审计日志
+├── 022_add_library_chat_history.py  # library_chat job/artifact 类型
+└── 023_add_ref_format_generation.py  # ref_format_presets + ref_format job/artifact 类型
 ```
 
 > 说明：`admin` 账号继续通过 `backend/scripts/seed_admin.py` 初始化，不放入 Alembic 迁移。
@@ -1241,6 +1267,7 @@ backend/migrations/versions/
 | 全文翻译（中文重述） | `jobs.job_type='translation'` + `artifacts.artifact_type` 新增 `translation_md`/`translation_glossary` + `prompt_templates.prompt_type` 新增 `translation`（v1.6 migration 014） |
 | 文献库 AI 查询 | `prompt_templates.prompt_type` 新增 `library_chat`（v1.7 migration 016）；命中集合复用 `bib_entries`、`bib_references`、`reading_items`；标签复用 `bib_entries.user_tags_json`，保存点评复用 `annotations(source_type='library_note')` |
 | Markdown 卡片笔记 | `bib_entries.markdown_source_file_id` + `card_notes` + `prompt_templates.prompt_type='card_note'`；导出包包含 cards/papers Markdown |
+| 文献库参考文献目录生成 | `ref_format_presets` + `jobs.job_type='ref_format'` + `artifacts.artifact_type='ref_format_md'` |
 | 引用网络分析 / 共引分析 | 依赖 `bib_references.source_bib_entry_id -> matched_bib_entry_id` 关系继续向上扩展 |
 | VIP 试用期 | `users.vip_expires_at` |
 | 团队/共享空间 | 不在本期，需要新增 `workspaces` 中间层（暂不规划） |
@@ -1261,6 +1288,7 @@ backend/migrations/versions/
 | 提示词管理 | `prompt_templates` | — |
 | 文献库 AI 查询 | `bib_entries` | `bib_references`、`reading_items`、`prompt_templates(library_chat)`、`annotations(library_note)` |
 | Markdown 卡片笔记 | `card_notes` | `bib_entries`、`files(markdown)`、`artifacts(translation_md)`、`prompt_templates(card_note)` |
+| 参考文献目录生成 | `ref_format_presets`、`jobs(ref_format)` | `artifacts(ref_format_md)` |
 | 用户反馈与后台审计 | `user_feedback` | `feedback_events`、`admin_audit_logs` |
 | 维度集合（用户自建） | `dimension_sets`、`dimension_items` | — |
 | 维度模板（系统预设） | `dimension_templates`、`template_items` | — |

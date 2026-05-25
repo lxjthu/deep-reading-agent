@@ -295,7 +295,8 @@ class PromptTemplate(Base):
             name="ck_prompt_templates_scope",
         ),
         CheckConstraint(
-            "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template','translation','library_chat','card_note')",
+            "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template',"
+            "'translation','library_chat','card_note','ref_format')",
             name="ck_prompt_templates_type",
         ),
         UniqueConstraint(
@@ -403,7 +404,7 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "job_type IN ('filter','reading_long','reading_quant','reading_qual',"
-            "'compare','synthesis','reference_trace','translation','translate_abstracts','library_chat')",
+            "'compare','synthesis','reference_trace','translation','translate_abstracts','library_chat','ref_format')",
             name="ck_jobs_job_type",
         ),
         CheckConstraint(
@@ -526,6 +527,38 @@ Index("idx_bib_status", BibEntry.reading_status)
 Index("idx_bib_doi", BibEntry.doi)
 Index("idx_bib_expires", BibEntry.expires_at)
 Index("idx_bib_markdown_source", BibEntry.markdown_source_file_id)
+
+
+# --------------------------------------------------------------------------
+# Reference format presets
+# --------------------------------------------------------------------------
+
+class RefFormatPreset(Base):
+    __tablename__ = "ref_format_presets"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "name", name="uq_rfp_owner_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    format_rules: Mapped[str] = mapped_column(Text, nullable=False)
+    detected_format_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    entry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_rfp_owner", RefFormatPreset.owner_user_id)
 
 
 # --------------------------------------------------------------------------
@@ -839,7 +872,8 @@ class Artifact(Base):
             "artifact_type IN ('reading_step','reading_final','reading_extract',"
             "'filter_excel','compare_excel','compare_md','synthesis_md',"
             "'references_excel','references_with_citations_excel',"
-            "'citation_trace_md','references_json','translation_md','translation_glossary','library_chat_md')",
+            "'citation_trace_md','references_json','translation_md','translation_glossary',"
+            "'library_chat_md','ref_format_md')",
             name="ck_artifacts_artifact_type",
         ),
     )

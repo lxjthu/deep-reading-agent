@@ -25,6 +25,7 @@ PROMPT_TYPE_LABELS: dict[str, str] = {
     "translation": "全文翻译",
     "library_chat": "文献库 AI 查询",
     "card_note": "Markdown 卡片笔记",
+    "ref_format": "参考文献格式",
 }
 
 PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
@@ -153,6 +154,16 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
             "file_path": "prompts/card_note/atomic_card_writer.md",
         },
     },
+    "ref_format": {
+        "analyze_prompt": {
+            "title": "格式规则提取",
+            "file_path": "prompts/ref_format/analyze_prompt.md",
+        },
+        "generate_prompt": {
+            "title": "参考文献生成",
+            "file_path": "prompts/ref_format/generate_prompt.md",
+        },
+    },
 }
 
 FILTER_FALLBACK_TEMPLATE = """你是一位学术文献筛选助手。请围绕研究主题“{topic}”评估下面这篇文献，并严格输出 JSON。
@@ -260,4 +271,9 @@ JSON 结构：
   "body_markdown": "## 核心观点\\n..."
 }
 """
+    if prompt_type == "ref_format":
+        if prompt_key == "analyze_prompt":
+            return "请分析参考文献示例的著录格式，并严格输出 JSON。"
+        if prompt_key == "generate_prompt":
+            return "请按给定格式规则将文献信息生成参考文献条目，并严格输出 JSON。"
     return "请直接输出分析内容，不要客套开场白。"
