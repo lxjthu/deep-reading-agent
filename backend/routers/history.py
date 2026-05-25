@@ -472,3 +472,98 @@ async def list_library_chat(
             }
         )
     return {"library_chat": files, "all": files}
+
+
+class SaveLibraryChatReportRequest(BaseModel):
+    question: str
+    report: str
+    entry_ids: List[str] = Field(default_factory=list)
+    entry_titles: List[str] = Field(default_factory=list)
+    keywords: List[str] = Field(default_factory=list)
+
+
+@router.post("/library-chat/")
+async def save_library_chat_report(
+    req: SaveLibraryChatReportRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not req.report.strip():
+        raise HTTPException(status_code=400, detail="报告内容不能为空。")
+
+    members: list[BibEntry] = []
+    seen: set[str] = set()
+    for entry_id in req.entry_ids:
+        entry = await db.get(BibEntry, entry_id)
+        if entry is None or entry.owner_user_id != user.id or entry.id in seen:
+            continue
+        seen.add(entry.id)
+        members.append(entry)
+
+    job_id = str(uuid.uuid4())
+    now = utcnow_naive()
+    db.add(
+        Job(
+            id=job_id,
+            owner_user_id=user.id,
+            job_type="library_chat",
+            status="success",
+            params_json=json.dumps(
+                {"question": req.question, "keywords": req.keywords},
+                ensure_ascii=False,
+            ),
+            progress=100,
+            current_stage="完成",
+            created_at=now,
+            started_at=now,
+            finished_at=now,
+            expires_at=compute_expires_at(user),
+        )
+    )
+
+    for sort_order, entry in enumerate(members):
+        db.add(
+            JobBibEntry(
+                job_id=job_id,
+                bib_entry_id=entry.id,
+                role="library_chat_member",
+                sort_order=sort_order,
+            )
+        )
+
+    result_dir = get_results_dir(user.id, job_id)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"library_chat_{timestamp}.md"
+
+    papers_str = ", ".join(req.entry_titles[:3])
+    if len(req.entry_titles) > 3:
+        papers_str += f" 等{len(req.entry_titles)}篇"
+
+    content = f"""# 文献助手报告：{req.question}
+
+**生成时间**：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+**涉及文献**：{papers_str}
+**检索关键词**：{', '.join(req.keywords) if req.keywords else '无'}
+
+---
+
+{req.report}
+"""
+
+    filepath = result_dir / filename
+    filepath.write_text(content, encoding="utf-8")
+    storage_path = build_storage_path(filepath)
+    db.add(
+        Artifact(
+            job_id=job_id,
+            owner_user_id=user.id,
+            artifact_type="library_chat_md",
+            filename=filename,
+            storage_path=storage_path,
+            size_bytes=filepath.stat().st_size,
+            expires_at=compute_expires_at(user),
+        )
+    )
+    await db.commit()
+
+    return {"success": True, "filename": filename, "path": storage_path, "job_id": job_id}
