@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal, Optional
 
 import httpx
@@ -17,8 +19,9 @@ from starlette.responses import StreamingResponse
 from auth.dependencies import current_user
 from backend.utils.api_key import validate_deepseek_key
 from db import get_db
-from db.models import Annotation, BibEntry, BibReference, ReadingItem, User
+from db.models import Annotation, Artifact, BibEntry, BibEntry, BibReference, Job, JobBibEntry, ReadingItem, User
 from prompt_service import get_effective_prompt_text
+from result_storage import build_result_storage_path, get_results_root
 
 router = APIRouter()
 
@@ -634,3 +637,111 @@ async def save_library_chat_comments(
         "saved": len(comments),
         "skipped": len(ordered_rows) - len(comments),
     }
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _compute_expires_at(user: User) -> datetime | None:
+    if user.role == "normal":
+        return _utcnow_naive() + __import__("datetime").timedelta(hours=24)
+    return None
+
+
+class SaveReportRequest(BaseModel):
+    question: str
+    report: str
+    entry_ids: list[str] = Field(default_factory=list)
+    entry_titles: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+
+
+@router.post("/save-report")
+async def save_chat_report(
+    req: SaveReportRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not req.report.strip():
+        raise HTTPException(status_code=400, detail="报告内容不能为空。")
+
+    members: list[BibEntry] = []
+    seen: set[str] = set()
+    for entry_id in req.entry_ids:
+        entry = await db.get(BibEntry, entry_id)
+        if entry is None or entry.owner_user_id != user.id or entry.id in seen:
+            continue
+        seen.add(entry.id)
+        members.append(entry)
+
+    job_id = str(uuid.uuid4())
+    now = _utcnow_naive()
+    db.add(
+        Job(
+            id=job_id,
+            owner_user_id=user.id,
+            job_type="library_chat",
+            status="success",
+            params_json=json.dumps(
+                {"question": req.question, "keywords": req.keywords},
+                ensure_ascii=False,
+            ),
+            progress=100,
+            current_stage="完成",
+            created_at=now,
+            started_at=now,
+            finished_at=now,
+            expires_at=_compute_expires_at(user),
+        )
+    )
+
+    for sort_order, entry in enumerate(members):
+        db.add(
+            JobBibEntry(
+                job_id=job_id,
+                bib_entry_id=entry.id,
+                role="library_chat_member",
+                sort_order=sort_order,
+            )
+        )
+
+    results_root = get_results_root()
+    result_dir = results_root / str(user.id) / job_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"library_chat_{timestamp}.md"
+
+    papers_str = ", ".join(req.entry_titles[:3])
+    if len(req.entry_titles) > 3:
+        papers_str += f" 等{len(req.entry_titles)}篇"
+
+    content = f"""# 文献助手报告：{req.question}
+
+**生成时间**：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+**涉及文献**：{papers_str}
+**检索关键词**：{', '.join(req.keywords) if req.keywords else '无'}
+
+---
+
+{req.report}
+"""
+
+    filepath = result_dir / filename
+    filepath.write_text(content, encoding="utf-8")
+    storage_path = build_result_storage_path(filepath)
+    db.add(
+        Artifact(
+            job_id=job_id,
+            owner_user_id=user.id,
+            artifact_type="library_chat_md",
+            filename=filename,
+            storage_path=storage_path,
+            size_bytes=filepath.stat().st_size,
+            expires_at=_compute_expires_at(user),
+        )
+    )
+    await db.commit()
+
+    return {"success": True, "filename": filename, "path": storage_path, "job_id": job_id}

@@ -403,7 +403,7 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "job_type IN ('filter','reading_long','reading_quant','reading_qual',"
-            "'compare','synthesis','reference_trace','translation','translate_abstracts')",
+            "'compare','synthesis','reference_trace','translation','translate_abstracts','library_chat')",
             name="ck_jobs_job_type",
         ),
         CheckConstraint(
@@ -839,7 +839,7 @@ class Artifact(Base):
             "artifact_type IN ('reading_step','reading_final','reading_extract',"
             "'filter_excel','compare_excel','compare_md','synthesis_md',"
             "'references_excel','references_with_citations_excel',"
-            "'citation_trace_md','references_json','translation_md','translation_glossary')",
+            "'citation_trace_md','references_json','translation_md','translation_glossary','library_chat_md')",
             name="ck_artifacts_artifact_type",
         ),
     )

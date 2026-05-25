@@ -32,6 +32,7 @@ READING_ARTIFACT_TYPES = {
     "translation_glossary",
 }
 FILTER_ARTIFACT_TYPES = {"filter_excel"}
+LIBRARY_CHAT_ARTIFACT_TYPES = {"library_chat_md"}
 
 
 class SaveSynthesisRequest(BaseModel):
@@ -73,6 +74,8 @@ def _human_size(size: int) -> str:
 def _history_type(artifact: Artifact, job: Job) -> str:
     if job.job_type == "translation":
         return "全文翻译"
+    if job.job_type == "library_chat":
+        return "文献助手"
     if artifact.artifact_type == "filter_excel":
         return "文献筛选"
     if artifact.artifact_type == "compare_md":
@@ -161,7 +164,7 @@ async def list_history(
             .join(Job, Job.id == Artifact.job_id)
             .where(
                 Artifact.owner_user_id == target_owner_id,
-                Artifact.artifact_type != "synthesis_md",
+                Artifact.artifact_type.notin_(["synthesis_md", "library_chat_md"]),
             )
             .order_by(Artifact.created_at.desc(), Artifact.id.desc())
         )
@@ -429,3 +432,43 @@ async def save_synthesis(
     await db.commit()
 
     return {"success": True, "filename": filename, "path": storage_path, "job_id": job_id}
+
+
+# === Library Chat History ===
+
+@router.get("/library-chat/")
+async def list_library_chat(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List library chat report history for current user."""
+    artifacts = (
+        await db.execute(
+            select(Artifact, Job)
+            .join(Job, Job.id == Artifact.job_id)
+            .where(
+                Artifact.owner_user_id == user.id,
+                Artifact.artifact_type == "library_chat_md",
+                Job.job_type == "library_chat",
+            )
+            .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        )
+    ).all()
+    files = []
+    for artifact, job in artifacts:
+        absolute_path = _artifact_absolute_path(artifact)
+        size = artifact.size_bytes or (absolute_path.stat().st_size if absolute_path.exists() else 0)
+        modified_dt = artifact.created_at or job.created_at or utcnow_naive()
+        files.append(
+            {
+                "filename": artifact.filename,
+                "path": artifact.storage_path,
+                "download_path": artifact.storage_path,
+                "size": size,
+                "size_human": _human_size(size),
+                "modified": modified_dt.strftime("%Y-%m-%d %H:%M"),
+                "type": "文献助手",
+                "job_id": job.id,
+            }
+        )
+    return {"library_chat": files, "all": files}
