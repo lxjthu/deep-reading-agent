@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-22
+> 最后更新：2026-05-25
 
 ---
 
@@ -28,6 +28,7 @@
 | [PENDING_PLANS.md](PENDING_PLANS.md) | 待办 | 所有未实施的功能规划（P1-P8） | 了解接下来做什么 |
 | [MULTI_USER_PLAN.md](MULTI_USER_PLAN.md) | 方案 | 多用户系统整体规划 | 理解用户/角色/隔离设计 |
 | [MULTIUSER_PROGRESS.md](MULTIUSER_PROGRESS.md) | 进度 | 多用户功能实施进度 | 查看已完成的里程碑 |
+| [ADMIN_USAGE_FEEDBACK_PLAN.md](ADMIN_USAGE_FEEDBACK_PLAN.md) | 方案 | 管理员用户洞察与反馈后台设计 | 设计后台用量统计、用户详情、反馈闭环时 |
 | [PROMPT_MANAGEMENT_PLAN.md](PROMPT_MANAGEMENT_PLAN.md) | 方案 | 提示词中心设计 | 理解 prompt_templates 的设计 |
 | [PDF_METADATA_MATCH_PLAN.md](PDF_METADATA_MATCH_PLAN.md) | 方案 | PDF 元数据在线匹配 | 理解 match_online/apply_match 的设计 |
 | [SYNTHESIS_PROMPT_PLAN.md](SYNTHESIS_PROMPT_PLAN.md) | 方案 | 综述提示词改进 | 综述相关规划 |
@@ -49,7 +50,7 @@
 | [TROUBLESHOOTING_SERVER_ERRORS.md](TROUBLESHOOTING_SERVER_ERRORS.md) | 排错 | 服务器报错排查记录（含修复方案） | **线上报错排查首选**：500错误、401错误、SQL错误等 |
 | [PACKAGING_DOWNLOAD_FILTER_REPORT_BUG.md](PACKAGING_DOWNLOAD_FILTER_REPORT_BUG.md) | 排错/修复 | 打包版产物下载、参考文献引用详情、模板市场 AI 生成等问题记录 | 排查 Windows 打包版和模板市场生成链路问题 |
 | [TWO_COLUMN_PDF_FIX.md](TWO_COLUMN_PDF_FIX.md) | 修复 | 双栏 PDF 参考文献提取修复（列感知文本提取） | 双栏论文参考文献提取不全 |
-| [MIGRATION_PLAN_10PLUS_USERS.md](MIGRATION_PLAN_10PLUS_USERS.md) | 方案 | 10+ 并发用户迁移方案 | 并发扩容规划 |
+| [MIGRATION_PLAN_10PLUS_USERS.md](MIGRATION_PLAN_10PLUS_USERS.md) | 方案 | 10+ 并发用户迁移方案（含 SQLite → PostgreSQL 迁移 Runbook） | 并发扩容规划、后端数据库迁移 |
 | [CONCURRENCY_ANALYSIS.md](CONCURRENCY_ANALYSIS.md) | 分析 | 多用户并发分析 | 性能瓶颈分析 |
 
 ---

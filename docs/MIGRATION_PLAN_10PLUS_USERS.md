@@ -780,6 +780,21 @@ redis-cli ping
 
 **目标**：从 SQLite 迁移到 PostgreSQL，彻底解决并发写入问题
 
+**本次补充依据（2026-05-25）**：
+
+- 当前对话要求把后端数据库迁移方案补全为可执行方案。
+- 结合 `DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md` 与 `TECHNICAL_OVERVIEW.md` 中的线上踩坑：SQLite Alembic 可能出现“迁移虚标”，迁移后不能只看 `alembic current`，必须验证真实列、约束与数据。
+- 结合 `PENDING_PLANS.md` 中的约束：PostgreSQL/Redis 迁移分支只处理迁移相关改动，不顺手清理前端 lint 或其他基线问题，避免污染 diff。
+- 结合当前代码：`CURRENT_SCHEMA_VERSION = "021"`，表结构已包含 Agent 会话、卡片笔记、用户反馈后台表、维度模板、上传批次等新表，原有示例脚本的表清单已过期。
+
+**迁移原则**：
+
+1. 先冻结写入，再做 SQLite 一致性快照；不要在后端仍可写入时直接复制 `db/app.sqlite`。
+2. 先用 Alembic 在 PostgreSQL 建空结构，再导入数据；不要在迁移脚本里临时 `CREATE TABLE`。
+3. 数据迁移必须有 `--dry-run`、行数对账和失败即回滚。目标库默认必须为空，除非显式传入清空参数。
+4. 应用代码要同时支持 SQLite 与 PostgreSQL 一段时间，保留 SQLite 回滚通道，等线上稳定后再删除旧依赖。
+5. `.dra` 导入导出继续作为用户级可迁移格式；整体数据库迁移不能破坏 `backend/services/data_portability.py` 的导出/导入顺序和 schema version。
+
 #### 3.1 安装 PostgreSQL
 
 ```bash
@@ -809,46 +824,101 @@ GRANT ALL PRIVILEGES ON DATABASE deepreading TO deepreading;
 \q
 ```
 
-#### 3.2 更新依赖
+建议额外创建迁移演练库，先在演练库跑完整流程：
+
+```sql
+CREATE DATABASE deepreading_migration_dryrun OWNER deepreading;
+```
+
+#### 3.2 迁移前冻结与备份
+
+生产迁移窗口建议安排在低峰期，步骤如下：
+
+```bash
+cd /root/.openclaw/workspace/deep-reading-agent
+
+# 1. 停止会写数据库的服务，至少停止后端和后台任务 worker
+pkill -f "uvicorn" || true
+pkill -f "celery" || true
+
+# 2. 确认没有进程仍打开 SQLite 文件
+lsof db/app.sqlite || true
+
+# 3. 用 SQLite 在线备份命令生成一致性快照
+mkdir -p db/backups
+sqlite3 db/app.sqlite ".backup 'db/backups/app.sqlite.pre-postgres-$(date +%Y%m%d-%H%M%S).bak'"
+
+# 4. 基础健康检查
+sqlite3 db/app.sqlite "PRAGMA integrity_check;"
+sqlite3 db/app.sqlite "PRAGMA foreign_key_check;"
+```
+
+必须记住服务器数据库路径是项目根目录下的 `db/app.sqlite`，不是 `backend/db/app.sqlite`。这是 2026-05-22 线上部署踩坑之一。
+
+迁移前还要检查当前 SQLite 结构是否真的到达最新 head，尤其是曾经出现过虚标的字段和约束：
+
+```bash
+cd /root/.openclaw/workspace/deep-reading-agent
+cd backend && alembic current && alembic heads
+cd ..
+sqlite3 db/app.sqlite "PRAGMA table_info(bib_entries);"
+sqlite3 db/app.sqlite "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs';"
+```
+
+如果 `bib_entries.abstract_cn`、`bib_entries.language` 或 `jobs` 的新 `job_type` 约束缺失，先修复 SQLite 当前库，再迁移到 PostgreSQL。不要把一个“虚标成功”的 SQLite 库直接搬到新库。
+
+#### 3.3 更新依赖
 
 **文件**：`backend/requirements.txt`
 
 ```txt
-# 替换 SQLite 依赖
-# aiosqlite>=0.19.0  # 移除
-
-# 添加 PostgreSQL 依赖
+# 迁移稳定前保留 aiosqlite，用于本地开发和快速回滚
+aiosqlite>=0.19.0
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.9
 alembic>=1.13.0
 ```
 
-#### 3.3 更新数据库配置
+#### 3.4 更新数据库配置
 
 **文件**：`backend/db/session.py`
+
+当前 `session.py` 已经通过 `DATABASE_URL` 支持覆盖默认 SQLite，但 PostgreSQL 迁移需要补两点：
+
+- 应用运行使用异步 URL：`postgresql+asyncpg://...`
+- Alembic 运行使用同步 URL：`postgresql+psycopg2://...`，不能把 `postgresql+asyncpg` 原样交给 `engine_from_config`
 
 ```python
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 import os
 
-# PostgreSQL 连接字符串
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://deepreading:your_password@localhost:5432/deepreading"
+    f"sqlite+aiosqlite:///{DB_PATH.as_posix()}",
 )
 
-# 创建异步引擎
-engine = create_async_engine(
-    DATABASE_URL,
-    pool_size=20,           # 连接池大小
-    max_overflow=10,        # 最大溢出连接
-    pool_timeout=30,        # 连接超时
-    pool_recycle=1800,      # 连接回收时间
-    echo=False,             # 不打印 SQL
-)
+if DATABASE_URL.startswith("postgresql+asyncpg"):
+    SYNC_DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2", 1)
+elif DATABASE_URL.startswith("sqlite+aiosqlite"):
+    SYNC_DATABASE_URL = DATABASE_URL.replace("sqlite+aiosqlite", "sqlite", 1)
+else:
+    SYNC_DATABASE_URL = DATABASE_URL
 
-# 创建异步会话
+engine_kwargs = {"echo": False, "future": True}
+if DATABASE_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+elif DATABASE_URL.startswith("postgresql"):
+    engine_kwargs.update(
+        pool_size=20,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=1800,
+        pool_pre_ping=True,
+    )
+
+engine = create_async_engine(DATABASE_URL, **engine_kwargs)
+
 async_session = sessionmaker(
     engine,
     class_=AsyncSession,
@@ -860,9 +930,107 @@ async def get_db():
         yield session
 ```
 
-#### 3.4 数据迁移脚本
+线上环境变量示例：
+
+```bash
+export DATABASE_URL="postgresql+asyncpg://deepreading:your_password@localhost:5432/deepreading"
+```
+
+#### 3.5 在 PostgreSQL 建空 schema
+
+不要重新 `alembic init`，仓库已经有 `backend/migrations/`。正确步骤是：
+
+```bash
+cd /root/.openclaw/workspace/deep-reading-agent/backend
+export DATABASE_URL="postgresql+asyncpg://deepreading:your_password@localhost:5432/deepreading"
+alembic upgrade head
+alembic current
+```
+
+建表后验证目标库表清单和 head：
+
+```bash
+psql "postgresql://deepreading:your_password@localhost:5432/deepreading" -c "\dt"
+psql "postgresql://deepreading:your_password@localhost:5432/deepreading" -c "SELECT version_num FROM alembic_version;"
+```
+
+#### 3.6 数据迁移脚本
 
 **文件**：`scripts/migrate_sqlite_to_postgres.py`（新建）
+
+脚本不要使用下面旧版示例的静态表清单。当前迁移顺序应以 `backend/db/models.py` 与 `backend/services/data_portability.py` 为准，至少包含：
+
+```python
+TABLES_TO_MIGRATE = [
+    "users",
+    "invite_codes",
+    "user_settings",
+    "upload_batches",
+    "files",
+    "prompt_templates",
+    "dimension_sets",
+    "dimension_items",
+    "dimension_templates",
+    "template_items",
+    "bib_entries",
+    "jobs",
+    "bib_filter_links",
+    "job_bib_entries",
+    "reading_items",
+    "reading_item_edits",
+    "annotations",
+    "agent_sessions",
+    "agent_messages",
+    "agent_action_proposals",
+    "artifacts",
+    "card_notes",
+    "bib_references",
+    "bib_reference_citations",
+]
+```
+
+实现要求：
+
+- 目标 PostgreSQL 必须为空，或显式传 `--truncate-target` 后按反向 FK 顺序清空；默认不覆盖已有数据。
+- 用 `sqlite3.Row` 保留列名，只插入源表与目标表共同存在的列；如果目标表缺列，直接失败。
+- 显式迁移主键 `id`，迁移完对所有 PostgreSQL 序列执行 `setval`，避免后续插入主键冲突。
+- Boolean、JSON 文本、datetime 字符串由驱动做基础转换；遇到转换失败要打印表名、主键和列名。
+- 每张表用事务批量写入，任一表失败则回滚整个目标库事务。
+- 输出源/目标每张表行数对账、失败行明细、迁移耗时。
+- 增加 `--verify-only`：不写入，只比较 SQLite 与 PostgreSQL 行数、关键外键孤儿记录、最大 id。
+- 增加 `--exclude-system-seeds` 只在确有需要时使用；默认迁移系统模板和邀请码，保持线上状态完整。
+
+正式迁移顺序：
+
+```bash
+cd /root/.openclaw/workspace/deep-reading-agent
+
+# 1. 演练库 dry run
+python scripts/migrate_sqlite_to_postgres.py \
+  --dry-run \
+  --sqlite-path db/app.sqlite \
+  --pg-url "postgresql://deepreading:your_password@localhost:5432/deepreading_migration_dryrun"
+
+# 2. 演练库正式导入
+python scripts/migrate_sqlite_to_postgres.py \
+  --sqlite-path db/app.sqlite \
+  --pg-url "postgresql://deepreading:your_password@localhost:5432/deepreading_migration_dryrun"
+
+# 3. 演练校验
+python scripts/migrate_sqlite_to_postgres.py \
+  --verify-only \
+  --sqlite-path db/app.sqlite \
+  --pg-url "postgresql://deepreading:your_password@localhost:5432/deepreading_migration_dryrun"
+
+# 4. 生产库正式导入
+python scripts/migrate_sqlite_to_postgres.py \
+  --sqlite-path db/app.sqlite \
+  --pg-url "postgresql://deepreading:your_password@localhost:5432/deepreading"
+```
+
+#### 3.7 旧版脚本示例（仅作反例参考）
+
+下面的旧版脚本保留用于说明原方案的问题：表清单过期、不更新序列、不做结构对账、不保证事务回滚。实施时应以上面的 3.6 要求重写。
 
 ```python
 """
@@ -969,19 +1137,50 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-#### 3.5 Alembic 迁移
+#### 3.8 迁移后校验
+
+数据库校验：
 
 ```bash
-# 初始化 Alembic（如果还没有）
-cd backend
-alembic init migrations
-
-# 生成迁移脚本
-alembic revision --autogenerate -m "migrate_to_postgresql"
-
-# 执行迁移
-alembic upgrade head
+psql "postgresql://deepreading:your_password@localhost:5432/deepreading" -c "SELECT COUNT(*) FROM users;"
+psql "postgresql://deepreading:your_password@localhost:5432/deepreading" -c "SELECT COUNT(*) FROM bib_entries;"
+psql "postgresql://deepreading:your_password@localhost:5432/deepreading" -c "SELECT COUNT(*) FROM jobs;"
+psql "postgresql://deepreading:your_password@localhost:5432/deepreading" -c "SELECT COUNT(*) FROM reading_items;"
+psql "postgresql://deepreading:your_password@localhost:5432/deepreading" -c "SELECT COUNT(*) FROM artifacts;"
+psql "postgresql://deepreading:your_password@localhost:5432/deepreading" -c "SELECT COUNT(*) FROM card_notes;"
 ```
+
+外键与业务抽样：
+
+- 每个用户的 `bib_entries`、`files`、`jobs` 数量与 SQLite 对齐。
+- `files.storage_path` 指向的上传文件仍存在。
+- `artifacts.path` 或相关结果文件仍能下载。
+- 文献库详情页能打开，精读结果、参考文献、卡片笔记、Agent 历史会话能读取。
+- `.dra` 导出一个真实用户，再导入到测试用户，确认 `CURRENT_SCHEMA_VERSION = "021"` 的包可用。
+
+应用校验：
+
+```bash
+cd /root/.openclaw/workspace/deep-reading-agent
+export DATABASE_URL="postgresql+asyncpg://deepreading:your_password@localhost:5432/deepreading"
+python -m unittest backend.tests.test_queue_manager
+python -c "from backend.main import app; print('App loaded successfully')"
+```
+
+上线后再做一次前端构建和浏览器强刷，避免误判为后端迁移问题：
+
+```bash
+cd frontend && npm run build
+```
+
+#### 3.9 切换与灰度
+
+1. 保留 SQLite 备份和旧 `DATABASE_URL` 配置。
+2. 设置生产 `DATABASE_URL=postgresql+asyncpg://...`。
+3. 启动后端单 worker，先不要同时切到多 worker。
+4. 注册/登录、上传、筛选、精读、文献库、导出 `.dra` 各跑一条冒烟链路。
+5. 观察 24 小时：500 错误、连接池耗尽、任务队列卡住、下载路径异常。
+6. 稳定后再进入阶段 4 多 worker 部署。
 
 ---
 
@@ -1448,10 +1647,18 @@ server {
 ### 5.3 阶段 3 检查清单
 
 - [ ] PostgreSQL 已安装并配置
-- [ ] 数据迁移脚本已测试
-- [ ] 数据迁移已完成
-- [ ] Alembic 迁移已执行
-- [ ] 应用已切换到 PostgreSQL
+- [ ] 演练库 `deepreading_migration_dryrun` 已创建
+- [ ] SQLite 写入已冻结，并用 `.backup` 生成一致性快照
+- [ ] `PRAGMA integrity_check` 与 `PRAGMA foreign_key_check` 通过
+- [ ] SQLite 当前结构已验证，未出现 Alembic 虚标字段或 CHECK 约束缺失
+- [ ] PostgreSQL 空库已通过现有 Alembic `upgrade head` 建表
+- [ ] `session.py` 已区分 `postgresql+asyncpg` 应用 URL 与 `postgresql+psycopg2` Alembic URL
+- [ ] 数据迁移脚本已覆盖当前全部业务表，并支持 `--dry-run`、`--verify-only`、序列 `setval`
+- [ ] 演练库迁移与对账通过
+- [ ] 生产库迁移与对账通过
+- [ ] `.dra` 导出/导入抽样验证通过
+- [ ] 应用已切换到 PostgreSQL 单 worker
+- [ ] 核心冒烟链路通过：登录、上传、筛选、精读、文献库、下载、导出
 - [ ] 压力测试通过（8 并发用户）
 
 ### 5.4 阶段 4 检查清单
@@ -1503,11 +1710,19 @@ git checkout HEAD~1 backend/routers/reading.py
 
 **阶段 3 回滚**：
 ```bash
-# 恢复 SQLite
-cp db/backups/app.sqlite.bak db/app.sqlite
+# 1. 停止 PostgreSQL 模式后端
+pkill -f "uvicorn" || true
+pkill -f "celery" || true
 
-# 恢复配置
-git checkout HEAD~1 backend/db/session.py
+# 2. 恢复 SQLite 数据库快照
+cp db/backups/app.sqlite.pre-postgres-YYYYMMDD-HHMMSS.bak db/app.sqlite
+
+# 3. 清空 PostgreSQL DATABASE_URL，回到默认 SQLite
+unset DATABASE_URL
+
+# 4. 启动单 worker 后端并做冒烟检查
+cd backend
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
 **阶段 4 回滚**：

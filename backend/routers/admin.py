@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import secrets
+import json
 from datetime import UTC, datetime
 from typing import Optional
 
@@ -15,7 +16,7 @@ from auth.schemas import MessageResponse, UserResponse
 from auth.security import hash_password, validate_password_strength
 from cleanup import reapply_user_retention
 from db import get_db
-from db.models import InviteCode, User
+from db.models import AdminAuditLog, InviteCode, User
 from routers.auth import build_user_response
 
 router = APIRouter()
@@ -74,6 +75,29 @@ def generate_invite_code() -> str:
     return f"VIP-{secrets.token_hex(4).upper()}"
 
 
+def add_admin_audit(
+    db: AsyncSession,
+    *,
+    admin_user_id: int,
+    action: str,
+    target_type: str,
+    target_id: str | None,
+    summary: str,
+    payload: dict | None = None,
+) -> None:
+    db.add(
+        AdminAuditLog(
+            admin_user_id=admin_user_id,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            summary=summary,
+            payload_json=json.dumps(payload or {}, ensure_ascii=False),
+            created_at=utcnow_naive(),
+        )
+    )
+
+
 @router.get("/users", response_model=list[UserResponse])
 async def list_users(
     _admin: User = Depends(require_admin),
@@ -89,7 +113,7 @@ async def list_users(
 async def update_user(
     user_id: int,
     request: AdminUserUpdateRequest,
-    _admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserUpdateResponse:
     user = await db.get(User, user_id)
@@ -117,6 +141,15 @@ async def update_user(
     if not changed:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="没有可更新的字段。")
 
+    add_admin_audit(
+        db,
+        admin_user_id=admin.id,
+        action="update_user",
+        target_type="user",
+        target_id=str(user.id),
+        summary=f"更新用户 {user.username}",
+        payload=request.model_dump(exclude_none=True),
+    )
     await db.commit()
     await db.refresh(user)
     return AdminUserUpdateResponse(message="用户更新成功。", user=build_user_response(user))
@@ -159,6 +192,15 @@ async def create_invite_code(
         created_at=utcnow_naive(),
     )
     db.add(invite)
+    add_admin_audit(
+        db,
+        admin_user_id=admin.id,
+        action="create_invite_code",
+        target_type="invite_code",
+        target_id=code,
+        summary=f"创建邀请码 {code}",
+        payload=request.model_dump(exclude_none=True),
+    )
     await db.commit()
     await db.refresh(invite)
     return build_invite_response(invite)
@@ -167,12 +209,21 @@ async def create_invite_code(
 @router.delete("/invite_codes/{invite_id}", response_model=MessageResponse)
 async def delete_invite_code(
     invite_id: int,
-    _admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponse:
     invite = await db.get(InviteCode, invite_id)
     if invite is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="邀请码不存在。")
+    code = invite.code
     await db.delete(invite)
+    add_admin_audit(
+        db,
+        admin_user_id=admin.id,
+        action="delete_invite_code",
+        target_type="invite_code",
+        target_id=str(invite_id),
+        summary=f"删除邀请码 {code}",
+    )
     await db.commit()
     return MessageResponse(message="邀请码已删除。")

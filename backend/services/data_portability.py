@@ -48,7 +48,17 @@ from upload_storage import get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "020"
+CURRENT_SCHEMA_VERSION = "021"
+
+# Deliberately excluded from .dra export/import:
+# - user_feedback
+# - feedback_events
+# - admin_audit_logs
+#
+# These tables are administrator-facing product operations records, not user
+# research workspace data. Feedback is retained for admin follow-up even when
+# normal-user workspace data expires; if privacy deletion is needed later, add
+# a dedicated anonymization/deletion flow instead of coupling it to .dra.
 
 # FK forward order for export / import
 EXPORT_TABLE_ORDER = [

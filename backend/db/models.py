@@ -88,6 +88,105 @@ class UserSettings(Base):
     )
 
 
+class UserFeedback(Base):
+    __tablename__ = "user_feedback"
+    __table_args__ = (
+        CheckConstraint(
+            "feedback_type IN ('bug','feature','question','data_issue','translation','reading_quality','other')",
+            name="ck_user_feedback_type",
+        ),
+        CheckConstraint(
+            "status IN ('open','triaged','in_progress','resolved','closed','reopened')",
+            name="ck_user_feedback_status",
+        ),
+        CheckConstraint(
+            "priority IN ('P0','P1','P2','P3')",
+            name="ck_user_feedback_priority",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    feedback_type: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open", server_default="open")
+    priority: Mapped[str] = mapped_column(String, nullable=False, default="P3", server_default="P3")
+    route: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    app_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    related_job_id: Mapped[Optional[str]] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    related_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("files.id"), nullable=True)
+    related_bib_entry_id: Mapped[Optional[str]] = mapped_column(ForeignKey("bib_entries.id"), nullable=True)
+    related_artifact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("artifacts.id"), nullable=True)
+    assigned_admin_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    public_reply: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    internal_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_user_feedback_owner", UserFeedback.owner_user_id)
+Index("idx_user_feedback_status", UserFeedback.status)
+Index("idx_user_feedback_priority", UserFeedback.priority)
+Index("idx_user_feedback_created", UserFeedback.created_at)
+Index("idx_user_feedback_job", UserFeedback.related_job_id)
+
+
+class FeedbackEvent(Base):
+    __tablename__ = "feedback_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('created','status_changed','priority_changed','assigned','commented','public_replied','closed','reopened')",
+            name="ck_feedback_events_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feedback_id: Mapped[int] = mapped_column(
+        ForeignKey("user_feedback.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    old_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_feedback_events_feedback", FeedbackEvent.feedback_id)
+Index("idx_feedback_events_actor", FeedbackEvent.actor_user_id)
+
+
+class AdminAuditLog(Base):
+    __tablename__ = "admin_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    admin_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    target_type: Mapped[str] = mapped_column(String, nullable=False)
+    target_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+Index("idx_admin_audit_admin", AdminAuditLog.admin_user_id)
+Index("idx_admin_audit_target", AdminAuditLog.target_type, AdminAuditLog.target_id)
+Index("idx_admin_audit_created", AdminAuditLog.created_at)
+
+
 class AgentSession(Base):
     __tablename__ = "agent_sessions"
     __table_args__ = (

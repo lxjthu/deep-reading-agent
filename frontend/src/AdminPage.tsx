@@ -23,6 +23,34 @@ type AdminInvite = {
   is_expired: boolean
 }
 
+type AdminFeedback = {
+  id: number
+  owner_user_id: number
+  owner?: {
+    id: number
+    username: string
+    email?: string | null
+    role: string
+  } | null
+  feedback_type: string
+  title: string
+  content: string
+  status: 'open' | 'triaged' | 'in_progress' | 'resolved' | 'closed' | 'reopened'
+  priority: 'P0' | 'P1' | 'P2' | 'P3'
+  route?: string | null
+  related_job_id?: string | null
+  public_reply?: string | null
+  internal_note?: string | null
+  created_at: string
+  updated_at: string
+}
+
+type AdminFeedbackList = {
+  items: AdminFeedback[]
+  total: number
+  open_count: number
+}
+
 type CreateInviteForm = {
   code: string
   maxUses: string
@@ -56,7 +84,10 @@ export default function AdminPage() {
   const logout = useAuthStore((state) => state.logout)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [invites, setInvites] = useState<AdminInvite[]>([])
+  const [feedback, setFeedback] = useState<AdminFeedback[]>([])
+  const [feedbackOpenCount, setFeedbackOpenCount] = useState(0)
   const [roleDrafts, setRoleDrafts] = useState<Record<number, AdminUser['role']>>({})
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<number, { status: AdminFeedback['status']; priority: AdminFeedback['priority']; public_reply: string; internal_note: string }>>({})
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -75,6 +106,7 @@ export default function AdminPage() {
     const normalCount = users.filter((item) => item.role === 'normal').length
     const activeCount = users.filter((item) => item.is_active === 1).length
     const expiredInviteCount = invites.filter((item) => item.is_expired).length
+    const p0FeedbackCount = feedback.filter((item) => item.priority === 'P0' && !['resolved', 'closed'].includes(item.status)).length
     return {
       totalUsers: users.length,
       adminCount,
@@ -83,25 +115,45 @@ export default function AdminPage() {
       activeCount,
       totalInvites: invites.length,
       expiredInviteCount,
+      totalFeedback: feedback.length,
+      openFeedback: feedbackOpenCount,
+      p0FeedbackCount,
     }
-  }, [invites, users])
+  }, [feedback, feedbackOpenCount, invites, users])
 
   async function loadData() {
     setLoading(true)
     setError('')
     try {
-      const [usersResponse, invitesResponse] = await Promise.all([
+      const [usersResponse, invitesResponse, feedbackResponse] = await Promise.all([
         fetch('/api/admin/users'),
         fetch('/api/admin/invite_codes'),
+        fetch('/api/feedback/admin'),
       ])
-      const [usersData, inviteData] = await Promise.all([
+      const [usersData, inviteData, feedbackData] = await Promise.all([
         parseJsonOrThrow<AdminUser[]>(usersResponse),
         parseJsonOrThrow<AdminInvite[]>(invitesResponse),
+        parseJsonOrThrow<AdminFeedbackList>(feedbackResponse),
       ])
       setUsers(usersData)
       setInvites(inviteData)
+      setFeedback(feedbackData.items || [])
+      setFeedbackOpenCount(feedbackData.open_count || 0)
       setRoleDrafts(
         Object.fromEntries(usersData.map((item) => [item.id, item.role])) as Record<number, AdminUser['role']>,
+      )
+      setFeedbackDrafts(
+        Object.fromEntries(
+          (feedbackData.items || []).map((item) => [
+            item.id,
+            {
+              status: item.status,
+              priority: item.priority,
+              public_reply: item.public_reply || '',
+              internal_note: item.internal_note || '',
+            },
+          ]),
+        ) as Record<number, { status: AdminFeedback['status']; priority: AdminFeedback['priority']; public_reply: string; internal_note: string }>,
       )
     } catch (loadError: any) {
       setError(loadError.message || '加载管理员后台失败。')
@@ -196,6 +248,49 @@ export default function AdminPage() {
     }
   }
 
+  async function handleSaveFeedback(item: AdminFeedback) {
+    const draft = feedbackDrafts[item.id]
+    if (!draft) return
+    setMessage('')
+    setError('')
+    try {
+      const response = await fetch(`/api/feedback/admin/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: draft.status,
+          priority: draft.priority,
+          public_reply: draft.public_reply,
+          internal_note: draft.internal_note,
+        }),
+      })
+      await parseJsonOrThrow<AdminFeedback>(response)
+      setMessage(`反馈 #${item.id} 已更新。`)
+      await loadData()
+    } catch (saveError: any) {
+      setError(saveError.message || '更新反馈失败。')
+    }
+  }
+
+  const feedbackTypeLabel: Record<string, string> = {
+    bug: '问题',
+    feature: '建议',
+    question: '疑问',
+    data_issue: '数据',
+    translation: '翻译',
+    reading_quality: '精读质量',
+    other: '其他',
+  }
+
+  const feedbackStatusLabel: Record<string, string> = {
+    open: '待处理',
+    triaged: '已分流',
+    in_progress: '处理中',
+    resolved: '已解决',
+    closed: '已关闭',
+    reopened: '重开',
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-8">
       <div className="mx-auto max-w-7xl space-y-5">
@@ -258,9 +353,9 @@ export default function AdminPage() {
             <div className="mt-2 text-xs text-gray-400">已过期 {stats.expiredInviteCount} 个</div>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="text-sm text-gray-500">当前范围</div>
-            <div className="mt-2 text-sm text-gray-700">P12 v1 已覆盖：</div>
-            <div className="mt-1 text-xs text-gray-500">用户列表、角色管理、启停账号、密码重置、邀请码管理</div>
+            <div className="text-sm text-gray-500">待处理反馈</div>
+            <div className="mt-2 text-3xl font-bold text-gray-900">{stats.openFeedback}</div>
+            <div className="mt-2 text-xs text-gray-400">P0 未关闭 {stats.p0FeedbackCount} 条，总计 {stats.totalFeedback} 条</div>
           </div>
         </div>
 
@@ -454,6 +549,138 @@ export default function AdminPage() {
             </div>
           </section>
         </div>
+
+        <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-5 py-4">
+            <h2 className="text-base font-semibold text-gray-900">用户反馈</h2>
+            <p className="mt-1 text-sm text-gray-500">反馈是管理员运营数据，不进入用户 .dra 导出包。处理后用户可在“我的反馈”看到公开回复。</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {feedback.length === 0 ? (
+              <div className="px-5 py-8 text-sm text-gray-400">还没有用户反馈。</div>
+            ) : (
+              feedback.map((item) => {
+                const draft = feedbackDrafts[item.id] || {
+                  status: item.status,
+                  priority: item.priority,
+                  public_reply: item.public_reply || '',
+                  internal_note: item.internal_note || '',
+                }
+                return (
+                  <div key={item.id} className="px-5 py-5">
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            item.priority === 'P0' ? 'bg-red-100 text-red-700' :
+                              item.priority === 'P1' ? 'bg-amber-100 text-amber-700' :
+                                'bg-gray-100 text-gray-600'
+                          }`}>
+                            {item.priority}
+                          </span>
+                          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                            {feedbackTypeLabel[item.feedback_type] || item.feedback_type}
+                          </span>
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                            {feedbackStatusLabel[item.status] || item.status}
+                          </span>
+                        </div>
+                        <div className="mt-3 text-base font-semibold text-gray-900">{item.title}</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          #{item.id} · {item.owner?.username || `用户 ${item.owner_user_id}`} · {formatTime(item.created_at)}
+                          {item.route ? ` · ${item.route}` : ''}
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-gray-700">{item.content}</p>
+                        {item.related_job_id && (
+                          <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                            关联任务：{item.related_job_id}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-gray-500">状态</span>
+                            <select
+                              value={draft.status}
+                              onChange={(event) =>
+                                setFeedbackDrafts((current) => ({
+                                  ...current,
+                                  [item.id]: { ...draft, status: event.target.value as AdminFeedback['status'] },
+                                }))
+                              }
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                            >
+                              <option value="open">待处理</option>
+                              <option value="triaged">已分流</option>
+                              <option value="in_progress">处理中</option>
+                              <option value="resolved">已解决</option>
+                              <option value="closed">已关闭</option>
+                              <option value="reopened">重开</option>
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-gray-500">优先级</span>
+                            <select
+                              value={draft.priority}
+                              onChange={(event) =>
+                                setFeedbackDrafts((current) => ({
+                                  ...current,
+                                  [item.id]: { ...draft, priority: event.target.value as AdminFeedback['priority'] },
+                                }))
+                              }
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                            >
+                              <option value="P0">P0</option>
+                              <option value="P1">P1</option>
+                              <option value="P2">P2</option>
+                              <option value="P3">P3</option>
+                            </select>
+                          </label>
+                        </div>
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium text-gray-500">公开回复（用户可见）</span>
+                          <textarea
+                            value={draft.public_reply}
+                            onChange={(event) =>
+                              setFeedbackDrafts((current) => ({
+                                ...current,
+                                [item.id]: { ...draft, public_reply: event.target.value },
+                              }))
+                            }
+                            rows={3}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium text-gray-500">内部备注</span>
+                          <textarea
+                            value={draft.internal_note}
+                            onChange={(event) =>
+                              setFeedbackDrafts((current) => ({
+                                ...current,
+                                [item.id]: { ...draft, internal_note: event.target.value },
+                              }))
+                            }
+                            rows={3}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                          />
+                        </label>
+                        <button
+                          onClick={() => void handleSaveFeedback(item)}
+                          className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                          type="button"
+                        >
+                          保存反馈处理
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </section>
       </div>
     </div>
   )

@@ -28,7 +28,7 @@ from db import AsyncSessionLocal
 from dimension_seed import ensure_default_dimension_sets
 from prompt_service import ensure_builtin_prompt_templates
 from template_seed import ensure_dimension_templates
-from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions, translation, cards
+from routers import admin, auth, upload, filter, reading, prompts, download, history, compare, deploy, library, references, data, dimensions, translation, cards, feedback
 from routers import agent
 from routers import library_chat
 
@@ -124,6 +124,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+app.include_router(feedback.router, prefix="/api/feedback", tags=["Feedback"])
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
 app.include_router(filter.router, prefix="/api/filter", tags=["Filter"])
 app.include_router(reading.router, prefix="/api/reading", tags=["Reading"])

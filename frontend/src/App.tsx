@@ -35,6 +35,26 @@ const CARD_TAB = { id: 'cards', label: '卡片笔记', icon: '▣' }
 const AGENT_TAB = { id: 'agent', label: 'AI 助手', icon: 'AI' }
 const TAB_IDS = new Set(TABS.map((tab) => tab.id))
 const LEGACY_API_KEY_STORAGE = 'deepseek_api_key'
+const AGENT_FOLDER_EXTENSIONS = new Set(['.pdf', '.md', '.markdown'])
+const AGENT_FOLDER_UPLOAD_LIMIT = 200
+
+type AgentInboxBatch = {
+  batch_id?: string
+  total_files?: number
+  succeeded?: number
+  failed?: number
+  status?: string
+  created_at?: string
+}
+
+type AgentFolderFile = File & {
+  webkitRelativePath?: string
+}
+
+function getAgentFolderFilename(file: File): string {
+  const folderFile = file as AgentFolderFile
+  return folderFile.webkitRelativePath || file.name || ''
+}
 
 function getApiKeyStorageKey(username?: string | null) {
   const normalized = username?.trim()
@@ -72,6 +92,210 @@ function promptForApiKey(): string {
   return trimmed
 }
 
+type FeedbackItem = {
+  id: number
+  feedback_type: string
+  title: string
+  content: string
+  status: string
+  priority: string
+  public_reply?: string | null
+  created_at: string
+  updated_at: string
+}
+
+function FeedbackDialog({
+  mode,
+  onClose,
+}: {
+  mode: 'create' | 'mine'
+  onClose: () => void
+}) {
+  const [activeMode, setActiveMode] = useState(mode)
+  const [feedbackType, setFeedbackType] = useState('bug')
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [items, setItems] = useState<FeedbackItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+
+  const loadMine = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const response = await fetch('/api/feedback/my')
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.detail || `加载失败（HTTP ${response.status}）`)
+      setItems(Array.isArray(data) ? data : [])
+    } catch (err: any) {
+      setError(err.message || '加载反馈失败。')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeMode === 'mine') {
+      void loadMine()
+    }
+  }, [activeMode])
+
+  const submitFeedback = async () => {
+    if (!title.trim() || !content.trim()) {
+      setError('请填写标题和反馈内容。')
+      return
+    }
+    setLoading(true)
+    setMessage('')
+    setError('')
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedback_type: feedbackType,
+          title: title.trim(),
+          content: content.trim(),
+          route: `${window.location.pathname}${window.location.search}`,
+          app_version: 'web',
+        }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.detail || `提交失败（HTTP ${response.status}）`)
+      setTitle('')
+      setContent('')
+      setMessage('反馈已提交。管理员处理后会在“我的反馈”里显示回复。')
+      setActiveMode('mine')
+    } catch (err: any) {
+      setError(err.message || '提交反馈失败。')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const statusLabel: Record<string, string> = {
+    open: '待处理',
+    triaged: '已分流',
+    in_progress: '处理中',
+    resolved: '已解决',
+    closed: '已关闭',
+    reopened: '重新打开',
+  }
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-2xl flex-col rounded-2xl border border-gray-200 bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">用户反馈</h2>
+            <p className="mt-1 text-sm text-gray-500">反馈会保留给管理员排查和改进产品，不会进入 .dra 导出包。</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600 hover:bg-gray-200">
+            关闭
+          </button>
+        </div>
+        <div className="border-b border-gray-100 px-5 py-3">
+          <div className="inline-flex rounded-lg bg-gray-100 p-1 text-sm">
+            <button
+              onClick={() => setActiveMode('create')}
+              className={`rounded-md px-3 py-1.5 ${activeMode === 'create' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            >
+              提交反馈
+            </button>
+            <button
+              onClick={() => setActiveMode('mine')}
+              className={`rounded-md px-3 py-1.5 ${activeMode === 'mine' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            >
+              我的反馈
+            </button>
+          </div>
+        </div>
+        <div className="overflow-y-auto px-5 py-4">
+          {(message || error) && (
+            <div className="mb-4 space-y-2">
+              {message && <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div>}
+              {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+            </div>
+          )}
+          {activeMode === 'create' ? (
+            <div className="space-y-4">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-gray-700">类型</span>
+                <select
+                  value={feedbackType}
+                  onChange={(event) => setFeedbackType(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="bug">问题/报错</option>
+                  <option value="reading_quality">精读质量</option>
+                  <option value="translation">翻译质量</option>
+                  <option value="data_issue">数据/文献库问题</option>
+                  <option value="feature">功能建议</option>
+                  <option value="question">使用疑问</option>
+                  <option value="other">其他</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-gray-700">标题</span>
+                <input
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  maxLength={160}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                  placeholder="一句话描述问题或建议"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-gray-700">内容</span>
+                <textarea
+                  value={content}
+                  onChange={(event) => setContent(event.target.value)}
+                  rows={7}
+                  maxLength={5000}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                  placeholder="请描述你遇到的情况、期望结果、实际结果。当前页面路径会自动附带。"
+                />
+              </label>
+              <button
+                onClick={() => void submitFeedback()}
+                disabled={loading}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {loading ? '提交中...' : '提交反馈'}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {loading && <div className="py-8 text-center text-sm text-gray-400">加载中...</div>}
+              {!loading && items.length === 0 && <div className="py-8 text-center text-sm text-gray-400">还没有反馈记录。</div>}
+              {items.map((item) => (
+                <div key={item.id} className="rounded-xl border border-gray-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium text-gray-900">{item.title}</div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        #{item.id} · {statusLabel[item.status] || item.status} · {new Date(item.updated_at).toLocaleString()}
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{item.priority}</span>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm text-gray-600">{item.content}</p>
+                  {item.public_reply && (
+                    <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                      <span className="font-medium">管理员回复：</span>{item.public_reply}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -89,9 +313,13 @@ function App() {
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null)
   const [canShutdownApp, setCanShutdownApp] = useState(false)
   const [agentTabVisible, setAgentTabVisible] = useState(false)
-  const [inputFolderPath, setInputFolderPath] = useState('')
-  const [inputFolderDraft, setInputFolderDraft] = useState('')
-  const [inputFolderStatus, setInputFolderStatus] = useState('')
+  const [agentInboxBatch, setAgentInboxBatch] = useState<AgentInboxBatch | null>(null)
+  const [agentFolderFiles, setAgentFolderFiles] = useState<File[]>([])
+  const [agentFolderSkippedCount, setAgentFolderSkippedCount] = useState(0)
+  const [agentFolderUploading, setAgentFolderUploading] = useState(false)
+  const [agentFolderStatus, setAgentFolderStatus] = useState('')
+  const [agentFolderInputKey, setAgentFolderInputKey] = useState(0)
+  const [feedbackDialogMode, setFeedbackDialogMode] = useState<'create' | 'mine' | null>(null)
 
   const cardTabVisible = activeTab === 'cards' || location.pathname.startsWith('/workspace/cards')
   const visibleTabs = useMemo(() => {
@@ -140,9 +368,7 @@ function App() {
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
         if (ignore || !data) return
-        const path = data.input_folder_path || ''
-        setInputFolderPath(path)
-        setInputFolderDraft(path)
+        setAgentInboxBatch(data.inbox_batch || null)
       })
       .catch(() => {})
     return () => {
@@ -201,23 +427,54 @@ function App() {
     handleTabChange('agent')
   }
 
-  const handleSaveInputFolder = async () => {
-    setInputFolderStatus('保存中...')
+  const handleAgentFolderSelection = (fileList: FileList | null) => {
+    const selected = Array.from(fileList || [])
+    const supported = selected.filter((file) => {
+      const filename = getAgentFolderFilename(file).toLowerCase()
+      const dotIndex = filename.lastIndexOf('.')
+      const extension = dotIndex >= 0 ? filename.slice(dotIndex) : ''
+      return AGENT_FOLDER_EXTENSIONS.has(extension)
+    })
+    setAgentFolderFiles(supported.slice(0, AGENT_FOLDER_UPLOAD_LIMIT))
+    setAgentFolderSkippedCount(selected.length - supported.length + Math.max(0, supported.length - AGENT_FOLDER_UPLOAD_LIMIT))
+    if (selected.length && !supported.length) {
+      setAgentFolderStatus('这个文件夹里没有可上传的 PDF/Markdown 文件。')
+    } else if (supported.length > AGENT_FOLDER_UPLOAD_LIMIT) {
+      setAgentFolderStatus(`一次最多上传 ${AGENT_FOLDER_UPLOAD_LIMIT} 个 PDF/Markdown 文件，已自动截取前 ${AGENT_FOLDER_UPLOAD_LIMIT} 个。`)
+    } else {
+      setAgentFolderStatus('')
+    }
+  }
+
+  const handleUploadAgentFolder = async () => {
+    if (!agentFolderFiles.length || agentFolderUploading) return
+    setAgentFolderUploading(true)
+    setAgentFolderStatus('上传中...')
     try {
-      const response = await fetch('/api/agent/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_folder_path: inputFolderDraft.trim() }),
+      const formData = new FormData()
+      agentFolderFiles.forEach((file) => {
+        formData.append('files', file, getAgentFolderFilename(file))
       })
+      const response = await fetch('/api/agent/inbox/upload-folder', { method: 'POST', body: formData })
       const data = await response.json().catch(() => null)
       if (!response.ok) {
-        throw new Error(data?.detail || `保存失败（HTTP ${response.status}）`)
+        throw new Error(data?.detail || `上传失败（HTTP ${response.status}）`)
       }
-      setInputFolderPath(data.input_folder_path || '')
-      setInputFolderDraft(data.input_folder_path || '')
-      setInputFolderStatus(data.input_folder_path ? '已保存为 Agent 可操作白名单。' : '已清空 input 文件夹白名单。')
+      setAgentInboxBatch(data.settings?.inbox_batch || {
+        batch_id: data.batch_id,
+        total_files: data.total,
+        succeeded: data.succeeded,
+        failed: data.failed,
+        status: data.failed ? 'partial' : 'success',
+      })
+      setAgentFolderFiles([])
+      setAgentFolderSkippedCount(0)
+      setAgentFolderInputKey((value) => value + 1)
+      setAgentFolderStatus(`已上传 ${data.succeeded || 0} 个文件，失败 ${data.failed || 0} 个。AI 助手现在会扫描这批文件。`)
     } catch (err) {
-      setInputFolderStatus(err instanceof Error ? err.message : '保存失败。')
+      setAgentFolderStatus(err instanceof Error ? err.message : '上传失败。')
+    } finally {
+      setAgentFolderUploading(false)
     }
   }
 
@@ -406,6 +663,26 @@ function App() {
                       <span>AI</span>
                     </button>
                     <button
+                      onClick={() => {
+                        setFeedbackDialogMode('create')
+                        setShowUserMenu(false)
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 hover:bg-rose-100"
+                    >
+                      <span>反馈问题</span>
+                      <span>!</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setFeedbackDialogMode('mine')
+                        setShowUserMenu(false)
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <span>我的反馈</span>
+                      <span>≡</span>
+                    </button>
+                    <button
                       onClick={handleExport}
                       disabled={exporting}
                       className="flex w-full items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-50"
@@ -490,36 +767,42 @@ function App() {
               </div>
 
               <div className="mt-5 border-t border-gray-100 pt-4">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">Agent input 文件夹白名单</h3>
+                <h3 className="mb-2 text-sm font-semibold text-gray-700">上传文件夹给 AI 助手</h3>
                 <input
-                  type="text"
-                  value={inputFolderDraft}
-                  onChange={(event) => {
-                    setInputFolderDraft(event.target.value)
-                    setInputFolderStatus('')
+                  key={agentFolderInputKey}
+                  type="file"
+                  multiple
+                  ref={(element) => {
+                    element?.setAttribute('webkitdirectory', '')
+                    element?.setAttribute('directory', '')
                   }}
-                  placeholder="例如：D:\\papers\\input"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                  onChange={(event) => {
+                    handleAgentFolderSelection(event.target.files)
+                  }}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-emerald-700 hover:file:bg-emerald-100"
                 />
                 <p className="mt-1 text-xs text-gray-400">
-                  保存后，AI 助手只能扫描这个文件夹中的 PDF/Markdown，不会接受模型临时指定的任意路径。
+                  在线版不会读取本地路径。只有你主动选择并上传的 PDF/Markdown 会进入 AI 助手可扫描的临时文件夹。
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
-                    onClick={() => void handleSaveInputFolder()}
-                    className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-emerald-700"
+                    onClick={() => void handleUploadAgentFolder()}
+                    disabled={!agentFolderFiles.length || agentFolderUploading}
+                    className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:bg-gray-300"
                   >
-                    保存路径
+                    {agentFolderUploading ? '上传中...' : `上传文件夹${agentFolderFiles.length ? `（${agentFolderFiles.length} 个支持文件）` : ''}`}
                   </button>
-                  {inputFolderPath && (
+                  {agentFolderFiles.length > 0 && (
                     <button
                       onClick={() => {
-                        setInputFolderDraft('')
-                        setInputFolderStatus('')
+                        setAgentFolderFiles([])
+                        setAgentFolderSkippedCount(0)
+                        setAgentFolderStatus('')
+                        setAgentFolderInputKey((value) => value + 1)
                       }}
                       className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200"
                     >
-                      清空输入框
+                      清空选择
                     </button>
                   )}
                   <button
@@ -529,11 +812,20 @@ function App() {
                     打开 AI 助手
                   </button>
                 </div>
-                {inputFolderStatus && (
-                  <div className="mt-2 text-xs text-gray-600">{inputFolderStatus}</div>
+                {agentFolderStatus && (
+                  <div className="mt-2 text-xs text-gray-600">{agentFolderStatus}</div>
                 )}
-                {inputFolderPath && !inputFolderStatus && (
-                  <div className="mt-2 break-all text-xs text-emerald-700">当前白名单：{inputFolderPath}</div>
+                {!agentFolderStatus && (agentFolderFiles.length > 0 || agentFolderSkippedCount > 0) && (
+                  <div className="mt-2 text-xs text-gray-600">
+                    已选择 {agentFolderFiles.length} 个 PDF/Markdown
+                    {agentFolderSkippedCount ? `，跳过 ${agentFolderSkippedCount} 个不支持或超出上限的文件` : ''}
+                  </div>
+                )}
+                {agentInboxBatch && !agentFolderStatus && (
+                  <div className="mt-2 text-xs text-emerald-700">
+                    当前可扫描文件夹：已上传 {agentInboxBatch.total_files ?? 0} 个文件
+                    {agentInboxBatch.created_at ? `，创建于 ${new Date(agentInboxBatch.created_at).toLocaleString()}` : ''}
+                  </div>
                 )}
               </div>
             </div>
@@ -611,6 +903,13 @@ function App() {
             )}
           </div>
         </div>
+      )}
+
+      {feedbackDialogMode && (
+        <FeedbackDialog
+          mode={feedbackDialogMode}
+          onClose={() => setFeedbackDialogMode(null)}
+        />
       )}
 
       {/* Tab Navigation */}

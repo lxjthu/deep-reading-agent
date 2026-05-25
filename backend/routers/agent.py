@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, UploadFile
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, or_, select
@@ -43,17 +43,20 @@ from db.models import (
     Job,
     JobBibEntry,
     ReadingItem,
+    UploadBatch,
     User,
     UserSettings,
 )
 from db.utils import title_match_score
-from routers.upload import ALLOWED_EXTENSIONS, detect_file_type
-from upload_storage import build_storage_path
+from routers.upload import ALLOWED_EXTENSIONS, bind_uploaded_file_to_existing_bib, detect_file_type
+from upload_storage import build_storage_path, get_user_upload_dir, resolve_storage_path
 
 router = APIRouter()
 
 MODEL = "deepseek-v4-flash"
 MAX_TOOL_ROUNDS = 8
+AGENT_INBOX_EXTENSIONS = {".pdf", ".md", ".markdown"}
+AGENT_INBOX_MAX_FILES = 200
 
 
 def utcnow_naive() -> datetime:
@@ -281,8 +284,29 @@ async def get_agent_preferences(db: AsyncSession, user: User) -> dict[str, Any]:
     settings = await db.get(UserSettings, user.id)
     prefs = _load_preferences(settings)
     agent_prefs = prefs.get("agent") if isinstance(prefs.get("agent"), dict) else {}
+    inbox_batch_id = str(agent_prefs.get("input_batch_id") or "")
+    inbox_batch = None
+    if inbox_batch_id:
+        batch = await db.get(UploadBatch, inbox_batch_id)
+        if batch and batch.owner_user_id == user.id:
+            inbox_batch = {
+                "batch_id": batch.id,
+                "total_files": batch.total_files,
+                "succeeded": batch.succeeded,
+                "failed": batch.failed,
+                "status": batch.status,
+                "note": batch.note,
+                "created_at": _dt(batch.created_at),
+            }
     return {
         "input_folder_path": str(agent_prefs.get("input_folder_path") or ""),
+        "input_batch_id": inbox_batch_id,
+        "input_file_ids": [
+            str(file_id)
+            for file_id in agent_prefs.get("input_file_ids", [])
+            if file_id
+        ] if isinstance(agent_prefs.get("input_file_ids"), list) else [],
+        "inbox_batch": inbox_batch,
     }
 
 
@@ -334,6 +358,147 @@ async def update_agent_settings(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return await save_agent_preferences(db, user, {"input_folder_path": input_folder_path})
+
+
+async def _persist_inbox_upload(
+    db: AsyncSession,
+    user: User,
+    upload: UploadFile,
+    batch_id: str,
+) -> dict[str, Any]:
+    original_name = (upload.filename or "").strip().replace("\\", "/")
+    if not original_name:
+        return {"success": False, "filename": "", "error": "missing_filename"}
+    file_ext = Path(original_name).suffix.lower()
+    if file_ext not in AGENT_INBOX_EXTENSIONS:
+        return {"success": False, "filename": original_name, "error": "unsupported_extension"}
+
+    user_dir = get_user_upload_dir(user.id)
+    temp_path = user_dir / f".{uuid.uuid4()}.agent-uploading"
+    final_path: Path | None = None
+    try:
+        hasher = hashlib.md5()
+        size_bytes = 0
+        sample = b""
+        with temp_path.open("wb") as buffer:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                if not sample:
+                    sample = chunk[:4096]
+                hasher.update(chunk)
+                buffer.write(chunk)
+                size_bytes += len(chunk)
+        if size_bytes <= 0:
+            return {"success": False, "filename": original_name, "error": "empty_file"}
+        file_type = detect_file_type(original_name, sample)
+        if file_type not in {"pdf", "markdown"}:
+            return {"success": False, "filename": original_name, "error": "unsupported_for_agent"}
+        md5_hash = hasher.hexdigest()
+
+        existing = (
+            await db.execute(select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash))
+        ).scalar_one_or_none()
+        if existing is not None:
+            matched_bib = await bind_uploaded_file_to_existing_bib(db, user, existing)
+            await db.flush()
+            return {
+                "success": True,
+                "deduplicated": True,
+                "file_id": existing.id,
+                "filename": existing.original_name,
+                "matched_bib_entry_id": matched_bib.id if matched_bib else None,
+            }
+
+        file_id = str(uuid.uuid4())
+        final_path, storage_path = build_storage_path(user.id, file_id, file_ext)
+        shutil.move(str(temp_path), str(final_path))
+        record = File(
+            id=file_id,
+            owner_user_id=user.id,
+            original_name=original_name,
+            file_type=file_type,
+            storage_path=storage_path,
+            size_bytes=size_bytes,
+            md5=md5_hash,
+            batch_id=batch_id,
+            expires_at=reading.compute_expires_at(user),
+        )
+        db.add(record)
+        matched_bib = await bind_uploaded_file_to_existing_bib(db, user, record)
+        await db.flush()
+        return {
+            "success": True,
+            "deduplicated": False,
+            "file_id": record.id,
+            "filename": record.original_name,
+            "matched_bib_entry_id": matched_bib.id if matched_bib else None,
+        }
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+        await upload.close()
+
+
+@router.post("/inbox/upload-folder")
+async def upload_agent_inbox_folder(
+    files: list[UploadFile] = FastAPIFile(...),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+    if len(files) > AGENT_INBOX_MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"一次最多上传 {AGENT_INBOX_MAX_FILES} 个 PDF/Markdown 文件。")
+
+    batch = UploadBatch(
+        id=str(uuid.uuid4()),
+        owner_user_id=user.id,
+        source_type="folder",
+        total_files=len(files),
+        succeeded=0,
+        failed=0,
+        status="running",
+        note="agent_inbox",
+        expires_at=reading.compute_expires_at(user),
+    )
+    db.add(batch)
+    results: list[dict[str, Any]] = []
+    for upload in files:
+        try:
+            result = await _persist_inbox_upload(db, user, upload, batch.id)
+        except Exception as exc:
+            result = {"success": False, "filename": upload.filename or "", "error": str(exc)[:300]}
+        results.append(result)
+        if result.get("success"):
+            batch.succeeded += 1
+        else:
+            batch.failed += 1
+    batch.status = "success" if batch.failed == 0 else ("partial" if batch.succeeded else "failed")
+    successful_file_ids = [
+        str(result["file_id"])
+        for result in results
+        if result.get("success") and result.get("file_id")
+    ]
+    saved = await save_agent_preferences(
+        db,
+        user,
+        {
+            "input_batch_id": batch.id,
+            "input_file_ids": successful_file_ids,
+            "input_folder_path": "",
+        },
+    )
+    await db.commit()
+    return {
+        "batch_id": batch.id,
+        "total": batch.total_files,
+        "succeeded": batch.succeeded,
+        "failed": batch.failed,
+        "results": results,
+        "settings": saved,
+    }
 
 
 @router.get("/sessions")
@@ -982,68 +1147,116 @@ async def tool_scan_input_folder(
     confidence_threshold: float = 0.55,
 ) -> dict[str, Any]:
     prefs = await get_agent_preferences(db, user)
-    input_folder_path = prefs.get("input_folder_path") or ""
-    if not input_folder_path:
-        return {"error": "input_folder_not_configured", "hint": "请先在设置里保存 input 文件夹白名单路径。"}
-    input_folder = Path(input_folder_path)
-    if not input_folder.exists() or not input_folder.is_dir():
-        return {"error": "input_folder_missing", "path": input_folder_path}
-
-    files = _collect_folder_files(input_folder, recursive, max_files)
+    input_batch_id = str(prefs.get("input_batch_id") or "")
+    input_file_ids = [
+        str(file_id)
+        for file_id in prefs.get("input_file_ids", [])
+        if file_id
+    ] if isinstance(prefs.get("input_file_ids"), list) else []
+    input_folder_path = str(prefs.get("input_folder_path") or "")
     candidates: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
-    for index, source_path in enumerate(files, start=1):
-        try:
-            md5_hash, size_bytes, sample = _file_md5_and_sample(source_path)
-            file_type = detect_file_type(source_path.name, sample)
-        except Exception as exc:
-            skipped.append({"filename": source_path.name, "reason": str(exc)[:200]})
-            continue
-        if file_type not in {"pdf", "markdown"}:
-            skipped.append({"filename": source_path.name, "reason": "unsupported_for_reading"})
-            continue
-        candidates.append(
-            {
-                "entry_id": f"folder-{index}",
-                "file_id": "",
-                "title": source_path.stem,
-                "filename": source_path.name,
-                "relative_path": str(source_path.relative_to(input_folder)),
-                "extension": source_path.suffix.lower(),
-                "size_bytes": size_bytes,
-                "md5": md5_hash,
-                "preview": _extract_preview(source_path, file_type, max_chars=1400),
-            }
-        )
+    source_label = "upload_batch" if input_batch_id else "server_folder"
 
-    md5_values = [item["md5"] for item in candidates]
-    existing_files = []
-    if md5_values:
-        existing_files = (
-            await db.execute(
-                select(File).where(
-                    File.owner_user_id == user.id,
-                    File.md5.in_(md5_values),
+    if input_batch_id:
+        batch = await db.get(UploadBatch, input_batch_id)
+        if not batch or batch.owner_user_id != user.id:
+            return {"error": "input_batch_missing", "batch_id": input_batch_id}
+        if input_file_ids:
+            file_records = (
+                await db.execute(
+                    select(File)
+                    .where(
+                        File.owner_user_id == user.id,
+                        File.id.in_(input_file_ids),
+                        File.file_type.in_(["pdf", "markdown"]),
+                    )
+                    .order_by(File.original_name.asc())
+                    .limit(max(1, min(max_files, 100)))
                 )
+            ).scalars().all()
+        else:
+            file_records = (
+                await db.execute(
+                    select(File)
+                    .where(
+                        File.owner_user_id == user.id,
+                        File.batch_id == input_batch_id,
+                        File.file_type.in_(["pdf", "markdown"]),
+                    )
+                    .order_by(File.original_name.asc())
+                    .limit(max(1, min(max_files, 100)))
+                )
+            ).scalars().all()
+        scanned_count = len(file_records)
+        for index, record in enumerate(file_records, start=1):
+            stored_path = resolve_storage_path(record.storage_path)
+            candidates.append(
+                {
+                    "entry_id": f"batch-{index}",
+                    "file_id": record.id,
+                    "title": Path(record.original_name).stem,
+                    "filename": record.original_name,
+                    "relative_path": record.original_name,
+                    "extension": Path(record.original_name).suffix.lower(),
+                    "size_bytes": record.size_bytes,
+                    "md5": record.md5,
+                    "preview": _extract_preview(stored_path, record.file_type, max_chars=1400) if stored_path.exists() else "",
+                    "source": "upload_batch",
+                }
             )
-        ).scalars().all()
-    file_by_md5 = {file_record.md5: file_record for file_record in existing_files}
-    file_ids = [file_record.id for file_record in existing_files]
+    else:
+        if not input_folder_path:
+            return {"error": "input_inbox_not_configured", "hint": "请先上传一个文件夹到 AI 助手。"}
+        input_folder = Path(input_folder_path)
+        if not input_folder.exists() or not input_folder.is_dir():
+            return {"error": "input_folder_missing", "path": input_folder_path}
+        path_files = _collect_folder_files(input_folder, recursive, max_files)
+        scanned_count = len(path_files)
+        for index, source_path in enumerate(path_files, start=1):
+            try:
+                md5_hash, size_bytes, sample = _file_md5_and_sample(source_path)
+                file_type = detect_file_type(source_path.name, sample)
+            except Exception as exc:
+                skipped.append({"filename": source_path.name, "reason": str(exc)[:200]})
+                continue
+            if file_type not in {"pdf", "markdown"}:
+                skipped.append({"filename": source_path.name, "reason": "unsupported_for_reading"})
+                continue
+            candidates.append(
+                {
+                    "entry_id": f"folder-{index}",
+                    "file_id": "",
+                    "title": source_path.stem,
+                    "filename": source_path.name,
+                    "relative_path": str(source_path.relative_to(input_folder)),
+                    "extension": source_path.suffix.lower(),
+                    "size_bytes": size_bytes,
+                    "md5": md5_hash,
+                    "preview": _extract_preview(source_path, file_type, max_chars=1400),
+                    "source": "server_folder",
+                }
+            )
+
+    file_ids = [item["file_id"] for item in candidates if item.get("file_id")]
     entries_by_file_id: dict[str, BibEntry] = {}
     if file_ids:
         existing_entries = (
             await db.execute(
                 select(BibEntry).where(
                     BibEntry.owner_user_id == user.id,
-                    BibEntry.source_file_id.in_(file_ids),
+                    or_(
+                        BibEntry.source_file_id.in_(file_ids),
+                        BibEntry.markdown_source_file_id.in_(file_ids),
+                    ),
                 )
             )
         ).scalars().all()
-        entries_by_file_id = {
-            str(entry.source_file_id): entry
-            for entry in existing_entries
-            if entry.source_file_id
-        }
+        for entry in existing_entries:
+            if entry.source_file_id:
+                entries_by_file_id[str(entry.source_file_id)] = entry
+            if entry.markdown_source_file_id:
+                entries_by_file_id[str(entry.markdown_source_file_id)] = entry
     library_entries = (
         await db.execute(select(BibEntry).where(BibEntry.owner_user_id == user.id))
     ).scalars().all()
@@ -1056,36 +1269,26 @@ async def tool_scan_input_folder(
         row = relevance_by_id.get(item["entry_id"]) or {}
         confidence = 1.0 if all_topic else float(row.get("confidence") or 0)
         relevant = all_topic or (bool(row.get("relevant")) and confidence >= float(confidence_threshold))
-        exact_file = file_by_md5.get(item["md5"])
-        exact_entry = entries_by_file_id.get(exact_file.id) if exact_file else None
+        exact_entry = entries_by_file_id.get(str(item.get("file_id") or ""))
         best_entry = None
         best_score = 0.0
         if exact_entry is None:
             for entry in library_entries:
+                if item.get("file_id") and item.get("file_id") in {entry.source_file_id, entry.markdown_source_file_id}:
+                    continue
                 score = title_match_score(item["title"], entry.title or "")
                 if score > best_score:
                     best_score = score
                     best_entry = entry
-
         if exact_entry is not None:
             library_match = {
                 "status": "in_library",
-                "method": "file_md5",
+                "method": "file_binding",
                 "score": 1.0,
                 "entry_id": exact_entry.id,
                 "library_title": exact_entry.title,
-                "file_id": exact_file.id,
+                "file_id": item.get("file_id") or exact_entry.source_file_id or exact_entry.markdown_source_file_id,
                 "reading_status": exact_entry.reading_status,
-            }
-        elif exact_file is not None:
-            library_match = {
-                "status": "file_exists_no_bib_entry",
-                "method": "file_md5",
-                "score": 1.0,
-                "entry_id": None,
-                "library_title": None,
-                "file_id": exact_file.id,
-                "reading_status": None,
             }
         elif best_entry is not None and best_score >= 0.72:
             library_match = {
@@ -1097,10 +1300,20 @@ async def tool_scan_input_folder(
                 "file_id": best_entry.source_file_id,
                 "reading_status": best_entry.reading_status,
             }
+        elif item.get("file_id"):
+            library_match = {
+                "status": "file_exists_no_bib_entry",
+                "method": "uploaded_file",
+                "score": round(best_score, 3),
+                "entry_id": None,
+                "library_title": best_entry.title if best_entry else None,
+                "file_id": item.get("file_id"),
+                "reading_status": None,
+            }
         else:
             library_match = {
                 "status": "not_in_library",
-                "method": "md5_and_title",
+                "method": "file_binding_and_title",
                 "score": round(best_score, 3),
                 "entry_id": None,
                 "library_title": best_entry.title if best_entry else None,
@@ -1114,6 +1327,7 @@ async def tool_scan_input_folder(
                 "relative_path": item["relative_path"],
                 "extension": item["extension"],
                 "size_bytes": item["size_bytes"],
+                "file_id": item.get("file_id") or "",
                 "relevant": relevant,
                 "confidence": confidence,
                 "library_match": library_match,
@@ -1123,8 +1337,10 @@ async def tool_scan_input_folder(
 
     return {
         "input_folder_path": input_folder_path,
+        "input_batch_id": input_batch_id,
+        "source": source_label,
         "topic": topic,
-        "scanned": len(files),
+        "scanned": scanned_count,
         "count": len(rows),
         "relevant_count": sum(1 for row in rows if row["relevant"]),
         "library_counts": {
@@ -1135,7 +1351,7 @@ async def tool_scan_input_folder(
         },
         "papers": rows,
         "skipped": skipped,
-        "note": "这是只读清单；未导入文件，也未启动精读任务。",
+        "note": "这是只读清单；在线版扫描的是已上传到 AI 助手 inbox 的文件夹批次，未启动精读任务。",
     }
 
 
@@ -1156,50 +1372,22 @@ async def tool_import_folder_and_start_reading(
 ) -> dict[str, Any]:
     if mode not in {"quant", "qual", "long"}:
         return {"error": "mode_must_be_quant_qual_or_long"}
-    prefs = await get_agent_preferences(db, user)
-    input_folder_path = prefs.get("input_folder_path") or ""
-    if not input_folder_path:
-        return {"error": "input_folder_not_configured", "hint": "请先在设置里保存 input 文件夹白名单路径。"}
-    input_folder = Path(input_folder_path)
-    if not input_folder.exists() or not input_folder.is_dir():
-        return {"error": "input_folder_missing", "path": input_folder_path}
-
-    files = _collect_folder_files(input_folder, recursive, max_files)
-    imported: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
-    for source_path in files:
-        try:
-            result = await _import_source_file(db, user, source_path)
-        except Exception as exc:
-            skipped.append({"path": str(source_path), "status": "error", "reason": str(exc)[:300]})
-            continue
-        if result.get("file_id") and result.get("entry_id"):
-            imported.append(result)
-        else:
-            skipped.append(result)
-
-    all_topic = _is_all_topic(topic)
-    relevance_rows = [] if all_topic else _classify_relevance(api_key, topic, imported)
-    relevance_by_id = {str(row.get("entry_id")): row for row in relevance_rows if isinstance(row, dict)}
-    selected = []
-    rejected = []
-    for item in imported:
-        row = relevance_by_id.get(item["entry_id"]) or {}
-        confidence = 1.0 if all_topic else float(row.get("confidence") or 0)
-        relevant = all_topic or (bool(row.get("relevant")) and confidence >= float(confidence_threshold))
-        payload = {
-            "file_id": item["file_id"],
-            "entry_id": item["entry_id"],
-            "title": item["title"],
-            "filename": item["filename"],
-            "confidence": confidence,
-            "reason": "topic=*，跳过主题筛选，全部纳入。" if all_topic else (row.get("reason") or ""),
-        }
-        if relevant:
-            selected.append(payload)
-        else:
-            rejected.append(payload)
-
+    scan = await tool_scan_input_folder(
+        db,
+        user,
+        api_key=api_key,
+        topic=topic,
+        recursive=recursive,
+        max_files=max_files,
+        confidence_threshold=confidence_threshold,
+    )
+    if scan.get("error"):
+        return scan
+    selected = [
+        paper
+        for paper in scan.get("papers", [])
+        if paper.get("relevant") and paper.get("file_id")
+    ]
     batch = None
     if selected:
         batch = await tool_start_batch_reading(
@@ -1207,23 +1395,17 @@ async def tool_import_folder_and_start_reading(
             user,
             api_key=api_key,
             mode=mode,
-            file_ids=[item["file_id"] for item in selected],
+            file_ids=[paper["file_id"] for paper in selected],
             analysis_dims=analysis_dims or [],
             custom_question=custom_question,
             extraction_method=extraction_method,
             conflict_resolution=conflict_resolution,
         )
-
     return {
-        "input_folder_path": input_folder_path,
-        "topic": topic,
+        **scan,
         "mode": mode,
-        "scanned": len(files),
-        "imported_or_seen": len(imported),
-        "skipped": skipped,
         "selected_count": len(selected),
         "selected": selected,
-        "rejected": rejected,
         "batch": batch,
     }
 
@@ -1316,7 +1498,7 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "scan_input_folder",
             "description": (
-                "Read-only scan of the configured input folder whitelist and compare it with the user's library. "
+                "Read-only scan of the user's uploaded AI assistant inbox batch and compare it with the user's library. "
                 "Use this when the user asks to see, list, inspect, or tabulate papers. "
                 "This never imports files and never starts reading jobs."
             ),
@@ -1336,7 +1518,7 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "import_folder_and_start_reading",
             "description": (
-                "Scan the configured input folder whitelist, import PDF/Markdown files, "
+                "Scan the user's uploaded AI assistant inbox batch, "
                 "select papers related to a topic, and start batch reading jobs. "
                 "Use only when the user explicitly asks to start/run/batch read/analyze."
             ),
@@ -1415,7 +1597,7 @@ async def execute_tool(
             **preview,
             "action": "import_folder_and_start_reading",
             "mode": args.get("mode"),
-            "note": "这是执行提案预览；确认后才会导入文件并启动精读任务。",
+            "note": "这是执行提案预览；确认后才会对已上传的文件启动精读任务。",
         }
         return await _create_proposal(db, user, session, action_type=name, arguments=args, preview=preview)
     if name == "get_job_status":
@@ -1430,8 +1612,8 @@ def build_messages(req: AgentChatRequest) -> list[dict[str, Any]]:
             "content": (
                 "你是 Deep Reading Agent 的文献工作台助手。你可以调用工具检索文献库、查看精读结果、"
                 "启动精读任务、查询任务状态，并基于工具返回的真实数据做对比和综述。"
-                "当用户要求扫描 input 文件夹、某个已配置文件夹或文件夹里与主题相关的文献时，"
-                "使用 import_folder_and_start_reading；不要要求用户提供任意路径。"
+                "在线版的文件夹来源是用户主动上传到 AI 助手 inbox 的 PDF/Markdown 批次，"
+                "不要要求用户提供本地路径，也不要尝试读取任意服务器路径。"
                 "如果主题是 *，含义是全部文献，不要解释成某个研究主题。"
                 "涉及文献列表、精读状态、任务进度、综述依据时必须先调用工具，不要编造。"
                 "启动长耗时任务前，如果用户已经明确要求执行，可以直接调用工具；如果缺少 file_id/entry_id/"

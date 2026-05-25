@@ -134,7 +134,83 @@ CREATE TABLE user_settings (
 **v1 暂未启用**，建表占位。  
 **API Key 不入库**：DeepSeek API Key 继续保留在前端 `localStorage`，由用户自行管理。普通用户 24h 清理只清服务端文件与档案，**不清前端 key**。前端登录页对普通用户提示"上传文件、文献档案、精读结果将在 24h 后清空，但您的 API Key 保存在浏览器本地，不会被清理；请自行备份产出文件"。
 
-### 3.4 `prompt_templates` — 提示词模板（系统默认 + 用户覆盖）
+### 3.4 `user_feedback` / `feedback_events` / `admin_audit_logs` — 用户反馈与后台审计
+
+> migration `021_add_feedback_admin_tables.py` 新增。反馈表是管理员查看和处理产品反馈的运营数据，不进入用户 `.dra` 导出/导入；normal 用户 24h 工作区清理也不自动删除反馈。若未来需要隐私删除，单独做匿名化/删除流程。
+
+```sql
+CREATE TABLE user_feedback (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    feedback_type       TEXT NOT NULL CHECK (feedback_type IN (
+                            'bug','feature','question','data_issue',
+                            'translation','reading_quality','other'
+                        )),
+    title               TEXT NOT NULL,
+    content             TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'open' CHECK (status IN (
+                            'open','triaged','in_progress','resolved','closed','reopened'
+                        )),
+    priority            TEXT NOT NULL DEFAULT 'P3' CHECK (priority IN ('P0','P1','P2','P3')),
+    route               TEXT,
+    user_agent          TEXT,
+    app_version         TEXT,
+    related_job_id      TEXT REFERENCES jobs(id),
+    related_file_id     TEXT REFERENCES files(id),
+    related_bib_entry_id TEXT REFERENCES bib_entries(id),
+    related_artifact_id INTEGER REFERENCES artifacts(id),
+    assigned_admin_id   INTEGER REFERENCES users(id),
+    public_reply        TEXT,
+    internal_note       TEXT,
+    resolved_at         DATETIME,
+    created_at          DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at          DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_user_feedback_owner ON user_feedback(owner_user_id);
+CREATE INDEX idx_user_feedback_status ON user_feedback(status);
+CREATE INDEX idx_user_feedback_priority ON user_feedback(priority);
+CREATE INDEX idx_user_feedback_created ON user_feedback(created_at);
+CREATE INDEX idx_user_feedback_job ON user_feedback(related_job_id);
+```
+
+```sql
+CREATE TABLE feedback_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    feedback_id     INTEGER NOT NULL REFERENCES user_feedback(id) ON DELETE CASCADE,
+    actor_user_id   INTEGER REFERENCES users(id),
+    event_type      TEXT NOT NULL CHECK (event_type IN (
+                        'created','status_changed','priority_changed',
+                        'assigned','commented','public_replied','closed','reopened'
+                    )),
+    old_value       TEXT,
+    new_value       TEXT,
+    note            TEXT,
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_feedback_events_feedback ON feedback_events(feedback_id);
+CREATE INDEX idx_feedback_events_actor ON feedback_events(actor_user_id);
+```
+
+```sql
+CREATE TABLE admin_audit_logs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_user_id   INTEGER NOT NULL REFERENCES users(id),
+    action          TEXT NOT NULL,
+    target_type     TEXT NOT NULL,
+    target_id       TEXT,
+    summary         TEXT NOT NULL,
+    payload_json    TEXT,
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_admin_audit_admin ON admin_audit_logs(admin_user_id);
+CREATE INDEX idx_admin_audit_target ON admin_audit_logs(target_type, target_id);
+CREATE INDEX idx_admin_audit_created ON admin_audit_logs(created_at);
+```
+
+### 3.5 `prompt_templates` — 提示词模板（系统默认 + 用户覆盖）
 
 > 目的：把固定提示词槽位从文件系统迁入数据库，支持“系统默认提示词 + 用户个人覆盖”，并统一所有分析链路的读取来源。
 
@@ -671,7 +747,7 @@ CREATE INDEX idx_card_notes_translation ON card_notes (source_translation_artifa
 
 - `source_version='original'` 时记录 `source_markdown_file_id`。
 - `source_version='translated'` 时记录对应 `translation_md` 的 `source_translation_artifact_id`。
-- `.dra` 导出/导入包含该表和 Markdown 镜像，当前 `CURRENT_SCHEMA_VERSION = "020"`。
+- `.dra` 导出/导入包含该表和 Markdown 镜像，当前 `CURRENT_SCHEMA_VERSION = "021"`。
 
 ### 3.15 `dimension_sets` — 用户维度集合（v1.4 新增）
 
@@ -1131,7 +1207,8 @@ backend/migrations/versions/
 ├── 017_add_bib_entry_abstract_cn.py  # bib_entries 新增 abstract_cn（摘要中文翻译）
 ├── 018_add_translate_abstracts_job_type.py  # jobs CHECK 约束新增 translate_abstracts
 ├── 019_add_agent_sessions.py  # Agent assistant 会话持久化
-└── 020_add_markdown_card_notes.py  # Markdown 原文绑定 + card_notes + card_note 提示词类型
+├── 020_add_markdown_card_notes.py  # Markdown 原文绑定 + card_notes + card_note 提示词类型
+└── 021_add_feedback_admin_tables.py  # 用户反馈、反馈事件、管理员审计日志
 ```
 
 > 说明：`admin` 账号继续通过 `backend/scripts/seed_admin.py` 初始化，不放入 Alembic 迁移。
@@ -1184,6 +1261,7 @@ backend/migrations/versions/
 | 提示词管理 | `prompt_templates` | — |
 | 文献库 AI 查询 | `bib_entries` | `bib_references`、`reading_items`、`prompt_templates(library_chat)`、`annotations(library_note)` |
 | Markdown 卡片笔记 | `card_notes` | `bib_entries`、`files(markdown)`、`artifacts(translation_md)`、`prompt_templates(card_note)` |
+| 用户反馈与后台审计 | `user_feedback` | `feedback_events`、`admin_audit_logs` |
 | 维度集合（用户自建） | `dimension_sets`、`dimension_items` | — |
 | 维度模板（系统预设） | `dimension_templates`、`template_items` | — |
 
@@ -1198,7 +1276,7 @@ backend/migrations/versions/
 
 Migration: `019_add_agent_sessions.py`
 
-These tables persist the AI literature assistant conversation, tool events, and execution proposals. They are user data and are included in `.dra` export/import via `backend/services/data_portability.py` with `CURRENT_SCHEMA_VERSION = "020"`.
+These tables persist the AI literature assistant conversation, tool events, and execution proposals. They are user data and are included in `.dra` export/import via `backend/services/data_portability.py` with `CURRENT_SCHEMA_VERSION = "021"`.
 
 ### `agent_sessions`
 
