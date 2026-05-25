@@ -436,7 +436,7 @@ async def save_synthesis(
 
 # === Library Chat History ===
 
-@router.get("/library-chat/")
+@router.get("/library-chat")
 async def list_library_chat(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
@@ -482,7 +482,7 @@ class SaveLibraryChatReportRequest(BaseModel):
     keywords: List[str] = Field(default_factory=list)
 
 
-@router.post("/library-chat/")
+@router.post("/library-chat")
 async def save_library_chat_report(
     req: SaveLibraryChatReportRequest,
     user: User = Depends(current_user),

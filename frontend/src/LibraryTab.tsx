@@ -1089,7 +1089,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       })),
     )
     try {
-      const response = await fetch('/api/history/library-chat/', {
+      const response = await fetch('/api/history/library-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

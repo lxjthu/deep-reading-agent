@@ -4797,7 +4797,7 @@ function HistoryTab() {
       const [readingRes, synthRes, chatRes] = await Promise.all([
         fetch('/api/history/'),
         fetch('/api/history/synthesis/'),
-        fetch('/api/history/library-chat/'),
+        fetch('/api/history/library-chat'),
       ])
       const readingData = await readingRes.json()
       const synthData = await synthRes.json()
