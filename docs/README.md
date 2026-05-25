@@ -72,6 +72,7 @@
 | [REFERENCE_CITATION_DEEPSEEK_FLASH_PLAN.md](REFERENCE_CITATION_DEEPSEEK_FLASH_PLAN.md) | 方案 | DeepSeek Flash 模型用于引用追踪 | 引用追踪模型选型 |
 | [COMPARE_SYNTHESIS_SELECTION_PLAN.md](COMPARE_SYNTHESIS_SELECTION_PLAN.md) | 方案 | 对比综述选择交互改进 | 对比页多选交互设计 |
 | [COMPARE_CARD_ACTIONS_IMPL.md](COMPARE_CARD_ACTIONS_IMPL.md) | 实现 | 对比页 AnswerCard 三按钮（编辑/点评/AI总结）实施记录 | 理解对比页卡片操作功能的数据库、API、前端实现 |
+| [CHUNKED_DATA_IMPORT_IMPL.md](CHUNKED_DATA_IMPORT_IMPL.md) | 实现 | 分片上传导入（.dra 大文件分片上传协议） | 理解分片导入三阶段流程、API 设计和前端实现 |
 | [LIBRARY_AI_CHAT_IMPL.md](LIBRARY_AI_CHAT_IMPL.md) | 实现 | 文献库 AI 多轮查询、标签确认写库、标签搜索筛选和逐篇 AI 点评 | 维护文献库 AI 助手、结果联动和点评链路 |
 | [AGENT_ASSISTANT_IMPL.md](AGENT_ASSISTANT_IMPL.md) | 实现 | AI 文献助手 tool calling、input 文件夹白名单、文件夹扫描、文献库对比、批量精读编排和前端 JSON HTML 展示 | 升级 AI 助手、Agent 工具、文件夹导入、持久会话和执行确认时 |
 | [AGENT_SESSION_CONFIRMATION_UI_PLAN.md](AGENT_SESSION_CONFIRMATION_UI_PLAN.md) | 方案 | AI 文献助手持久会话、agent_sessions/agent_messages、执行前确认、导入/精读确认弹窗和结果 UI 改造规划 | 实施可靠多轮对话、执行确认和 JSON 页面美化前 |

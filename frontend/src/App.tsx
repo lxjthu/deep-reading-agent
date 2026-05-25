@@ -37,6 +37,7 @@ const TAB_IDS = new Set(TABS.map((tab) => tab.id))
 const LEGACY_API_KEY_STORAGE = 'deepseek_api_key'
 const AGENT_FOLDER_EXTENSIONS = new Set(['.pdf', '.md', '.markdown'])
 const AGENT_FOLDER_UPLOAD_LIMIT = 200
+const IMPORT_CHUNK_SIZE = 4 * 1024 * 1024
 
 type AgentInboxBatch = {
   batch_id?: string
@@ -572,29 +573,83 @@ function App() {
     setImporting(true)
     setImportResult(null)
     setImportStatus(null)
-    const formData = new FormData()
-    formData.append('file', file)
     try {
-      const response = await fetch('/api/data/import/start', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body: formData,
+      const totalChunks = Math.ceil(file.size / IMPORT_CHUNK_SIZE)
+      const initForm = new FormData()
+      initForm.append('filename', file.name)
+      initForm.append('total_size', String(file.size))
+      initForm.append('total_chunks', String(totalChunks))
+
+      setImportStatus({
+        job_id: '',
+        status: 'pending',
+        progress: 0,
+        current_stage: '正在创建分片上传会话...',
+        error_msg: null,
+        result: null,
       })
 
-      let data: any = {}
-      const contentType = response.headers.get('content-type')
-      if (contentType && contentType.includes('application/json')) {
-        data = await response.json()
-      } else {
-        const text = await response.text()
-        data = { detail: text || `服务器返回非JSON响应（HTTP ${response.status}）` }
-      }
-      
-      if (!response.ok) {
-        throw new Error(data.detail || `导入失败（HTTP ${response.status}）`)
+      const initResponse = await fetch('/api/data/import/chunk/init', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: initForm,
+      })
+      const initData = await initResponse.json().catch(() => null)
+      if (!initResponse.ok) {
+        throw new Error(initData?.detail || `创建上传会话失败（HTTP ${initResponse.status}）`)
       }
 
-      const jobId = data.job_id
+      const uploadId = initData?.upload_id
+      if (!uploadId) throw new Error('创建上传会话失败：后端未返回 upload_id。')
+
+      for (let index = 0; index < totalChunks; index += 1) {
+        const start = index * IMPORT_CHUNK_SIZE
+        const end = Math.min(file.size, start + IMPORT_CHUNK_SIZE)
+        const chunkForm = new FormData()
+        chunkForm.append('upload_id', uploadId)
+        chunkForm.append('chunk_index', String(index))
+        chunkForm.append('chunk', file.slice(start, end), `${file.name}.part${index}`)
+        const chunkResponse = await fetch('/api/data/import/chunk', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: chunkForm,
+        })
+        const chunkData = await chunkResponse.json().catch(() => null)
+        if (!chunkResponse.ok) {
+          throw new Error(chunkData?.detail || `上传第 ${index + 1} 个分片失败（HTTP ${chunkResponse.status}）`)
+        }
+        setImportStatus({
+          job_id: '',
+          status: 'pending',
+          progress: Math.min(20, Math.round(((index + 1) / totalChunks) * 20)),
+          current_stage: `正在上传导入包分片 ${index + 1}/${totalChunks}...`,
+          error_msg: null,
+          result: null,
+        })
+      }
+
+      const completeForm = new FormData()
+      completeForm.append('upload_id', uploadId)
+      setImportStatus({
+        job_id: '',
+        status: 'pending',
+        progress: 20,
+        current_stage: '正在组装导入包并启动后台任务...',
+        error_msg: null,
+        result: null,
+      })
+
+      const completeResponse = await fetch('/api/data/import/chunk/complete', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: completeForm,
+      })
+      const data = await completeResponse.json().catch(() => null)
+      if (!completeResponse.ok) {
+        throw new Error(data?.detail || `启动导入任务失败（HTTP ${completeResponse.status}）`)
+      }
+
+      const jobId = data?.job_id
       if (!jobId) throw new Error('导入任务创建失败：后端未返回任务 ID。')
 
       setImportStatus({

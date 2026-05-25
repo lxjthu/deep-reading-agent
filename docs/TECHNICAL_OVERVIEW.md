@@ -944,11 +944,12 @@
 
 - [data.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/routers/data.py)
 - [data_portability.py](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/backend/services/data_portability.py)
+- [CHUNKED_DATA_IMPORT_IMPL.md](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/docs/CHUNKED_DATA_IMPORT_IMPL.md) — 分片上传实现记录
 
 职责：
 
 - 用户数据一键导出为 `.dra` 格式
-- `.dra` 文件一键导入恢复数据
+- `.dra` 文件一键导入恢复数据（支持分片上传，2026-05-25 新增）
 - 导出包包含数据库记录（JSON）和物理文件
 
 关键函数：
@@ -965,6 +966,9 @@
   - 每张表 flush 一次，捕获早期错误
   - 统一提交事务
   - 恢复物理文件（best-effort）
+- `import_chunk_init` / `import_chunk_upload` / `import_chunk_complete`（2026-05-25 新增）
+  - 三阶段分片上传协议：init → 逐片上传 → complete 组装并启动导入
+  - 单片 ≤ 10MB，前端按 4MB 分片；原单文件上传端点保留
 
 **关键实现要点**：
 
@@ -1924,6 +1928,25 @@ v2 页面核心架构（与 v1 对比）：
 - **服务器数据库路径混淆**：服务器数据库路径为项目根目录下 `db/app.sqlite`，不是 `backend/db/app.sqlite`。执行 `cd backend && sqlite3 db/app.sqlite` 找不到数据库
 - **前端构建需手动执行**：服务器自动部署脚本只执行 `pip install` 和 `alembic upgrade head`，不执行前端构建。部署后必须手动 `cd frontend && npm run build`
 - **浏览器缓存**：服务器前端重新构建后，必须强制刷新浏览器（Ctrl+Shift+R）清除缓存的旧 JS 文件
+
+### 8.21 分片上传导入
+
+改动目标：
+
+- 将 `.dra` 文件导入从单次 HTTP 请求改为前端分片上传 + 后端组装的三阶段协议，解决大文件上传超时和 body size 限制问题
+
+落点文件：
+
+- `backend/routers/data.py` — 新增 `import_chunk_init`、`import_chunk_upload`、`import_chunk_complete` 三个端点；重构 `_ensure_import_allowed()`、`_start_import_from_path()` 辅助函数
+- `frontend/src/App.tsx` — `handleImportFile` 改为分片上传流程（4MB/片），进度条分片阶段占 0%~20%
+
+关键实现细节：
+
+- 前端 `IMPORT_CHUNK_SIZE = 4MB`，后端 `_IMPORT_CHUNK_SIZE_LIMIT = 10MB`
+- upload session 存内存 dict（`_import_upload_sessions`），服务重启清空
+- complete 时按 chunk_index 顺序拼接，校验总字节数 == total_size
+- 原有 `POST /import/start` 单文件端点保留，可继续使用
+- 详见 [CHUNKED_DATA_IMPORT_IMPL.md](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/docs/CHUNKED_DATA_IMPORT_IMPL.md)
 
 ## 9. 改代码时的推荐查找路径
 
