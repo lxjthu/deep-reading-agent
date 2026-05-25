@@ -650,7 +650,7 @@ class JobBibEntry(Base):
     __tablename__ = "job_bib_entries"
     __table_args__ = (
         CheckConstraint(
-            "role IN ('target','compare_member','synthesis_member','reference_source')",
+            "role IN ('target','compare_member','synthesis_member','reference_source','library_chat_member')",
             name="ck_jbe_role",
         ),
         UniqueConstraint("job_id", "bib_entry_id", "role", name="uq_jbe_unique"),

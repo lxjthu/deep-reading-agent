@@ -43,7 +43,7 @@ class LibraryChatCommentRequest(BaseModel):
     turn_id: str = Field(min_length=1, max_length=128)
     question: str = Field(min_length=1, max_length=4000)
     report: str = Field(min_length=1, max_length=80000)
-    entry_ids: list[str] = Field(min_length=1, max_length=200)
+    entry_ids: list[str] = Field(min_length=1, max_length=1000)
     history: list[LibraryChatTurn] = Field(default_factory=list, max_length=12)
     api_key: Optional[str] = None
 
