@@ -19,7 +19,7 @@ from starlette.responses import StreamingResponse
 from auth.dependencies import current_user
 from backend.utils.api_key import validate_deepseek_key
 from db import get_db
-from db.models import Annotation, Artifact, BibEntry, BibEntry, BibReference, Job, JobBibEntry, ReadingItem, User
+from db.models import Annotation, Artifact, BibEntry, BibReference, Job, JobBibEntry, ReadingItem, User
 from prompt_service import get_effective_prompt_text
 from result_storage import build_result_storage_path, get_results_root
 
