@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-25
+> 最后更新：2026-05-25 (2)
 
 ---
 
@@ -61,6 +61,7 @@
 |------|------|------|----------|
 | [INCIDENT_2026-05-06_LIBRARY_502.md](INCIDENT_2026-05-06_LIBRARY_502.md) | 事件 | 文献库 502 故障复盘 | 了解历史故障及修复过程 |
 | [API_KEY_FLOW_FIX.md](API_KEY_FLOW_FIX.md) | 修复 | API Key 传递链路修复 | 理解 API Key 如何从前端传到后端 |
+| [FIX_LIBRARY_CHAT_SAVE_500.md](FIX_LIBRARY_CHAT_SAVE_500.md) | 修复 | 文献助手保存历史记录远端 500 错误（SQLite CHECK 约束 migration 静默失败） | SQLite migration CHECK 约束修改不生效的排查参考 |
 
 ---
 

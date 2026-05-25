@@ -43,6 +43,43 @@ JBE_ROLES = "'target','compare_member','synthesis_member','reference_source','li
 OLD_JBE_ROLES = "'target','compare_member','synthesis_member','reference_source'"
 
 
+def _rebuild_table_sqlite(table: str, new_ddl: str) -> None:
+    ctx = op.get_context()
+    if ctx.dialect.name != "sqlite":
+        return
+    bind = op.get_bind()
+    tmp = f"_tmp_{table}"
+    bind.execute(f"ALTER TABLE {table} RENAME TO {tmp}")
+    bind.execute(new_ddl)
+    cols = bind.execute(f"PRAGMA table_info({tmp})").fetchall()
+    col_names = ", ".join(c[1] for c in cols)
+    bind.execute(f"INSERT INTO {table} ({col_names}) SELECT {col_names} FROM {tmp}")
+    bind.execute(f"DROP TABLE {tmp}")
+
+
+JBE_TABLE_DDL = (
+    'CREATE TABLE job_bib_entries ('
+    'id INTEGER NOT NULL, job_id VARCHAR NOT NULL, bib_entry_id VARCHAR NOT NULL, '
+    'role VARCHAR NOT NULL, sort_order INTEGER DEFAULT 0 NOT NULL, '
+    'PRIMARY KEY (id), '
+    'CONSTRAINT uq_jbe_unique UNIQUE (job_id, bib_entry_id, role), '
+    f'CONSTRAINT ck_jbe_role CHECK (role IN ({JBE_ROLES})), '
+    'FOREIGN KEY(job_id) REFERENCES jobs (id) ON DELETE CASCADE, '
+    'FOREIGN KEY(bib_entry_id) REFERENCES bib_entries (id) ON DELETE CASCADE)'
+)
+
+OLD_JBE_TABLE_DDL = (
+    'CREATE TABLE job_bib_entries ('
+    'id INTEGER NOT NULL, job_id VARCHAR NOT NULL, bib_entry_id VARCHAR NOT NULL, '
+    'role VARCHAR NOT NULL, sort_order INTEGER DEFAULT 0 NOT NULL, '
+    'PRIMARY KEY (id), '
+    'CONSTRAINT uq_jbe_unique UNIQUE (job_id, bib_entry_id, role), '
+    f'CONSTRAINT ck_jbe_role CHECK (role IN ({OLD_JBE_ROLES})), '
+    'FOREIGN KEY(job_id) REFERENCES jobs (id) ON DELETE CASCADE, '
+    'FOREIGN KEY(bib_entry_id) REFERENCES bib_entries (id) ON DELETE CASCADE)'
+)
+
+
 def upgrade() -> None:
     with op.batch_alter_table("jobs") as batch_op:
         batch_op.drop_constraint("ck_jobs_job_type", type_="check")
@@ -52,15 +89,23 @@ def upgrade() -> None:
         batch_op.drop_constraint("ck_artifacts_artifact_type", type_="check")
         batch_op.create_check_constraint("ck_artifacts_artifact_type", f"artifact_type IN ({ARTIFACT_TYPES})")
 
-    with op.batch_alter_table("job_bib_entries") as batch_op:
-        batch_op.drop_constraint("ck_jbe_role", type_="check")
-        batch_op.create_check_constraint("ck_jbe_role", f"role IN ({JBE_ROLES})")
+    _rebuild_table_sqlite("job_bib_entries", JBE_TABLE_DDL)
+
+    ctx = op.get_context()
+    if ctx.dialect.name != "sqlite":
+        with op.batch_alter_table("job_bib_entries") as batch_op:
+            batch_op.drop_constraint("ck_jbe_role", type_="check")
+            batch_op.create_check_constraint("ck_jbe_role", f"role IN ({JBE_ROLES})")
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("job_bib_entries") as batch_op:
-        batch_op.drop_constraint("ck_jbe_role", type_="check")
-        batch_op.create_check_constraint("ck_jbe_role", f"role IN ({OLD_JBE_ROLES})")
+    _rebuild_table_sqlite("job_bib_entries", OLD_JBE_TABLE_DDL)
+
+    ctx = op.get_context()
+    if ctx.dialect.name != "sqlite":
+        with op.batch_alter_table("job_bib_entries") as batch_op:
+            batch_op.drop_constraint("ck_jbe_role", type_="check")
+            batch_op.create_check_constraint("ck_jbe_role", f"role IN ({OLD_JBE_ROLES})")
 
     with op.batch_alter_table("artifacts") as batch_op:
         batch_op.drop_constraint("ck_artifacts_artifact_type", type_="check")
