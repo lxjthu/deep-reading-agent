@@ -4785,26 +4785,22 @@ export default App
 
 // History Panel - Show all generated reports
 function HistoryTab() {
-  const [subTab, setSubTab] = useState<'reading' | 'synthesis' | 'library_chat'>('reading')
+  const [subTab, setSubTab] = useState<'reading' | 'synthesis'>('reading')
   const [readingFiles, setReadingFiles] = useState<any[]>([])
   const [synthesisFiles, setSynthesisFiles] = useState<any[]>([])
-  const [libraryChatFiles, setLibraryChatFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [readingRes, synthRes, chatRes] = await Promise.all([
+      const [readingRes, synthRes] = await Promise.all([
         fetch('/api/history/'),
-        fetch('/api/history/synthesis/'),
-        fetch('/api/history/library-chat'),
+        fetch('/api/history/synthesis/')
       ])
       const readingData = await readingRes.json()
       const synthData = await synthRes.json()
-      const chatData = await chatRes.json()
       setReadingFiles(readingData.all || [])
       setSynthesisFiles(synthData.all || [])
-      setLibraryChatFiles(chatData.all || [])
     } catch (e) {
       console.error('Failed to load history:', e)
     }
@@ -4815,15 +4811,13 @@ function HistoryTab() {
     fetchAll()
   }, [])
 
-  const handleDelete = async (filename: string, tab: string) => {
+  const handleDelete = async (filename: string, isSynthesis: boolean) => {
     if (!confirm(`确定删除 ${filename}？`)) return
     try {
       const res = await fetch(`/api/history/${encodeURIComponent(filename)}`, { method: 'DELETE' })
       if (res.ok) {
-        if (tab === 'synthesis') {
+        if (isSynthesis) {
           setSynthesisFiles(files => files.filter(f => f.filename !== filename))
-        } else if (tab === 'library_chat') {
-          setLibraryChatFiles(files => files.filter(f => f.filename !== filename))
         } else {
           setReadingFiles(files => files.filter(f => f.filename !== filename))
         }
@@ -4840,11 +4834,10 @@ function HistoryTab() {
     '文献筛选': '📑',
     'AI综述': '🤖',
     '全文翻译': '🌐',
-    '文献助手': '💬',
     '其他': '📎',
   }
 
-  const renderFileList = (files: any[], tab: string) => {
+  const renderFileList = (files: any[], isSynthesis: boolean) => {
     if (files.length === 0) {
       return <div className="text-sm text-gray-400 py-8 text-center">暂无记录</div>
     }
@@ -4892,7 +4885,7 @@ function HistoryTab() {
                 ⬇ 下载
               </button>
               <button
-                onClick={() => handleDelete(file.filename, tab)}
+                onClick={() => handleDelete(file.filename, isSynthesis)}
                 className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
               >
                 🗑 删除
@@ -4931,16 +4924,6 @@ function HistoryTab() {
           🤖 AI综述 ({synthesisFiles.length})
         </button>
         <button
-          onClick={() => setSubTab('library_chat')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            subTab === 'library_chat'
-              ? 'border-emerald-600 text-emerald-700'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          💬 文献助手 ({libraryChatFiles.length})
-        </button>
-        <button
           onClick={fetchAll}
           className="ml-auto px-3 py-2 text-sm text-gray-500 hover:text-emerald-600 transition-colors"
           disabled={loading}
@@ -4949,9 +4932,8 @@ function HistoryTab() {
         </button>
       </div>
 
-      {subTab === 'reading' && renderFileList(readingFiles, 'reading')}
-      {subTab === 'synthesis' && renderFileList(synthesisFiles, 'synthesis')}
-      {subTab === 'library_chat' && renderFileList(libraryChatFiles, 'library_chat')}
+      {subTab === 'reading' && renderFileList(readingFiles, false)}
+      {subTab === 'synthesis' && renderFileList(synthesisFiles, true)}
     </div>
   )
 }

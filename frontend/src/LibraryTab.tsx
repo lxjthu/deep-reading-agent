@@ -155,8 +155,6 @@ type LibraryChatTurn = {
   actionProposal: LibraryChatActionProposal | null
   commentSaveStatus: 'idle' | 'saving' | 'done' | 'error'
   commentSaveMessage: string
-  historySaveStatus: 'idle' | 'saving' | 'done' | 'error'
-  historySaveMessage: string
 }
 
 async function parseJsonOrThrow<T>(response: Response): Promise<T> {
@@ -780,8 +778,6 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       actionProposal: null,
       commentSaveStatus: 'idle',
       commentSaveMessage: '',
-      historySaveStatus: 'idle',
-      historySaveMessage: '',
     }
     setChatTurns((turns) => [...turns, nextTurn])
     setChatQuestion('')
@@ -1072,48 +1068,6 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
           ...item,
           commentSaveStatus: 'error',
           commentSaveMessage: error instanceof Error ? error.message : '保存本轮 AI 点评失败。',
-        })),
-      )
-    }
-  }
-
-  async function saveChatTurnReport(turnId: string) {
-    const turn = chatTurns.find((t) => t.id === turnId)
-    if (!turn || !turn.report.trim() || turn.historySaveStatus === 'saving') return
-
-    setChatTurns((turns) =>
-      updateLastChatTurn(turns, turnId, (item) => ({
-        ...item,
-        historySaveStatus: 'saving',
-        historySaveMessage: '',
-      })),
-    )
-    try {
-      const response = await fetch('/api/history/library-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: turn.question,
-          report: turn.report,
-          entry_ids: turn.entryIds,
-          entry_titles: turn.entryTitles,
-          keywords: turn.keywords,
-        }),
-      })
-      const data = await parseJsonOrThrow<{ success: boolean; filename: string }>(response)
-      setChatTurns((turns) =>
-        updateLastChatTurn(turns, turnId, (item) => ({
-          ...item,
-          historySaveStatus: 'done',
-          historySaveMessage: `已保存到历史记录：${data.filename}`,
-        })),
-      )
-    } catch (error: unknown) {
-      setChatTurns((turns) =>
-        updateLastChatTurn(turns, turnId, (item) => ({
-          ...item,
-          historySaveStatus: 'error',
-          historySaveMessage: error instanceof Error ? error.message : '保存到历史记录失败。',
         })),
       )
     }
@@ -2236,46 +2190,24 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                         {chatLoading && turn.id === chatTurns[chatTurns.length - 1]?.id ? '正在生成报告...' : '本轮暂无报告内容。'}
                       </div>
                     )}
-                    {turn.report && (
+                    {turn.report && turn.entryIds.length > 0 && (
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => void saveChatTurnReport(turn.id)}
-                          disabled={turn.historySaveStatus === 'saving' || chatLoading}
-                          className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-40"
+                          onClick={() => void saveChatTurnComments(turn.id)}
+                          disabled={turn.commentSaveStatus === 'saving' || chatLoading}
+                          className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
                         >
-                          {turn.historySaveStatus === 'saving' ? '保存中...' : '保存到历史记录'}
+                          {turn.commentSaveStatus === 'saving' ? '保存点评中...' : '保存本轮 AI 点评'}
                         </button>
-                        {turn.historySaveMessage && (
+                        {turn.commentSaveMessage && (
                           <span
                             className={`text-xs ${
-                              turn.historySaveStatus === 'error' ? 'text-red-600' : 'text-blue-700'
+                              turn.commentSaveStatus === 'error' ? 'text-red-600' : 'text-emerald-700'
                             }`}
                           >
-                            {turn.historySaveMessage}
+                            {turn.commentSaveMessage}
                           </span>
-                        )}
-                        {turn.entryIds.length > 0 && (
-                          <>
-                            <span className="text-gray-300">|</span>
-                            <button
-                              type="button"
-                              onClick={() => void saveChatTurnComments(turn.id)}
-                              disabled={turn.commentSaveStatus === 'saving' || chatLoading}
-                              className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
-                            >
-                              {turn.commentSaveStatus === 'saving' ? '保存点评中...' : '保存本轮 AI 点评'}
-                            </button>
-                            {turn.commentSaveMessage && (
-                              <span
-                                className={`text-xs ${
-                                  turn.commentSaveStatus === 'error' ? 'text-red-600' : 'text-emerald-700'
-                                }`}
-                              >
-                                {turn.commentSaveMessage}
-                              </span>
-                            )}
-                          </>
                         )}
                       </div>
                     )}
