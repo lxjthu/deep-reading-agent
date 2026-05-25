@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import hashlib
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -30,9 +31,10 @@ from services.pdf_metadata_llm import extract_metadata_with_llm
 from upload_storage import resolve_storage_path
 from backend.utils.api_key import validate_deepseek_key
 from services.abstract_translator import run_batch_translate
-from routers.upload import compute_expires_at, detect_file_type, persist_upload_to_temp
+from routers.upload import compute_expires_at, detect_file_type, persist_upload_to_temp, utcnow_naive
 from upload_storage import build_storage_path, get_user_upload_dir
 from services.card_notes import json_list, read_artifact_markdown, read_markdown_file, strip_frontmatter
+from services.fulltext_lookup import download_pdf_candidate, lookup_fulltext
 
 router = APIRouter()
 
@@ -124,6 +126,28 @@ class LibraryAiCommentUpdateRequest(BaseModel):
 class BatchTranslateRequest(BaseModel):
     entry_ids: list[str] = Field(..., min_length=1, max_length=200)
     api_key: str
+
+
+class FullTextCandidateResponse(BaseModel):
+    url: str
+    source: str
+    version: str
+    kind: str
+    label: str
+    confidence: float
+
+
+class FullTextLookupResponse(BaseModel):
+    status: str
+    message: str
+    attached_file_id: Optional[str] = None
+    attached_file_name: Optional[str] = None
+    attached_source_url: Optional[str] = None
+    doi: Optional[str] = None
+    pdf_candidates: list[FullTextCandidateResponse] = Field(default_factory=list)
+    landing_pages: list[FullTextCandidateResponse] = Field(default_factory=list)
+    working_paper_searches: list[FullTextCandidateResponse] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
 
 
 class ReaderVersion(BaseModel):
@@ -258,6 +282,67 @@ def build_entry_summary(
         note=entry.user_note,
         filter_score=filter_score,
     )
+
+
+def _candidate_response(candidate) -> FullTextCandidateResponse:
+    return FullTextCandidateResponse(
+        url=candidate.url,
+        source=candidate.source,
+        version=candidate.version,
+        kind=candidate.kind,
+        label=candidate.label,
+        confidence=candidate.confidence,
+    )
+
+
+def _safe_pdf_filename(entry: BibEntry, source: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", (entry.title or "paper").strip())
+    stem = stem.strip("._-")[:90] or "paper"
+    source_slug = re.sub(r"[^A-Za-z0-9._-]+", "_", source.strip()).strip("._-")[:32] or "open"
+    return f"{stem}_{source_slug}.pdf"
+
+
+async def _attach_pdf_bytes_to_entry(
+    db: AsyncSession,
+    user: User,
+    entry: BibEntry,
+    *,
+    filename: str,
+    content: bytes,
+) -> File:
+    md5_hash = hashlib.md5(content).hexdigest()
+    existing = (
+        await db.execute(
+            select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash)
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        entry.source_file_id = existing.id
+        if entry.reading_status == "none":
+            entry.reading_status = "has_pdf"
+        entry.updated_at = utcnow_naive()
+        return existing
+
+    file_id = str(uuid.uuid4())
+    final_path, storage_path = build_storage_path(user.id, file_id, ".pdf")
+    final_path.write_bytes(content)
+    record = File(
+        id=file_id,
+        owner_user_id=user.id,
+        original_name=filename,
+        file_type="pdf",
+        storage_path=storage_path,
+        size_bytes=len(content),
+        md5=md5_hash,
+        expires_at=compute_expires_at(user),
+    )
+    db.add(record)
+    entry.source_file_id = record.id
+    if entry.reading_status == "none":
+        entry.reading_status = "has_pdf"
+    entry.updated_at = utcnow_naive()
+    return record
 
 
 async def get_owned_entry(db: AsyncSession, user: User, entry_id: str) -> BibEntry:
@@ -741,6 +826,65 @@ async def upload_entry_markdown(
         raise
     finally:
         await file.close()
+
+
+@router.post("/entries/{entry_id}/fulltext-search", response_model=FullTextLookupResponse)
+async def search_entry_fulltext(
+    entry_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_user),
+) -> FullTextLookupResponse:
+    entry = await get_owned_entry(db, user, entry_id)
+    authors = _json_list(entry.authors_json)
+    lookup = await lookup_fulltext(
+        title=entry.title,
+        doi=entry.doi,
+        authors=authors,
+        year=entry.year,
+    )
+
+    errors: list[str] = []
+    for candidate in lookup.pdf_candidates[:5]:
+        try:
+            content, final_url = await download_pdf_candidate(candidate.url)
+            record = await _attach_pdf_bytes_to_entry(
+                db,
+                user,
+                entry,
+                filename=_safe_pdf_filename(entry, candidate.source),
+                content=content,
+            )
+            await db.commit()
+            return FullTextLookupResponse(
+                status="attached",
+                message=f"已找到并挂载 {candidate.label}。",
+                attached_file_id=record.id,
+                attached_file_name=record.original_name,
+                attached_source_url=final_url,
+                doi=lookup.doi,
+                pdf_candidates=[_candidate_response(item) for item in lookup.pdf_candidates],
+                landing_pages=[_candidate_response(item) for item in lookup.landing_pages],
+                working_paper_searches=[_candidate_response(item) for item in lookup.working_paper_searches],
+                errors=errors,
+            )
+        except Exception as exc:
+            errors.append(f"{candidate.source}: {exc}")
+
+    status_text = "landing_only" if lookup.landing_pages else "search_only"
+    message = (
+        "未能自动挂载 PDF，已返回 DOI/开放访问页面和 working paper 检索入口。"
+        if status_text == "landing_only"
+        else "未能自动挂载 PDF，已返回 working paper 检索入口。"
+    )
+    return FullTextLookupResponse(
+        status=status_text,
+        message=message,
+        doi=lookup.doi,
+        pdf_candidates=[_candidate_response(item) for item in lookup.pdf_candidates],
+        landing_pages=[_candidate_response(item) for item in lookup.landing_pages],
+        working_paper_searches=[_candidate_response(item) for item in lookup.working_paper_searches],
+        errors=errors,
+    )
 
 
 @router.get("/entries/{entry_id}/reader", response_model=ReaderResponse)

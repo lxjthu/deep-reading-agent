@@ -70,6 +70,28 @@ type LibraryAiComment = {
   updated_at: string | null
 }
 
+type FullTextCandidate = {
+  url: string
+  source: string
+  version: string
+  kind: string
+  label: string
+  confidence: number
+}
+
+type FullTextLookupResponse = {
+  status: 'attached' | 'landing_only' | 'search_only' | string
+  message: string
+  attached_file_id: string | null
+  attached_file_name: string | null
+  attached_source_url: string | null
+  doi: string | null
+  pdf_candidates: FullTextCandidate[]
+  landing_pages: FullTextCandidate[]
+  working_paper_searches: FullTextCandidate[]
+  errors: string[]
+}
+
 type EditDraft = {
   title: string
   authorsText: string
@@ -353,6 +375,8 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [translating, setTranslating] = useState(false)
   const [translateProgress, setTranslateProgress] = useState('')
   const [markdownUploading, setMarkdownUploading] = useState(false)
+  const [fulltextSearching, setFulltextSearching] = useState(false)
+  const [fulltextResult, setFulltextResult] = useState<FullTextLookupResponse | null>(null)
 
   const [chatOpen, setChatOpen] = useState(false)
   const [chatQuestion, setChatQuestion] = useState('')
@@ -660,6 +684,35 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   function openCnkiTitleSearch(entry: LibraryEntrySummary | LibraryEntryDetail) {
     const url = buildCnkiTitleSearchUrl(entry.title)
     window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  async function handleFullTextSearch() {
+    if (!detail || fulltextSearching) return
+    setFulltextSearching(true)
+    setSaveMessage('')
+    try {
+      const response = await fetch(`/api/library/entries/${encodeURIComponent(detail.id)}/fulltext-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const data = await parseJsonOrThrow<FullTextLookupResponse>(response)
+
+      if (data.status === 'attached') {
+        setSaveMessage(data.message)
+        await loadEntries(detail.id)
+        await loadDetail(detail.id)
+        if (data.attached_source_url) {
+          console.info('Full text source:', data.attached_source_url)
+        }
+        return
+      }
+
+      setFulltextResult(data)
+    } catch (error: unknown) {
+      alert(`英文原文检索失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setFulltextSearching(false)
+    }
   }
 
   async function handleBatchTags(operation: 'add' | 'remove') {
@@ -1632,6 +1685,14 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                     </button>
                     <button
                       type="button"
+                      disabled={fulltextSearching}
+                      className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                      onClick={() => void handleFullTextSearch()}
+                    >
+                      {fulltextSearching ? '检索中...' : '英文原文'}
+                    </button>
+                    <button
+                      type="button"
                       disabled={!hasMarkdownReaderSource && !hasTranslatedReaderSource}
                       className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300"
                       onClick={() => navigate(`/workspace/cards/reader/${detail.id}?view=${readerDefaultView}`)}
@@ -2185,6 +2246,63 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
           </div>
         )}
       </section>
+
+      {fulltextResult && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }}
+          onClick={() => setFulltextResult(null)}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 12, width: '90%', maxWidth: 560, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 12px 32px rgba(45,42,38,0.15)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #e5e7eb' }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>英文原文检索结果</h3>
+              <button type="button" onClick={() => setFulltextResult(null)} className="rounded-lg border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">关闭</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', fontSize: 13 }}>
+              {fulltextResult.doi && (
+                <p style={{ margin: '0 0 8px', color: '#6b7280' }}>DOI: {fulltextResult.doi}</p>
+              )}
+              {fulltextResult.errors.length > 0 && (
+                <p style={{ margin: '0 0 8px', color: '#dc2626', fontSize: 12 }}>
+                  PDF 候选未能挂载：{fulltextResult.errors.slice(0, 2).join('；')}
+                </p>
+              )}
+              {fulltextResult.pdf_candidates.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <p style={{ fontWeight: 600, margin: '0 0 6px' }}>PDF 下载链接</p>
+                  {fulltextResult.pdf_candidates.map((item, i) => (
+                    <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', padding: '4px 0', color: '#4f46e5', textDecoration: 'none', wordBreak: 'break-all' }}>
+                      [{item.source}] {item.label}
+                    </a>
+                  ))}
+                </div>
+              )}
+              {fulltextResult.landing_pages.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <p style={{ fontWeight: 600, margin: '0 0 6px' }}>开放访问页面</p>
+                  {fulltextResult.landing_pages.map((item, i) => (
+                    <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', padding: '4px 0', color: '#4f46e5', textDecoration: 'none', wordBreak: 'break-all' }}>
+                      [{item.label}] {item.url.length > 80 ? item.url.slice(0, 77) + '...' : item.url}
+                    </a>
+                  ))}
+                </div>
+              )}
+              {fulltextResult.working_paper_searches.length > 0 && (
+                <div>
+                  <p style={{ fontWeight: 600, margin: '0 0 6px' }}>未找到直接 PDF，可尝试以下检索入口</p>
+                  {fulltextResult.working_paper_searches.slice(0, 6).map((item, i) => (
+                    <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', padding: '4px 0', color: '#4f46e5', textDecoration: 'none' }}>
+                      [{item.source}] {item.label}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
