@@ -1,6 +1,7 @@
 """Data export/import router for user data portability (.dra format)."""
 from __future__ import annotations
 
+import json
 import os
 import asyncio
 import logging
@@ -23,7 +24,6 @@ from services.data_portability import export_user_data, import_user_data
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Simple in-memory rate limiting
 _export_counts: dict[int, list[datetime]] = {}
 _import_counts: dict[int, list[datetime]] = {}
 
@@ -35,8 +35,37 @@ _IMPORT_CHUNK_SIZE_LIMIT = 10 * 1024 * 1024
 _import_tasks: dict[str, dict[str, Any]] = {}
 _user_active_imports: dict[int, str] = {}
 _import_task_lock = threading.Lock()
-_import_upload_lock = threading.Lock()
-_import_upload_sessions: dict[str, dict[str, Any]] = {}
+_UPLOAD_SESSIONS_ROOT = Path(tempfile.gettempdir()) / "dra_upload_sessions"
+
+
+def _session_dir(upload_id: str) -> Path:
+    return _UPLOAD_SESSIONS_ROOT / upload_id
+
+
+def _session_meta_path(upload_id: str) -> Path:
+    return _session_dir(upload_id) / "_session.json"
+
+
+def _save_session_meta(upload_id: str, meta: dict[str, Any]) -> None:
+    p = _session_meta_path(upload_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    payload = {k: v for k, v in meta.items() if k != "received"}
+    payload["received"] = sorted(meta.get("received", set()))
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
+
+
+def _load_session_meta(upload_id: str) -> dict[str, Any] | None:
+    p = _session_meta_path(upload_id)
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    data["received"] = set(data.get("received", []))
+    return data
 
 
 def _utc_now() -> datetime:
@@ -249,20 +278,21 @@ async def import_chunk_init(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分片数量无效。")
 
     upload_id = str(uuid.uuid4())
-    upload_dir = Path(tempfile.mkdtemp(prefix=f"import_upload_{user.id}_{upload_id}_"))
+    upload_dir = _session_dir(upload_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
     now = _utc_now().isoformat()
-    with _import_upload_lock:
-        _import_upload_sessions[upload_id] = {
-            "upload_id": upload_id,
-            "user_id": user.id,
-            "filename": filename,
-            "total_size": total_size,
-            "total_chunks": total_chunks,
-            "upload_dir": str(upload_dir),
-            "received": set(),
-            "created_at": now,
-            "updated_at": now,
-        }
+    meta = {
+        "upload_id": upload_id,
+        "user_id": user.id,
+        "filename": filename,
+        "total_size": total_size,
+        "total_chunks": total_chunks,
+        "upload_dir": str(upload_dir),
+        "received": set(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    _save_session_meta(upload_id, meta)
     return {"upload_id": upload_id}
 
 
@@ -273,12 +303,11 @@ async def import_chunk_upload(
     chunk: UploadFile = File(...),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    with _import_upload_lock:
-        session = _import_upload_sessions.get(upload_id)
-        if session is None or session.get("user_id") != user.id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分片上传会话不存在。")
-        total_chunks = int(session["total_chunks"])
-        upload_dir = Path(str(session["upload_dir"]))
+    meta = _load_session_meta(upload_id)
+    if meta is None or meta.get("user_id") != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分片上传会话不存在。")
+    total_chunks = int(meta["total_chunks"])
+    upload_dir = Path(str(meta["upload_dir"]))
 
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分片序号无效。")
@@ -294,13 +323,10 @@ async def import_chunk_upload(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"保存分片失败：{exc}") from exc
 
-    with _import_upload_lock:
-        session = _import_upload_sessions.get(upload_id)
-        if session is None or session.get("user_id") != user.id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分片上传会话不存在。")
-        session["received"].add(chunk_index)
-        session["updated_at"] = _utc_now().isoformat()
-        received_count = len(session["received"])
+    meta["received"].add(chunk_index)
+    meta["updated_at"] = _utc_now().isoformat()
+    _save_session_meta(upload_id, meta)
+    received_count = len(meta["received"])
 
     return {"upload_id": upload_id, "received": received_count, "total_chunks": total_chunks}
 
@@ -310,15 +336,14 @@ async def import_chunk_complete(
     upload_id: str = Form(...),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    with _import_upload_lock:
-        session = _import_upload_sessions.get(upload_id)
-        if session is None or session.get("user_id") != user.id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分片上传会话不存在。")
-        filename = str(session["filename"])
-        total_size = int(session["total_size"])
-        total_chunks = int(session["total_chunks"])
-        received = set(session["received"])
-        upload_dir = Path(str(session["upload_dir"]))
+    meta = _load_session_meta(upload_id)
+    if meta is None or meta.get("user_id") != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分片上传会话不存在。")
+    filename = str(meta["filename"])
+    total_size = int(meta["total_size"])
+    total_chunks = int(meta["total_chunks"])
+    received = set(meta["received"])
+    upload_dir = Path(str(meta["upload_dir"]))
 
     _ensure_import_allowed(user, filename, total_size)
     missing = [idx for idx in range(total_chunks) if idx not in received]
@@ -326,6 +351,7 @@ async def import_chunk_complete(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"分片尚未上传完成：缺少 {len(missing)} 个。")
 
     tmp_path = Path(tempfile.mktemp(suffix=".dra"))
+    import shutil
     try:
         written = 0
         with open(tmp_path, "wb") as out:
@@ -341,9 +367,6 @@ async def import_chunk_complete(
             os.unlink(tmp_path)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"组装导入包失败：{exc}") from exc
     finally:
-        with _import_upload_lock:
-            _import_upload_sessions.pop(upload_id, None)
-        import shutil
         shutil.rmtree(upload_dir, ignore_errors=True)
 
     return _start_import_from_path(user, filename, tmp_path)

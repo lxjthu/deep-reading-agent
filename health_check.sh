@@ -14,7 +14,7 @@ check_and_restart() {
         pkill -f "uvicorn main:app" 2>/dev/null || true
         cd /root/.openclaw/workspace/deep-reading-agent/backend
         source ../venv/bin/activate
-        nohup uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 > /tmp/fastapi.log 2>&1 &
+        nohup uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 > /tmp/fastapi.log 2>&1 &
         sleep 2
         if curl -s http://localhost:8000/health >/dev/null 2>&1; then
             log "✅ Backend restarted"
