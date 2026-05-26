@@ -1,0 +1,1 @@
+0 9 * * * root bash /root/.openclaw/workspace/deep-reading-agent/scripts/daily_health_check.sh > /tmp/deepread_cron.log 2>&1 && python3 /root/.openclaw/workspace/deep-reading-agent/scripts/generate_report.py >> /tmp/deepread_cron.log 2>&1
