@@ -19,7 +19,15 @@ python -m unittest backend.tests.test_queue_manager
 cd frontend && npm run build
 ```
 
-部署：`git push origin online` → Webhook 触发服务器自动拉代码重启；数据库迁移需 SSH 手动 `alembic upgrade head`。
+## 服务器
+
+- **地址**：`http://8.162.14.154:18080/`（Nginx 反代到 127.0.0.1:18000）
+- **SSH**：`ssh root@8.162.14.154`
+- **项目路径**：`/root/deep-reading-agent`
+- **后端 venv**：`/root/deep-reading-agent/venv`
+- **日志**：`/tmp/fastapi.log`
+- **重启**：`pkill -f 'uvicorn main:app.*18000'; sleep 2; cd /root/deep-reading-agent && source venv/bin/activate && nohup uvicorn main:app --host 127.0.0.1 --port 18000 --workers 1 --timeout-keep-alive 30 > /tmp/fastapi.log 2>&1 &`
+- **部署**：SCP 上传改动的文件 → 重启 uvicorn（无 Webhook，手动部署）
 
 ## 架构
 
