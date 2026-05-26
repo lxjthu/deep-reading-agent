@@ -7,6 +7,8 @@ import uuid
 import threading
 import re
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from services.deepseek_limiter import deepseek_semaphore
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -979,19 +981,31 @@ def _check_and_retry_empty_dimensions(
         tasks[task_id]["logs"].append(
             f"[后检查] 第 {attempt} 次重试：{len(empty_keys)} 个维度需要重新分析"
         )
-        for key in empty_keys:
+
+        def _retry_one(key):
             if tasks[task_id].get("status") == "cancelled":
-                return results
+                return key, None, "cancelled"
             try:
-                tasks[task_id]["stage"] = f"重试维度: {key} ({attempt}/{max_retries})"
                 new_content = retry_fn(key)
+                return key, new_content, None
+            except Exception as e:
+                return key, None, str(e)
+
+        with ThreadPoolExecutor(max_workers=min(len(empty_keys), 6)) as pool:
+            retry_futures = {pool.submit(_retry_one, k): k for k in empty_keys}
+            for future in as_completed(retry_futures):
+                if tasks[task_id].get("status") == "cancelled":
+                    return results
+                key, new_content, err = future.result()
+                if err == "cancelled":
+                    return results
                 if new_content and not _is_empty_result(new_content):
                     results[key] = new_content
                     tasks[task_id]["logs"].append(f"✓ [重试] {key} 完成")
+                elif err:
+                    tasks[task_id]["logs"].append(f"⚠ [重试] {key} 失败: {str(err)[:80]}")
                 else:
                     tasks[task_id]["logs"].append(f"⚠ [重试] {key} 仍为空")
-            except Exception as e:
-                tasks[task_id]["logs"].append(f"⚠ [重试] {key} 失败: {str(e)[:80]}")
     still_empty = [k for k, v in results.items() if _is_empty_result(v)]
     if still_empty:
         tasks[task_id]["logs"].append(
@@ -1146,48 +1160,57 @@ def run_long_context_task(
 
         results = {}
         total_dims = len(analysis_dims)
-        for i, dim_key in enumerate(analysis_dims):
-            if tasks[task_id]["status"] == "cancelled":
-                return
-            
-            dim_map = {
-                "研究问题": "overview",
-                "理论框架": "theory",
-                "识别策略": "methodology",
-                "数据来源": "data_source",
-                "变量度量": "variable_measurement",
-                "识别假设": "identification_assumptions",
-                "统计结果": "results",
-                "机制分析": "mechanism",
-                "稳健性检验": "robustness",
-                "外部有效性": "external_validity",
-                "贡献与局限": "contributions_limitations",
-                "写作质量": "writing_quality",
-            }
-            mapped_key = dim_map.get(dim_key)
 
-            tasks[task_id]["stage"] = f"分析维度 {i+1}/{total_dims}: {dim_key}..."
-            tasks[task_id]["logs"].append(f"[{i+1}/{total_dims}] {dim_key}...")
-            
+        dims_to_analyze = []
+        for i, dim_key in enumerate(analysis_dims):
             item_key_for_dim = LONG_DIMENSION_KEYS.get(dim_key, f"long.{slugify_key_fragment(dim_key)}")
             if conflict_resolution == "incremental" and item_key_for_dim in prev_items:
                 results[dim_key] = prev_items[item_key_for_dim]
                 tasks[task_id]["logs"].append(f"⏭ {dim_key} 跳过（复用已有结果）")
                 continue
+            dims_to_analyze.append(dim_key)
 
-            try:
-                if mapped_key:
-                    answer = engine.analyze_dimension(mapped_key)
-                elif custom_dim_map and dim_key in custom_dim_map:
-                    dim_meta = custom_dim_map[dim_key]
-                    answer = engine.analyze_dimension(dim_key, dim_meta=dim_meta)
-                else:
-                    answer = engine.analyze_dimension("overview")
+        def _analyze_long_dim(dim_key):
+            with deepseek_semaphore:
+                if tasks[task_id]["status"] == "cancelled":
+                    return dim_key, None, "cancelled"
+                dim_map = {
+                    "研究问题": "overview", "理论框架": "theory", "识别策略": "methodology",
+                    "数据来源": "data_source", "变量度量": "variable_measurement",
+                    "识别假设": "identification_assumptions", "统计结果": "results",
+                    "机制分析": "mechanism", "稳健性检验": "robustness",
+                    "外部有效性": "external_validity", "贡献与局限": "contributions_limitations",
+                    "写作质量": "writing_quality",
+                }
+                mapped_key = dim_map.get(dim_key)
+                try:
+                    if mapped_key:
+                        answer = engine.analyze_dimension(mapped_key)
+                    elif custom_dim_map and dim_key in custom_dim_map:
+                        answer = engine.analyze_dimension(dim_key, dim_meta=custom_dim_map[dim_key])
+                    else:
+                        answer = engine.analyze_dimension("overview")
+                    return dim_key, answer, None
+                except Exception as e:
+                    return dim_key, f"[分析出错: {str(e)[:200]}]", str(e)
+
+        workers = min(len(dims_to_analyze), 12)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_analyze_long_dim, dk): dk for dk in dims_to_analyze}
+            done_count = 0
+            for future in as_completed(futures):
+                if tasks[task_id]["status"] == "cancelled":
+                    break
+                dim_key, answer, err = future.result()
+                if err == "cancelled":
+                    return
                 results[dim_key] = answer
-                tasks[task_id]["logs"].append(f"✓ {dim_key} 完成")
-            except Exception as e:
-                tasks[task_id]["logs"].append(f"⚠ {dim_key} 出错: {str(e)[:80]}")
-                results[dim_key] = f"[分析出错: {str(e)[:200]}]"
+                done_count += 1
+                tasks[task_id]["progress"] = 50 + int(40 * done_count / max(len(dims_to_analyze), 1))
+                if err:
+                    tasks[task_id]["logs"].append(f"⚠ {dim_key} 出错: {str(err)[:80]}")
+                else:
+                    tasks[task_id]["logs"].append(f"✓ {dim_key} 完成")
         
         # Handle custom question after all dimensions
         if custom_question and custom_question.strip():
@@ -1226,25 +1249,54 @@ def run_long_context_task(
         tasks[task_id]["stage"] = "生成报告..."
         
         original_name = get_original_filename(file_path)
-        safe_name = sanitize_filename(original_name)
-        result_dir = get_results_dir(user_id, task_id)
-        report_path = result_dir / f"{safe_name}_long_context.md"
-        
-        # Extract metadata from front matter (tolerant — never fail the main task)
+        tasks[task_id]["stage"] = "后处理（元数据 + 参考文献）..."
+        tasks[task_id]["logs"].append("开始并发后处理...")
+
+        def _extract_meta_long():
+            try:
+                front_matter = extract_front_matter(file_path)
+                metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+                return metadata, None
+            except Exception as exc:
+                return None, str(exc)
+
+        def _extract_refs_long():
+            try:
+                return _try_extract_references(
+                    file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
+                ), None
+            except Exception as exc:
+                return [], str(exc)
+
         metadata = None
-        try:
-            tasks[task_id]["stage"] = "提取论文元数据..."
-            tasks[task_id]["logs"].append("提取论文元数据...")
-            front_matter = extract_front_matter(file_path)
-            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+        ref_artifacts = []
+        with ThreadPoolExecutor(max_workers=2) as post_pool:
+            meta_future = post_pool.submit(_extract_meta_long)
+            ref_future = post_pool.submit(_extract_refs_long)
+            metadata, meta_err = meta_future.result()
+            ref_artifacts, ref_err = ref_future.result()
+
+        if meta_err:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {meta_err}")
+        elif metadata:
             tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
-        except Exception as exc:
-            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
+        else:
+            tasks[task_id]["logs"].append("⚠ 元数据提取未成功")
         if not metadata:
             from backend.services.pdf_metadata_llm import _empty_metadata
             metadata = _empty_metadata()
-        
-        # Update BibEntry with extracted metadata
+
+        if ref_artifacts is None:
+            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
+        elif ref_artifacts:
+            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
+        else:
+            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功")
+
+        safe_name = sanitize_filename(original_name)
+        result_dir = get_results_dir(user_id, task_id)
+        report_path = result_dir / f"{safe_name}_long_context.md"
+
         try:
             updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
@@ -1272,20 +1324,6 @@ def run_long_context_task(
         preview_parts = []
         for dim_key, answer in results.items():
             preview_parts.append(f"## {dim_key}\n{answer[:500]}...")
-        
-        # Extract references (optional, does not fail the main task)
-        tasks[task_id]["stage"] = "提取参考文献..."
-        tasks[task_id]["logs"].append("尝试提取参考文献...")
-        original_name = get_original_filename(file_path)
-        ref_artifacts = _try_extract_references(
-            file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
-        )
-        if ref_artifacts is None:
-            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
-        elif ref_artifacts:
-            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
-        else:
-            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
         
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
@@ -1366,27 +1404,34 @@ def run_quant_task(
         
         steps = list(QUANT_PROMPT_KEYS.items())
         
+        def _analyze_quant_step(step_name, prompt_key):
+            with deepseek_semaphore:
+                if tasks[task_id]["status"] == "cancelled":
+                    return step_name, None, "cancelled"
+                try:
+                    prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
+                    answer = engine.ask(prompt_content)
+                    return step_name, answer, None
+                except Exception as e:
+                    return step_name, f"[分析出错: {str(e)[:200]}]", str(e)
+
         results = {}
-        for i, (step_name, prompt_key) in enumerate(steps):
-            if tasks[task_id]["status"] == "cancelled":
-                logger.info("[quant:%s] 任务已取消，退出", task_id[:8])
-                return
-            
-            tasks[task_id]["progress"] = 15 + i * 12
-            tasks[task_id]["stage"] = step_name
-            tasks[task_id]["logs"].append(f"[{i+1}/7] {step_name}...")
-            logger.info("[quant:%s] [%d/7] %s 开始 (prompt_key=%s)", task_id[:8], i+1, step_name, prompt_key)
-            
-            try:
-                prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
-                answer = engine.ask(prompt_content)
+        with ThreadPoolExecutor(max_workers=min(len(steps), 7)) as pool:
+            futures = {pool.submit(_analyze_quant_step, sn, pk): sn for sn, pk in steps}
+            done_count = 0
+            for future in as_completed(futures):
+                done_count += 1
+                step_name, answer, err = future.result()
+                if err == "cancelled":
+                    return
                 results[step_name] = answer
-                tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
-                logger.info("[quant:%s] [%d/7] %s 完成, 回答长度=%d", task_id[:8], i+1, step_name, len(answer))
-            except Exception as e:
-                tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(e)[:80]}")
-                results[step_name] = f"[分析出错: {str(e)[:200]}]"
-                logger.warning("[quant:%s] [%d/7] %s 出错: %s", task_id[:8], i+1, step_name, e)
+                if err:
+                    tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(err)[:80]}")
+                    logger.warning("[quant:%s] %s 出错: %s", task_id[:8], step_name, err)
+                else:
+                    tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
+                    logger.info("[quant:%s] %s 完成, 回答长度=%d", task_id[:8], step_name, len(answer or ""))
+                tasks[task_id]["progress"] = 15 + int(75 * done_count / len(steps))
         
         # Post-check: retry empty steps
         def _retry_quant(step_name_inner):
@@ -1404,33 +1449,57 @@ def run_quant_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_7step.md"
         
-        # Extract metadata from front matter (tolerant — never fail the main task)
+        tasks[task_id]["stage"] = "后处理（元数据 + 参考文献）..."
+        tasks[task_id]["logs"].append("开始并发后处理...")
+
+        def _extract_meta_quant():
+            try:
+                front_matter = extract_front_matter(file_path)
+                metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+                return metadata, None
+            except Exception as exc:
+                return None, str(exc)
+
+        def _extract_refs_quant():
+            try:
+                return _try_extract_references(
+                    file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
+                ), None
+            except Exception as exc:
+                return [], str(exc)
+
         metadata = None
-        try:
-            tasks[task_id]["stage"] = "提取论文元数据..."
-            tasks[task_id]["logs"].append("提取论文元数据...")
-            front_matter = extract_front_matter(file_path)
-            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+        ref_artifacts = []
+        with ThreadPoolExecutor(max_workers=2) as post_pool:
+            meta_future = post_pool.submit(_extract_meta_quant)
+            ref_future = post_pool.submit(_extract_refs_quant)
+            metadata, meta_err = meta_future.result()
+            ref_artifacts, ref_err = ref_future.result()
+
+        if meta_err:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {meta_err}")
+        elif metadata:
             tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
-            logger.info("[quant:%s] 元数据提取完成: %s", task_id[:8], metadata.get('title', '未知'))
-        except Exception as exc:
-            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
-            logger.warning("[quant:%s] 元数据提取跳过: %s", task_id[:8], exc)
+        else:
+            tasks[task_id]["logs"].append("⚠ 元数据提取未成功")
         if not metadata:
             from backend.services.pdf_metadata_llm import _empty_metadata
             metadata = _empty_metadata()
-        
-        # Update BibEntry with extracted metadata
+
+        if ref_artifacts is None:
+            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
+        elif ref_artifacts:
+            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
+        else:
+            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功")
+
         try:
             updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
-                logger.info("[quant:%s] 文献库元数据已更新: %s", task_id[:8], updated_fields)
         except Exception as exc:
             tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
-            logger.warning("[quant:%s] 文献库元数据更新跳过: %s", task_id[:8], exc)
         
-        # Build frontmatter
         frontmatter = build_frontmatter(metadata, "七步精读")
         
         with open(report_path, "w", encoding="utf-8") as f:
@@ -1442,20 +1511,6 @@ def run_quant_task(
         logger.info("[quant:%s] 报告已写入: %s", task_id[:8], report_path)
         
         preview = "\n\n".join([f"## {k}\n{v[:400]}..." for k, v in list(results.items())[:3]])
-        
-        # Extract references (optional, does not fail the main task)
-        tasks[task_id]["stage"] = "提取参考文献..."
-        tasks[task_id]["logs"].append("尝试提取参考文献...")
-        original_name = get_original_filename(file_path)
-        ref_artifacts = _try_extract_references(
-            file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
-        )
-        if ref_artifacts is None:
-            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
-        elif ref_artifacts:
-            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
-        else:
-            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
         
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
@@ -1538,27 +1593,34 @@ def run_qual_task(
         
         steps = list(QUAL_PROMPT_KEYS.items())
         
+        def _analyze_qual_step(step_name, prompt_key):
+            with deepseek_semaphore:
+                if tasks[task_id]["status"] == "cancelled":
+                    return step_name, None, "cancelled"
+                try:
+                    prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
+                    answer = engine.ask(prompt_content)
+                    return step_name, answer, None
+                except Exception as e:
+                    return step_name, f"[分析出错: {str(e)[:200]}]", str(e)
+
         results = {}
-        for i, (step_name, prompt_key) in enumerate(steps):
-            if tasks[task_id]["status"] == "cancelled":
-                logger.info("[qual:%s] 任务已取消，退出", task_id[:8])
-                return
-            
-            tasks[task_id]["progress"] = 20 + i * 20
-            tasks[task_id]["stage"] = step_name
-            tasks[task_id]["logs"].append(f"[{i+1}/4] {step_name}...")
-            logger.info("[qual:%s] [%d/4] %s 开始 (prompt_key=%s)", task_id[:8], i+1, step_name, prompt_key)
-            
-            try:
-                prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
-                answer = engine.ask(prompt_content)
+        with ThreadPoolExecutor(max_workers=min(len(steps), 4)) as pool:
+            futures = {pool.submit(_analyze_qual_step, sn, pk): sn for sn, pk in steps}
+            done_count = 0
+            for future in as_completed(futures):
+                done_count += 1
+                step_name, answer, err = future.result()
+                if err == "cancelled":
+                    return
                 results[step_name] = answer
-                tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
-                logger.info("[qual:%s] [%d/4] %s 完成, 回答长度=%d", task_id[:8], i+1, step_name, len(answer))
-            except Exception as e:
-                tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(e)[:80]}")
-                results[step_name] = f"[分析出错: {str(e)[:200]}]"
-                logger.warning("[qual:%s] [%d/4] %s 出错: %s", task_id[:8], i+1, step_name, e)
+                if err:
+                    tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(err)[:80]}")
+                    logger.warning("[qual:%s] %s 出错: %s", task_id[:8], step_name, err)
+                else:
+                    tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
+                    logger.info("[qual:%s] %s 完成, 回答长度=%d", task_id[:8], step_name, len(answer or ""))
+                tasks[task_id]["progress"] = 20 + int(70 * done_count / len(steps))
         
         # Post-check: retry empty steps
         def _retry_qual(step_name_inner):
@@ -1576,33 +1638,57 @@ def run_qual_task(
         result_dir = get_results_dir(user_id, task_id)
         report_path = result_dir / f"{safe_name}_4step.md"
         
-        # Extract metadata from front matter (tolerant — never fail the main task)
+        tasks[task_id]["stage"] = "后处理（元数据 + 参考文献）..."
+        tasks[task_id]["logs"].append("开始并发后处理...")
+
+        def _extract_meta_qual():
+            try:
+                front_matter = extract_front_matter(file_path)
+                metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+                return metadata, None
+            except Exception as exc:
+                return None, str(exc)
+
+        def _extract_refs_qual():
+            try:
+                return _try_extract_references(
+                    file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
+                ), None
+            except Exception as exc:
+                return [], str(exc)
+
         metadata = None
-        try:
-            tasks[task_id]["stage"] = "提取论文元数据..."
-            tasks[task_id]["logs"].append("提取论文元数据...")
-            front_matter = extract_front_matter(file_path)
-            metadata = extract_metadata_with_llm(front_matter, original_name, api_key=api_key)
+        ref_artifacts = []
+        with ThreadPoolExecutor(max_workers=2) as post_pool:
+            meta_future = post_pool.submit(_extract_meta_qual)
+            ref_future = post_pool.submit(_extract_refs_qual)
+            metadata, meta_err = meta_future.result()
+            ref_artifacts, ref_err = ref_future.result()
+
+        if meta_err:
+            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {meta_err}")
+        elif metadata:
             tasks[task_id]["logs"].append(f"✓ 元数据提取完成: {metadata.get('title', '未知标题')}")
-            logger.info("[qual:%s] 元数据提取完成: %s", task_id[:8], metadata.get('title', '未知'))
-        except Exception as exc:
-            tasks[task_id]["logs"].append(f"⚠ 元数据提取跳过: {exc}")
-            logger.warning("[qual:%s] 元数据提取跳过: %s", task_id[:8], exc)
+        else:
+            tasks[task_id]["logs"].append("⚠ 元数据提取未成功")
         if not metadata:
             from backend.services.pdf_metadata_llm import _empty_metadata
             metadata = _empty_metadata()
-        
-        # Update BibEntry with extracted metadata
+
+        if ref_artifacts is None:
+            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
+        elif ref_artifacts:
+            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
+        else:
+            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功")
+
         try:
             updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
-                logger.info("[qual:%s] 文献库元数据已更新: %s", task_id[:8], updated_fields)
         except Exception as exc:
             tasks[task_id]["logs"].append(f"⚠ 文献库元数据更新跳过: {exc}")
-            logger.warning("[qual:%s] 文献库元数据更新跳过: %s", task_id[:8], exc)
         
-        # Build frontmatter
         frontmatter = build_frontmatter(metadata, "四步精读")
         
         with open(report_path, "w", encoding="utf-8") as f:
@@ -1614,20 +1700,6 @@ def run_qual_task(
         logger.info("[qual:%s] 报告已写入: %s", task_id[:8], report_path)
         
         preview = "\n\n".join([f"## {k}\n{v[:400]}..." for k, v in list(results.items())[:2]])
-        
-        # Extract references (optional, does not fail the main task)
-        tasks[task_id]["stage"] = "提取参考文献..."
-        tasks[task_id]["logs"].append("尝试提取参考文献...")
-        original_name = get_original_filename(file_path)
-        ref_artifacts = _try_extract_references(
-            file_path, user_id, task_id, original_name, bib_entry_id, api_key=api_key,
-        )
-        if ref_artifacts is None:
-            tasks[task_id]["logs"].append("✓ 参考文献已存在，跳过提取")
-        elif ref_artifacts:
-            tasks[task_id]["logs"].append(f"✓ 识别到 {len(ref_artifacts)} 个参考文献报告")
-        else:
-            tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功（可稍后在参考文献梳理标签页手动操作）")
         
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"

@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
@@ -22,6 +23,7 @@ from db.models import Annotation, Artifact, BibEntry, DimensionItem, DimensionSe
 from db.utils import compute_dedup_key
 from result_storage import build_result_storage_path, get_results_root
 from backend.utils.api_key import validate_deepseek_key
+from services.deepseek_limiter import deepseek_semaphore
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -1490,34 +1492,43 @@ async def synthesize_dimensions(
             client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
             metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
 
-            dimension_sections = []
             total = len(dimensions)
+            dim_prompts = []
             for idx, dim_info in enumerate(dimensions):
                 dim_label = dim_info.get("label", f"维度{idx + 1}")
-
-                job_cur = await db.get(Job, job_id)
-                job_cur.current_stage = f"正在生成维度 {idx + 1}/{total}：{dim_label}"
-                job_cur.progress = 10 + int(80 * idx / total)
-                await db.commit()
-
                 dim_prompt = await build_synthesis_dimension_prompt(dim_label, paper_data, "subQuestions", user_id=user.id, db=db)
-                user_message = metadata_block + "\n\n" + dim_prompt
+                dim_prompts.append((idx, dim_info, dim_label, dim_prompt))
 
-                response = client.chat.completions.create(
-                    model="deepseek-v4-flash",
-                    extra_body={"thinking": {"type": "disabled"}},
-                    messages=[
-                        {"role": "system", "content": synthesis_system_prompt},
-                        {"role": "user", "content": user_message},
-                    ],
-                    temperature=0.65,
-                    max_tokens=8000,
-                )
+            job_cur = await db.get(Job, job_id)
+            job_cur.current_stage = f"并发生成 {total} 个维度..."
+            job_cur.progress = 15
+            await db.commit()
 
-                content = response.choices[0].message.content or ""
-                dimension_sections.append({"label": dim_label, "content": content})
+            def _call_llm(idx, dim_info, dim_label, dim_prompt):
+                with deepseek_semaphore:
+                    user_message = metadata_block + "\n\n" + dim_prompt
+                    response = client.chat.completions.create(
+                        model="deepseek-v4-flash",
+                        extra_body={"thinking": {"type": "disabled"}},
+                        messages=[
+                            {"role": "system", "content": synthesis_system_prompt},
+                            {"role": "user", "content": user_message},
+                        ],
+                        temperature=0.65,
+                        max_tokens=8000,
+                    )
+                    content = response.choices[0].message.content or ""
+                    return {"label": dim_label, "content": content, "index": idx}
 
-                yield f"event: dimension\ndata: {json.dumps({'label': dim_label, 'content': content, 'index': idx, 'total': total}, ensure_ascii=False)}\n\n"
+            dimension_sections = [None] * len(dim_prompts)
+            with ThreadPoolExecutor(max_workers=min(len(dim_prompts), 10)) as pool:
+                futures = {pool.submit(_call_llm, idx, di, dl, dp): idx for idx, di, dl, dp in dim_prompts}
+                for future in as_completed(futures):
+                    result = future.result()
+                    dimension_sections[result["index"]] = result
+                    yield f"event: dimension\ndata: {json.dumps({'label': result['label'], 'content': result['content'], 'index': result['index'], 'total': total}, ensure_ascii=False)}\n\n"
+
+            dimension_sections = [s for s in dimension_sections if s is not None]
 
             section_parts = []
             for sec in dimension_sections:
@@ -1647,32 +1658,42 @@ async def synthesis_stream(
             client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
             metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
 
-            dimension_sections = []
             total = len(dimensions)
+            dim_prompts = []
             for idx, dim_label in enumerate(dimensions):
-                job_cur = await db.get(Job, job_id)
-                job_cur.current_stage = f"正在生成维度 {idx + 1}/{total}：{dim_label}"
-                job_cur.progress = 10 + int(80 * idx / total)
-                await db.commit()
-
                 dim_prompt = await build_synthesis_dimension_prompt(dim_label, paper_data, content_field, user_id=user.id, db=db)
-                user_message = metadata_block + "\n\n" + dim_prompt
+                dim_prompts.append((idx, dim_label, dim_prompt))
 
-                response = client.chat.completions.create(
-                    model="deepseek-v4-flash",
-                    extra_body={"thinking": {"type": "disabled"}},
-                    messages=[
-                        {"role": "system", "content": synthesis_system_prompt},
-                        {"role": "user", "content": user_message},
-                    ],
-                    temperature=0.65,
-                    max_tokens=8000,
-                )
+            job_cur = await db.get(Job, job_id)
+            job_cur.current_stage = f"并发生成 {total} 个维度..."
+            job_cur.progress = 15
+            await db.commit()
 
-                content = response.choices[0].message.content or ""
-                dimension_sections.append({"label": dim_label, "content": content})
+            def _call_llm(idx, dim_label, dim_prompt):
+                with deepseek_semaphore:
+                    user_message = metadata_block + "\n\n" + dim_prompt
+                    response = client.chat.completions.create(
+                        model="deepseek-v4-flash",
+                        extra_body={"thinking": {"type": "disabled"}},
+                        messages=[
+                            {"role": "system", "content": synthesis_system_prompt},
+                            {"role": "user", "content": user_message},
+                        ],
+                        temperature=0.65,
+                        max_tokens=8000,
+                    )
+                    content = response.choices[0].message.content or ""
+                    return {"label": dim_label, "content": content, "index": idx}
 
-                yield f"event: dimension\ndata: {json.dumps({'label': dim_label, 'content': content, 'index': idx, 'total': total}, ensure_ascii=False)}\n\n"
+            dimension_sections = [None] * len(dim_prompts)
+            with ThreadPoolExecutor(max_workers=min(len(dim_prompts), 10)) as pool:
+                futures = {pool.submit(_call_llm, idx, dl, dp): idx for idx, dl, dp in dim_prompts}
+                for future in as_completed(futures):
+                    result = future.result()
+                    dimension_sections[result["index"]] = result
+                    yield f"event: dimension\ndata: {json.dumps({'label': result['label'], 'content': result['content'], 'index': result['index'], 'total': total}, ensure_ascii=False)}\n\n"
+
+            dimension_sections = [s for s in dimension_sections if s is not None]
 
             section_parts = []
             for sec in dimension_sections:
