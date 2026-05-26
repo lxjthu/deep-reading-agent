@@ -962,7 +962,7 @@ async def get_entry_reader(
             select(BibReference)
             .where(BibReference.owner_user_id == user.id, BibReference.source_bib_entry_id == entry.id)
             .order_by(BibReference.reference_order.asc())
-            .limit(20)
+            .limit(1000)
         )
     ).scalars().all()
     incoming_refs = (
@@ -974,7 +974,7 @@ async def get_entry_reader(
                 BibReference.matched_bib_entry_id == entry.id,
             )
             .order_by(BibReference.updated_at.desc())
-            .limit(20)
+            .limit(1000)
         )
     ).all()
 

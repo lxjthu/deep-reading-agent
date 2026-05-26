@@ -746,7 +746,7 @@ async def tool_search_library(
     reading_status: str = "",
     limit: int = 20,
 ) -> dict[str, Any]:
-    limit = max(1, min(int(limit or 20), 50))
+    limit = max(1, min(int(limit or 20), 1000))
     stmt = select(BibEntry, File).outerjoin(File, File.id == BibEntry.source_file_id).where(
         BibEntry.owner_user_id == user.id
     )
@@ -787,7 +787,7 @@ async def tool_get_entry_detail(db: AsyncSession, user: User, *, entry_id: str) 
             .join(JobBibEntry, JobBibEntry.job_id == Job.id)
             .where(Job.owner_user_id == user.id, JobBibEntry.bib_entry_id == entry.id)
             .order_by(Job.created_at.desc())
-            .limit(20)
+            .limit(1000)
         )
     ).scalars().all()
     return {
@@ -1421,7 +1421,7 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "query": {"type": "string"},
                     "reading_status": {"type": "string", "enum": ["", "none", "has_pdf", "reading", "read"]},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
                 },
             },
         },
