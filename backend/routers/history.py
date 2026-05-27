@@ -386,6 +386,7 @@ async def save_synthesis(
             expires_at=compute_expires_at(user),
         )
     )
+    await db.flush()
     for sort_order, bib_entry in enumerate(members):
         db.add(
             JobBibEntry(
@@ -520,6 +521,7 @@ async def save_library_chat_report(
             expires_at=compute_expires_at(user),
         )
     )
+    await db.flush()
 
     for sort_order, entry in enumerate(members):
         db.add(

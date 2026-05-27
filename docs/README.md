@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-25 (2)
+> 最后更新：2026-05-27
 
 ---
 
@@ -45,6 +45,8 @@
 | 文档 | 类型 | 内容 | 何时查阅 |
 |------|------|------|----------|
 | [DEPLOYMENT_ARCHITECTURE.md](DEPLOYMENT_ARCHITECTURE.md) | 部署 | 本地→GitHub→服务器部署链路 | 部署流程、Webhook 配置 |
+| [NEW_SERVER_SQL_MAINTENANCE.md](NEW_SERVER_SQL_MAINTENANCE.md) | 部署/运维 | 新服务器 `8.162.14.154:18080`、SQL 数据库、专用分支和手动部署维护指南 | 维护新服务器、部署本分支、排查 SQL 数据库和日志路径 |
+| [MANUAL_DEPLOY_AFTER_CODE_CHANGES.md](MANUAL_DEPLOY_AFTER_CODE_CHANGES.md) | 部署/运维 | 每次改完代码后，上传到 `8.162.14.154:18080`、迁移、重启和验证的手动 Runbook | 手动上线代码、前端构建、迁移和排查重启问题 |
 | [DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md](DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md) | 部署 | 数据库部署与迁移指南 | 服务器数据库迁移 |
 | [OPS_HEALTHCHECK_GUIDE.md](OPS_HEALTHCHECK_GUIDE.md) | 运维 | 服务器健康检查与自动恢复 | 线上故障排查 |
 | [TROUBLESHOOTING_SERVER_ERRORS.md](TROUBLESHOOTING_SERVER_ERRORS.md) | 排错 | 服务器报错排查记录（含修复方案） | **线上报错排查首选**：500错误、401错误、SQL错误等 |
@@ -62,6 +64,7 @@
 | [INCIDENT_2026-05-06_LIBRARY_502.md](INCIDENT_2026-05-06_LIBRARY_502.md) | 事件 | 文献库 502 故障复盘 | 了解历史故障及修复过程 |
 | [API_KEY_FLOW_FIX.md](API_KEY_FLOW_FIX.md) | 修复 | API Key 传递链路修复 | 理解 API Key 如何从前端传到后端 |
 | [FIX_LIBRARY_CHAT_SAVE_500.md](FIX_LIBRARY_CHAT_SAVE_500.md) | 修复 | 文献助手保存历史记录远端 500 错误（SQLite CHECK 约束 migration 静默失败） | SQLite migration CHECK 约束修改不生效的排查参考 |
+| [FIX_PG_FLUSH_ORDER_500.md](FIX_PG_FLUSH_ORDER_500.md) | 修复 | PostgreSQL 下文献助手保存历史 500 错误（SQLAlchemy flush 顺序导致 FK 违反） | PostgreSQL 同 session 多表 INSERT 顺序问题排查 |
 
 ---
 
@@ -76,6 +79,7 @@
 | [CHUNKED_DATA_IMPORT_IMPL.md](CHUNKED_DATA_IMPORT_IMPL.md) | 实现 | 分片上传导入（.dra 大文件分片上传协议） | 理解分片导入三阶段流程、API 设计和前端实现 |
 | [LIBRARY_AI_CHAT_IMPL.md](LIBRARY_AI_CHAT_IMPL.md) | 实现 | 文献库 AI 多轮查询、标签确认写库、标签搜索筛选和逐篇 AI 点评 | 维护文献库 AI 助手、结果联动和点评链路 |
 | [AGENT_ASSISTANT_IMPL.md](AGENT_ASSISTANT_IMPL.md) | 实现 | AI 文献助手 tool calling、input 文件夹白名单、文件夹扫描、文献库对比、批量精读编排和前端 JSON HTML 展示 | 升级 AI 助手、Agent 工具、文件夹导入、持久会话和执行确认时 |
+| [RESEARCH_AGENT_UPGRADE_PLAN.md](RESEARCH_AGENT_UPGRADE_PLAN.md) | 方案 | 研究助手智能体升级方案：分级知识库检索、RQ/FTS 非向量检索、全 API 工具能力矩阵、CNKI/英文原文/互联网检索授权策略、DeepSeek/MiMo tool calling 测试报告 | 规划下一代数据库驱动研究智能体、扩展 AI 助手工具和联网检索能力时 |
 | [AGENT_SESSION_CONFIRMATION_UI_PLAN.md](AGENT_SESSION_CONFIRMATION_UI_PLAN.md) | 方案 | AI 文献助手持久会话、agent_sessions/agent_messages、执行前确认、导入/精读确认弹窗和结果 UI 改造规划 | 实施可靠多轮对话、执行确认和 JSON 页面美化前 |
 | [TESTSET_AND_P2_PLAN.md](TESTSET_AND_P2_PLAN.md) | 方案 | 测试集与 P2 规划 | 测试相关规划 |
 
@@ -109,6 +113,9 @@
 | [superpowers/plans/2026-05-06-queue-integration-plan.md](superpowers/plans/2026-05-06-queue-integration-plan.md) | 任务队列接入计划 | 队列管理器集成方案 |
 | [superpowers/plans/2026-05-03-pdf-metadata-match.md](superpowers/plans/2026-05-03-pdf-metadata-match.md) | PDF 元数据匹配实施计划 | 匹配功能实施步骤 |
 | [superpowers/plans/2026-05-03-windows-executable-packaging.md](superpowers/plans/2026-05-03-windows-executable-packaging.md) | Windows 可执行文件打包计划 | PyInstaller 打包方案 |
+| [superpowers/plans/2026-05-26-batch-reading-concurrency-and-asyncpg.md](superpowers/plans/2026-05-26-batch-reading-concurrency-and-asyncpg.md) | 批量精读并发与 asyncpg 稳定性修复计划 | 新 PostgreSQL 服务器批量长文本精读进度 500、连接池跨 event loop 和并发限流问题 |
+| [superpowers/plans/2026-05-26-quant-qual-concurrency-reuse-long-fix.md](superpowers/plans/2026-05-26-quant-qual-concurrency-reuse-long-fix.md) | 七步/四步精读并发复用长文本修复计划 | 为七步和四步精读增加显式内层并发配置，复用新服务器稳定并发方案 |
+| [superpowers/plans/2026-05-26-library-existing-files-start-reading.md](superpowers/plans/2026-05-26-library-existing-files-start-reading.md) | 文献库已有文件直接发起精读计划 | 从文献库多选已有 PDF/Markdown 文献并直接启动长文本/七步/四步精读，含 AI 助手入口 |
 
 ---
 
