@@ -1657,7 +1657,27 @@ async def agent_chat(
     )
 
     async def _stream():
+        task_id = None
         try:
+            # 生成聊天任务ID并加入队列
+            task_id = f"chat_{uuid.uuid4().hex[:12]}"
+            queue_info = task_queue.enqueue(task_id, user.id, "chat")
+            
+            # 如果排队位置大于1，先发送排队状态
+            if queue_info["queue_position"] > 1:
+                yield sse_event(
+                    "queue_status",
+                    {
+                        "queue_position": queue_info["queue_position"],
+                        "estimated_wait_seconds": queue_info["estimated_wait_seconds"],
+                        "estimated_wait_minutes": queue_info["estimated_wait_minutes"],
+                        "message": f"当前排队位置：第{queue_info['queue_position']}位，预计等待{queue_info['estimated_wait_minutes']}分钟",
+                    },
+                )
+            
+            # 标记任务开始运行
+            task_queue.mark_running(task_id)
+            
             session = await _ensure_session(db, user, req)
             yield sse_event(
                 "session",
@@ -1749,5 +1769,8 @@ async def agent_chat(
             yield sse_event("done", {})
         except Exception as exc:
             yield sse_event("error", {"message": str(exc)})
+        finally:
+            if task_id:
+                task_queue.mark_completed(task_id)
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

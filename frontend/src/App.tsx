@@ -3580,7 +3580,7 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
 
 type AgentChatEvent = {
   id: string
-  type: 'tool_call' | 'tool_result' | 'answer' | 'error' | 'proposal'
+  type: 'queue_status' | 'tool_call' | 'tool_result' | 'answer' | 'error' | 'proposal'
   title: string
   body: string
   payload?: unknown
@@ -3816,11 +3816,13 @@ function AgentEventList({ events, selectable, selectedIds, onToggle }: {
             onToggle={onToggle}
           />
         ) : (
-          <div
+            <div
             key={block.event.id}
             className={`rounded-lg border bg-white p-4 shadow-sm ${
               block.event.type === 'error'
                 ? 'border-red-200'
+                : block.event.type === 'queue_status'
+                ? 'border-blue-200 bg-blue-50'
                 : 'border-emerald-200'
             }`}
           >
@@ -4036,7 +4038,14 @@ function AgentTab({ apiKey }: { apiKey: string }) {
         if (!eventLine || !dataLine) return
         const eventName = eventLine.slice(7).trim()
         const data = JSON.parse(dataLine.slice(6))
-        if (eventName === 'session') {
+        if (eventName === 'queue_status') {
+          appendEvent({
+            type: 'queue_status',
+            title: '排队中',
+            body: data.message || `当前排队位置：第${data.queue_position}位`,
+            payload: data,
+          })
+        } else if (eventName === 'session') {
           if (data.session_id) setSessionId(data.session_id)
         } else if (eventName === 'tool_call') {
           appendEvent({
@@ -4355,7 +4364,7 @@ function AgentTab({ apiKey }: { apiKey: string }) {
             disabled={loading || !message.trim()}
             className="h-20 self-end rounded-lg bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? '处理中...' : '发送'}
+            {loading ? (events.some(e => e.type === 'queue_status') ? '排队中...' : '处理中...') : '发送'}
           </button>
         </div>
       </div>
