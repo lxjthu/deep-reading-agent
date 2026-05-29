@@ -7,6 +7,8 @@ import json
 import time
 from typing import List, Dict, Optional, Callable
 
+from backend.utils.llm_provider import DEEPSEEK_BASE_URL, resolve_llm_provider
+
 
 class ResilientDeepSeekClient:
     """
@@ -20,12 +22,14 @@ class ResilientDeepSeekClient:
     5. 本地摘要机制（保留关键信息，丢弃冗余）
     """
     
-    def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com"):
-        self.api_key = api_key
-        self.base_url = base_url
+    def __init__(self, api_key: str, base_url: str = DEEPSEEK_BASE_URL):
+        provider = resolve_llm_provider(api_key)
+        self.api_key = provider.api_key
+        self.base_url = base_url if base_url != DEEPSEEK_BASE_URL else provider.base_url
+        self.model = provider.model_for("deepseek-v4-flash")
         self.session = requests.Session()
         self.session.headers.update({
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         })
         
@@ -45,7 +49,7 @@ class ResilientDeepSeekClient:
             max_retries: 最大重试次数
         """
         data = {
-            "model": "deepseek-v4-flash",
+            "model": self.model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,

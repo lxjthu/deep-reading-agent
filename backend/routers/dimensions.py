@@ -1004,7 +1004,8 @@ async def save_generated_template(
     await _activate_dimension_set(db, user.id, ds)
 
     for idx, dim in enumerate(body.dimensions):
-        dim_key = f"ai_{re.sub(r'[^\w]', '_', dim.get('dim_name', ''))[:20]}_{idx}"
+        dim_name_slug = re.sub(r"[^\w]", "_", dim.get("dim_name", ""))[:20]
+        dim_key = f"ai_{dim_name_slug}_{idx}"
         db.add(
             DimensionItem(
                 set_id=ds.id,

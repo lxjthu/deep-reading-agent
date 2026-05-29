@@ -1,21 +1,21 @@
 # 数据库设计文档
 
-> **版本**: v1.7
-> **日期**: 2026-05-22
+> **版本**: v1.8
+> **日期**: 2026-05-27
 > **关联文档**: [MULTI_USER_PLAN.md](./MULTI_USER_PLAN.md)、[REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md)、[CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](./CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md)、[CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md)、[DIMENSION_TEMPLATE_PLAN.md](./DIMENSION_TEMPLATE_PLAN.md)、[TRANSLATION_INTEGRATION_PLAN.md](./TRANSLATION_INTEGRATION_PLAN.md)
 
 ## 1. 选型与约定
 
 | 项 | 选择 |
 |---|---|
-| 数据库 | SQLite 3 |
+| 数据库 | SQLite 3（本地开发）/ PostgreSQL 15+（生产环境） |
 | ORM | SQLAlchemy 2.0（async + Mapped 风格） |
 | 迁移工具 | Alembic |
 | 主键 | 业务表用 UUID（TEXT），账号体系表用自增 INTEGER |
-| 时间 | 全部 UTC，存 ISO8601 字符串或 SQLite 原生 DATETIME |
+| 时间 | 全部 UTC，存 ISO8601 字符串或 SQLite 原生 DATETIME；PostgreSQL 环境使用 TIMESTAMP 类型 |
 | 软删除 | 不做。普通用户的 24h 清理通过物理删除 + 级联完成 |
-| 数据库文件位置 | `db/app.sqlite`（加入 `.gitignore`） |
-| 备份 | 每日凌晨复制到 `db/backups/YYYY-MM-DD.sqlite`，保留 30 天 |
+| 数据库文件位置 | `db/app.sqlite`（本地开发，加入 `.gitignore`）；生产环境通过 `.env.production` 的 `DATABASE_URL` 连接 PostgreSQL |
+| 备份 | 本地开发：每日凌晨复制到 `db/backups/YYYY-MM-DD.sqlite`，保留 30 天；生产环境：PostgreSQL 备份策略 |
 
 ## 2. 实体关系图（ER 概览）
 
@@ -929,19 +929,26 @@ CREATE INDEX idx_tpl_items_template ON template_items (template_id);
 
 ## 5. 24 小时清理任务（普通用户）
 
-**实现位置**：`backend/cleanup.py`，APScheduler 注册 `interval=1h`。
+**实现位置**：
+
+- 业务逻辑：`backend/cleanup.py`
+- 独立执行入口：`backend/scripts/run_cleanup_normal_users.py`
+- 推荐调度方式：服务器 `systemd timer`（见 `deploy/systemd/deepreading-cleanup-normal-users.*`）
+- 应用进程内 APScheduler 仅保留为显式开关兜底：`ENABLE_IN_PROCESS_CLEANUP_SCHEDULER=1`
 
 **清理逻辑**：
 
 ```python
-def cleanup_expired() -> None:
-    now = datetime.utcnow()
-    # 1. 清理过期 artifacts（物理 + 数据库）
-    # 2. 清理过期 jobs
-    # 3. 清理过期 bib_entries（级联清理 bib_references / bib_reference_citations 等依赖）
-    # 4. 清理过期 files（物理 + 数据库）
-    # 5. 清理过期 upload_batches
-    # 6. 清理空目录 _uploads/{uid}/、deep_reading_results/{uid}/
+def cleanup_normal_user_data() -> None:
+    # 1. 找出所有 role='normal' 用户
+    # 2. 收集 _uploads/ 与 deep_reading_results/ 物理文件路径
+    # 3. 先断开跨用户引用：
+    #    - bib_references.matched_bib_entry_id
+    #    - user_feedback.related_*
+    #    - bib_entries.source_* / jobs.input_file_id / card_notes.source_*
+    # 4. 删除 normal 用户名下的工作区表记录
+    # 5. 先 commit 数据库
+    # 6. 再删除磁盘文件与空目录
 ```
 
 **`expires_at` 计算**（在创建/更新时设置）：
@@ -959,8 +966,8 @@ def cleanup_expired() -> None:
 **参考文献梳理明细的保留策略**：
 
 - `bib_references` / `bib_reference_citations` 不单独设置 `expires_at`
-- 普通用户数据到期时，依赖 `source_bib_entry_id` 或 `source_job_id` 的级联删除一并清理
-- 这样可以避免多处重复维护到期时间，同时保证引用明细不会脱离源文献长期残留
+- normal 用户清理时，除了删除用户自己拥有的引用明细，还要先把其他用户 `bib_references.matched_bib_entry_id -> normal 用户 bib_entries.id` 的跨用户匹配断开
+- 这样可以避免 PostgreSQL 外键阻塞零点清理
 
 ## 6. 关键查询示例
 
@@ -1295,7 +1302,7 @@ backend/migrations/versions/
 
 ## 11. 风险与注意事项
 
-1. **SQLite 并发**：开启 WAL 模式（`PRAGMA journal_mode=WAL`），写并发足够支撑当前规模；用 `aiosqlite` 驱动。
+1. **SQLite 并发**（仅适用于本地开发）：开启 WAL 模式（`PRAGMA journal_mode=WAL`），写并发足够支撑当前规模；用 `aiosqlite` 驱动。生产环境使用 PostgreSQL，不涉及 WAL 模式。
 2. **物理文件与 DB 一致性**：所有"文件 + DB 记录"操作走 try/finally，DB 失败时回滚物理写入。
 3. **API Key 不入库**：DeepSeek API Key 完全在前端 `localStorage` 由用户自管，服务端不存、不清理、不审计。优点：泄漏面缩小；缺点：用户清浏览器缓存就要重输。
 4. **dedup_key 冲突**：理论上仍可能误合并不同文献。前端"我的文献"页提供"取消合并 / 拆分"功能（v1.1 再做）。

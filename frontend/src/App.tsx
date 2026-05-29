@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useMemo } from 'react'
 import { marked } from 'marked'
@@ -10,6 +10,7 @@ import ReferenceTraceTab from './ReferenceTraceTab'
 import TemplateMarket from './TemplateMarket'
 import TranslationTab from './TranslationTab'
 import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
+import { apiFetch } from './lib/api-fetch'
 import { useAuthStore } from './store/auth'
 import { CompareView } from './components/CompareView'
 import ConflictDialog from './components/ConflictDialog'
@@ -35,6 +36,7 @@ const CARD_TAB = { id: 'cards', label: '卡片笔记', icon: '▣' }
 const AGENT_TAB = { id: 'agent', label: 'AI 助手', icon: 'AI' }
 const TAB_IDS = new Set(TABS.map((tab) => tab.id))
 const LEGACY_API_KEY_STORAGE = 'deepseek_api_key'
+type ApiProvider = 'deepseek' | 'mimo-payg' | 'mimo-token-plan'
 const AGENT_FOLDER_EXTENSIONS = new Set(['.pdf', '.md', '.markdown'])
 const AGENT_FOLDER_UPLOAD_LIMIT = 200
 const IMPORT_CHUNK_SIZE = 4 * 1024 * 1024
@@ -48,18 +50,50 @@ type AgentInboxBatch = {
   created_at?: string
 }
 
+type AgentInboxUploadSummary = {
+  batch_id?: string
+  status?: string
+  total_files?: number
+  succeeded?: number
+  failed?: number
+  imported_count?: number
+  deduplicated_count?: number
+  matched_count?: number
+  unmatched_count?: number
+  error_counts?: Record<string, number>
+  failed_examples?: Array<{ filename?: string; error?: string; message?: string }>
+  recommendations?: string[]
+  created_at?: string
+}
+
+type ProviderCheckResult = {
+  ok: boolean
+  provider?: string
+  provider_label?: string
+  base_url?: string
+  model?: string
+  key_prefix?: string
+  explicit_provider?: string | null
+  latency_ms?: number
+  response_preview?: string
+  checked_at?: string
+}
+
 type AgentFolderFile = File & {
   webkitRelativePath?: string
 }
 
 type ImportTaskStatus = {
   job_id: string
+  mode?: 'merge_append' | 'merge_replace'
   status: 'pending' | 'running' | 'success' | 'failed'
   progress: number
   current_stage: string
   error_msg: string | null
   result: Record<string, unknown> | null
 }
+
+type ImportMode = 'merge_append' | 'merge_replace'
 
 function getAgentFolderFilename(file: File): string {
   const folderFile = file as AgentFolderFile
@@ -69,6 +103,24 @@ function getAgentFolderFilename(file: File): string {
 function getApiKeyStorageKey(username?: string | null) {
   const normalized = username?.trim()
   return normalized ? `deepseek_api_key:${normalized}` : null
+}
+
+function getApiProviderStorageKey(username?: string | null) {
+  const normalized = username?.trim()
+  return normalized ? `llm_api_provider:${normalized}` : null
+}
+
+function normalizeApiProvider(value?: string | null): ApiProvider {
+  if (value === 'mimo-payg' || value === 'mimo-token-plan') return value
+  return 'deepseek'
+}
+
+function formatApiKeyForProvider(apiKey: string, provider: ApiProvider): string {
+  const key = apiKey.trim()
+  if (!key) return ''
+  if (provider === 'mimo-payg') return key.startsWith('mimo:') ? key : `mimo:${key}`
+  if (provider === 'mimo-token-plan') return key.startsWith('mimo-token:') ? key : `mimo-token:${key}`
+  return key
 }
 
 function getInitialTab(pathname: string, search: string): string {
@@ -91,15 +143,17 @@ function getInitialTab(pathname: string, search: string): string {
 function promptForApiKey(): string {
   const username = useAuthStore.getState().user?.username
   const storageKey = getApiKeyStorageKey(username)
+  const providerKey = getApiProviderStorageKey(username)
   const existing = storageKey ? localStorage.getItem(storageKey) : ''
-  if (existing) return existing
-  const key = prompt('请输入 DeepSeek API Key（sk-开头）：')
+  const provider = normalizeApiProvider(providerKey ? localStorage.getItem(providerKey) : null)
+  if (existing) return formatApiKeyForProvider(existing, provider)
+  const key = prompt('请输入 API Key（DeepSeek/sk、小米按量/sk、小米 Token Plan/tp）：')
   if (!key || !key.trim()) return ''
   const trimmed = key.trim()
   if (storageKey) {
     localStorage.setItem(storageKey, trimmed)
   }
-  return trimmed
+  return formatApiKeyForProvider(trimmed, provider)
 }
 
 type FeedbackItem = {
@@ -313,6 +367,7 @@ function App() {
   const logout = useAuthStore((state) => state.logout)
   const [activeTab, setActiveTab] = useState(() => getInitialTab(location.pathname, location.search))
   const [apiKey, setApiKey] = useState('')
+  const [apiProvider, setApiProvider] = useState<ApiProvider>('deepseek')
   const [showKeyInput, setShowKeyInput] = useState(false)
   const [tempKey, setTempKey] = useState('')
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -322,15 +377,20 @@ function App() {
   const [importResult, setImportResult] = useState<Record<string, unknown> | null>(null)
   const [importStatus, setImportStatus] = useState<ImportTaskStatus | null>(null)
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null)
+  const [importMode, setImportMode] = useState<ImportMode>('merge_append')
   const [canShutdownApp, setCanShutdownApp] = useState(false)
   const [agentTabVisible, setAgentTabVisible] = useState(false)
   const [agentInboxBatch, setAgentInboxBatch] = useState<AgentInboxBatch | null>(null)
+  const [agentInboxSummary, setAgentInboxSummary] = useState<AgentInboxUploadSummary | null>(null)
   const [agentFolderFiles, setAgentFolderFiles] = useState<File[]>([])
   const [agentFolderSkippedCount, setAgentFolderSkippedCount] = useState(0)
   const [agentFolderUploading, setAgentFolderUploading] = useState(false)
   const [agentFolderStatus, setAgentFolderStatus] = useState('')
   const [agentFolderInputKey, setAgentFolderInputKey] = useState(0)
   const [feedbackDialogMode, setFeedbackDialogMode] = useState<'create' | 'mine' | null>(null)
+  const [providerCheckResult, setProviderCheckResult] = useState<ProviderCheckResult | null>(null)
+  const [providerCheckError, setProviderCheckError] = useState<AgentStructuredError | null>(null)
+  const [checkingProvider, setCheckingProvider] = useState(false)
 
   const cardTabVisible = activeTab === 'cards' || location.pathname.startsWith('/workspace/cards')
   const visibleTabs = useMemo(() => {
@@ -343,12 +403,27 @@ function App() {
     if (!storageKey) {
       setApiKey('')
       setTempKey('')
+      setApiProvider('deepseek')
+      setProviderCheckResult(null)
+      setProviderCheckError(null)
+      setAgentInboxBatch(null)
+      setAgentInboxSummary(null)
       return
     }
+    const providerKey = getApiProviderStorageKey(user?.username)
     const saved = localStorage.getItem(storageKey)
+    const savedProvider = providerKey ? localStorage.getItem(providerKey) : null
     setApiKey(saved || '')
+    setApiProvider(normalizeApiProvider(savedProvider))
     setTempKey('')
+    setProviderCheckResult(null)
+    setProviderCheckError(null)
   }, [user?.username])
+
+  const requestApiKey = useMemo(
+    () => formatApiKeyForProvider(apiKey, apiProvider),
+    [apiKey, apiProvider],
+  )
 
   useEffect(() => {
     const nextTab = getInitialTab(location.pathname, location.search)
@@ -375,11 +450,12 @@ function App() {
 
   useEffect(() => {
     let ignore = false
-    fetch('/api/agent/settings')
+    apiFetch('/api/agent/settings')
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
         if (ignore || !data) return
         setAgentInboxBatch(data.inbox_batch || null)
+        setAgentInboxSummary(data.inbox_upload_summary || null)
       })
       .catch(() => {})
     return () => {
@@ -412,24 +488,76 @@ function App() {
 
   const handleSaveKey = () => {
     const storageKey = getApiKeyStorageKey(user?.username)
+    const providerKey = getApiProviderStorageKey(user?.username)
     if (!storageKey || !tempKey.trim()) return
     const key = tempKey.trim()
     setApiKey(key)
     localStorage.setItem(storageKey, key)
+    if (providerKey) {
+      localStorage.setItem(providerKey, apiProvider)
+    }
     localStorage.removeItem(LEGACY_API_KEY_STORAGE)
+    setProviderCheckResult(null)
+    setProviderCheckError(null)
     setShowKeyInput(false)
     setTempKey('')
   }
 
   const handleDeleteKey = () => {
     const storageKey = getApiKeyStorageKey(user?.username)
+    const providerKey = getApiProviderStorageKey(user?.username)
     setApiKey('')
     setTempKey('')
     if (storageKey) {
       localStorage.removeItem(storageKey)
     }
+    if (providerKey) {
+      localStorage.removeItem(providerKey)
+    }
     localStorage.removeItem(LEGACY_API_KEY_STORAGE)
+    setProviderCheckResult(null)
+    setProviderCheckError(null)
     setShowKeyInput(false)
+  }
+
+  const handleCheckProvider = async () => {
+    const candidateKey = (tempKey.trim() || apiKey).trim()
+    if (!candidateKey || checkingProvider) return
+    setCheckingProvider(true)
+    setProviderCheckResult(null)
+    setProviderCheckError(null)
+    try {
+      const response = await apiFetch('/api/agent/provider-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: formatApiKeyForProvider(candidateKey, apiProvider) }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        const structuredError = normalizeAgentErrorPayload(data?.detail ?? data)
+        if (structuredError) {
+          setProviderCheckError(structuredError)
+          return
+        }
+        throw new Error(data?.detail || `测试连接失败（HTTP ${response.status}）`)
+      }
+      setProviderCheckResult(data)
+    } catch (err) {
+      const structuredError = normalizeAgentErrorPayload(err)
+      if (structuredError) {
+        setProviderCheckError(structuredError)
+      } else {
+        setProviderCheckError({
+          code: 'provider_check_failed',
+          message: err instanceof Error ? err.message : '测试连接失败。',
+          stage: 'provider_probe',
+          retryable: true,
+          severity: 'error',
+        })
+      }
+    } finally {
+      setCheckingProvider(false)
+    }
   }
 
   const handleOpenAgent = () => {
@@ -466,7 +594,7 @@ function App() {
       agentFolderFiles.forEach((file) => {
         formData.append('files', file, getAgentFolderFilename(file))
       })
-      const response = await fetch('/api/agent/inbox/upload-folder', { method: 'POST', body: formData })
+      const response = await apiFetch('/api/agent/inbox/upload-folder', { method: 'POST', body: formData })
       const data = await response.json().catch(() => null)
       if (!response.ok) {
         throw new Error(data?.detail || `上传失败（HTTP ${response.status}）`)
@@ -478,6 +606,7 @@ function App() {
         failed: data.failed,
         status: data.failed ? 'partial' : 'success',
       })
+      setAgentInboxSummary(data.summary || data.settings?.inbox_upload_summary || null)
       setAgentFolderFiles([])
       setAgentFolderSkippedCount(0)
       setAgentFolderInputKey((value) => value + 1)
@@ -567,9 +696,10 @@ function App() {
     setSelectedImportFile(null)
     setImportResult(null)
     setImportStatus(null)
+    setImportMode('merge_append')
   }
 
-  const handleImport = async (file: File) => {
+  const handleImport = async (file: File, mode: ImportMode) => {
     setImporting(true)
     setImportResult(null)
     setImportStatus(null)
@@ -579,6 +709,7 @@ function App() {
       initForm.append('filename', file.name)
       initForm.append('total_size', String(file.size))
       initForm.append('total_chunks', String(totalChunks))
+      initForm.append('mode', mode)
 
       setImportStatus({
         job_id: '',
@@ -684,7 +815,8 @@ function App() {
 
       const result = finalStatus?.result || {}
       setImportResult(result)
-      window.alert(`导入成功！已恢复 ${result.files_restored || 0} 个文件。页面即将刷新。`)
+      const modeLabel = mode === 'merge_replace' ? '覆盖导入' : '追加导入'
+      window.alert(`${modeLabel}成功！已恢复 ${result.files_restored || 0} 个文件。页面即将刷新。`)
       window.location.reload()
     } catch (err: any) {
       console.error('[import error]', err)
@@ -710,7 +842,7 @@ function App() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span className="hidden rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700 sm:inline-flex">
-              DeepSeek ✓
+              {apiProvider === 'deepseek' ? 'DeepSeek' : 'MiMo'} ✓
             </span>
             <div className="relative">
               <button
@@ -836,15 +968,35 @@ function App() {
         <div className="border-b border-emerald-100 bg-emerald-50/70">
           <div className="mx-auto w-full max-w-[1800px] px-3 py-3 sm:px-4 sm:py-4 lg:px-6 xl:px-8">
             <div className="max-w-xl rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">DeepSeek API Key</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">LLM API Key</h3>
+              <select
+                value={apiProvider}
+                onChange={(e) => {
+                  const provider = normalizeApiProvider(e.target.value)
+                  setApiProvider(provider)
+                  setProviderCheckResult(null)
+                  setProviderCheckError(null)
+                  const providerKey = getApiProviderStorageKey(user?.username)
+                  if (providerKey) localStorage.setItem(providerKey, provider)
+                }}
+                className="mb-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="deepseek">DeepSeek（sk-）</option>
+                <option value="mimo-payg">小米 MiMo 按量付费（sk-，中国集群）</option>
+                <option value="mimo-token-plan">小米 MiMo Token Plan（tp-，中国集群）</option>
+              </select>
               <input
                 type="password"
                 value={tempKey}
-                onChange={(e) => setTempKey(e.target.value)}
-                placeholder={apiKey ? '••••••••••••••••' : 'sk-...'}
+                onChange={(e) => {
+                  setTempKey(e.target.value)
+                  setProviderCheckResult(null)
+                  setProviderCheckError(null)
+                }}
+                placeholder={apiKey ? '••••••••••••••••' : apiProvider === 'mimo-token-plan' ? 'tp-...' : 'sk-...'}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
               />
-              <p className="mt-1 text-xs text-gray-400">仅保存在当前账号对应的浏览器 localStorage 中，不会与其他账号共用</p>
+              <p className="mt-1 text-xs text-gray-400">仅保存在当前账号对应的浏览器 localStorage 中，不会与其他账号共用；小米模式固定使用中国集群</p>
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={handleSaveKey}
@@ -852,6 +1004,13 @@ function App() {
                   className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300 transition-colors"
                 >
                   保存
+                </button>
+                <button
+                  onClick={() => void handleCheckProvider()}
+                  disabled={checkingProvider || !(tempKey.trim() || apiKey)}
+                  className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:bg-gray-100 disabled:text-gray-400 transition-colors"
+                >
+                  {checkingProvider ? '检测中...' : '测试连接'}
                 </button>
                 {apiKey && (
                   <button
@@ -868,6 +1027,32 @@ function App() {
                   收起
                 </button>
               </div>
+              {providerCheckResult && (
+                <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-semibold">连接测试成功</div>
+                    <span className="rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      {providerCheckResult.provider || 'unknown'}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid gap-2 text-xs text-emerald-900 md:grid-cols-2">
+                    <div>Provider：{providerCheckResult.provider_label || providerCheckResult.provider || '-'}</div>
+                    <div>模型：{providerCheckResult.model || '-'}</div>
+                    <div className="break-all">Base URL：{providerCheckResult.base_url || '-'}</div>
+                    <div>耗时：{typeof providerCheckResult.latency_ms === 'number' ? `${providerCheckResult.latency_ms} ms` : '-'}</div>
+                  </div>
+                  {providerCheckResult.response_preview && (
+                    <div className="mt-2 rounded-md border border-emerald-100 bg-white px-3 py-2 text-xs text-gray-700">
+                      返回预览：{providerCheckResult.response_preview}
+                    </div>
+                  )}
+                </div>
+              )}
+              {providerCheckError && (
+                <div className="mt-3">
+                  <AgentErrorCard error={providerCheckError} />
+                </div>
+              )}
 
               <div className="mt-5 border-t border-gray-100 pt-4">
                 <h3 className="mb-2 text-sm font-semibold text-gray-700">上传文件夹给 AI 助手</h3>
@@ -930,6 +1115,11 @@ function App() {
                     {agentInboxBatch.created_at ? `，创建于 ${new Date(agentInboxBatch.created_at).toLocaleString()}` : ''}
                   </div>
                 )}
+                {agentInboxSummary && (
+                  <div className="mt-4">
+                    <AgentInboxSummaryCard summary={agentInboxSummary} />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -953,9 +1143,31 @@ function App() {
             <div className="mt-3 space-y-3 text-sm text-gray-600">
               <p className="rounded-lg bg-red-50 p-3 text-red-700">
                 <span className="font-semibold">⚠ 警告：</span>
-                导入将<span className="font-bold">清空您当前的所有数据</span>，并用导出包中的数据替换。此操作不可撤销。
+                本次导入支持<span className="font-bold">追加</span>或<span className="font-bold">覆盖</span>模式，
+                不会再先清空您当前的全部工作区数据。请根据需要选择模式。
               </p>
               <p>请选择 .dra 格式的导出包文件：</p>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="text-sm font-medium text-gray-800">导入模式</div>
+                <label className="mt-2 flex cursor-pointer items-start gap-2 text-sm text-gray-700">
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={importMode === 'merge_append'}
+                    onChange={() => setImportMode('merge_append')}
+                  />
+                  <span>追加导入：保留现有数据，重复项会按规则跳过或复用。</span>
+                </label>
+                <label className="mt-2 flex cursor-pointer items-start gap-2 text-sm text-gray-700">
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={importMode === 'merge_replace'}
+                    onChange={() => setImportMode('merge_replace')}
+                  />
+                  <span>覆盖导入：仅替换与导入包冲突的数据，不会清空整个工作区。</span>
+                </label>
+              </div>
               <input
                 type="file"
                 accept=".dra"
@@ -1003,10 +1215,12 @@ function App() {
                     return
                   }
                   const confirmed = window.confirm(
-                    '确定要导入吗？这将清空您当前的所有数据并用导出包中的数据替换。此操作不可撤销。'
+                    importMode === 'merge_replace'
+                      ? '确定要以“覆盖导入”模式继续吗？系统只会替换与导入包冲突的数据，不会先清空整个工作区。'
+                      : '确定要以“追加导入”模式继续吗？系统会保留现有数据，并尽量复用或跳过重复项。'
                   )
                   if (!confirmed) return
-                  handleImport(selectedImportFile)
+                  handleImport(selectedImportFile, importMode)
                 }}
                 disabled={importing || !selectedImportFile}
                 className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
@@ -1017,6 +1231,9 @@ function App() {
             {importResult && (
               <div className="mt-3 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">
                 <div className="font-semibold">导入结果</div>
+                <div className="mt-1">
+                  模式：{(importResult.mode as string) === 'merge_replace' ? '覆盖导入' : '追加导入'}
+                </div>
                 <div className="mt-1">
                   已恢复 {(importResult.files_restored as number) || 0} 个文件，缺失 {(importResult.files_missing as number) || 0} 个
                 </div>
@@ -1058,20 +1275,20 @@ function App() {
       {/* Main Content */}
       <main className="flex flex-1 min-h-0">
         <div className={shellInnerClass}>
-          {activeTab === 'filter' && <FilterTab apiKey={apiKey} />}
-          {activeTab === 'long' && <LongTab apiKey={apiKey} />}
-          {activeTab === 'quant' && <QuantTab apiKey={apiKey} />}
-          {activeTab === 'qual' && <QualTab apiKey={apiKey} />}
-          {activeTab === 'compare-long' && <CompareView mode="long" apiKey={apiKey || null} />}
-          {activeTab === 'compare-7step' && <CompareView mode="quant" apiKey={apiKey || null} />}
-          {activeTab === 'compare-4step' && <CompareView mode="qual" apiKey={apiKey || null} />}
-          {activeTab === 'translation' && <TranslationTab apiKey={apiKey} />}
-          {activeTab === 'agent' && <AgentTab apiKey={apiKey} />}
-          {activeTab === 'library' && <LibraryTab apiKey={apiKey} />}
-          {activeTab === 'cards' && location.pathname.includes('/reader') && <MarkdownReader apiKey={apiKey} />}
+          {activeTab === 'filter' && <FilterTab apiKey={requestApiKey} />}
+          {activeTab === 'long' && <LongTab apiKey={requestApiKey} />}
+          {activeTab === 'quant' && <QuantTab apiKey={requestApiKey} />}
+          {activeTab === 'qual' && <QualTab apiKey={requestApiKey} />}
+          {activeTab === 'compare-long' && <CompareView mode="long" apiKey={requestApiKey || null} />}
+          {activeTab === 'compare-7step' && <CompareView mode="quant" apiKey={requestApiKey || null} />}
+          {activeTab === 'compare-4step' && <CompareView mode="qual" apiKey={requestApiKey || null} />}
+          {activeTab === 'translation' && <TranslationTab apiKey={requestApiKey} />}
+          {activeTab === 'agent' && <AgentTab apiKey={requestApiKey} />}
+          {activeTab === 'library' && <LibraryTab apiKey={requestApiKey} />}
+          {activeTab === 'cards' && location.pathname.includes('/reader') && <MarkdownReader apiKey={requestApiKey} />}
           {activeTab === 'cards' && !location.pathname.includes('/reader') && <CardLibrary />}
-          {activeTab === 'references' && <ReferenceTraceTab apiKey={apiKey} />}
-          {activeTab === 'prompts' && <PromptsTab apiKey={apiKey} />}
+          {activeTab === 'references' && <ReferenceTraceTab apiKey={requestApiKey} />}
+          {activeTab === 'prompts' && <PromptsTab apiKey={requestApiKey} />}
           {activeTab === 'history' && <HistoryTab />}
         </div>
       </main>
@@ -1279,19 +1496,26 @@ interface BatchState {
   isBatchRunning: boolean
 }
 
-function persistBatchId(batchId: string | null) {
+type ReadingBatchKind = 'long' | 'quant' | 'qual'
+
+function getBatchTaskStorageKey(kind: ReadingBatchKind) {
+  return `dra_batch_task_id_${kind}`
+}
+
+function persistBatchId(kind: ReadingBatchKind, batchId: string | null) {
+  const storageKey = getBatchTaskStorageKey(kind)
   if (batchId) {
-    localStorage.setItem('dra_batch_task_id', batchId)
+    localStorage.setItem(storageKey, batchId)
   } else {
-    localStorage.removeItem('dra_batch_task_id')
+    localStorage.removeItem(storageKey)
   }
 }
 
-function restoreBatchId(): string | null {
-  return localStorage.getItem('dra_batch_task_id')
+function restoreBatchId(kind: ReadingBatchKind): string | null {
+  return localStorage.getItem(getBatchTaskStorageKey(kind))
 }
 
-function useBatchReadingTracker() {
+function useBatchReadingTracker(kind: ReadingBatchKind) {
   const [state, setState] = useState<BatchState>({
     batchId: null, total: 0, completed: 0, failed: 0, running: 0, queued: 0, tasks: [], isBatchRunning: false,
   })
@@ -1306,14 +1530,14 @@ function useBatchReadingTracker() {
 
   const resetBatch = () => {
     stopPolling()
-    persistBatchId(null)
+    persistBatchId(kind, null)
     setState({
       batchId: null, total: 0, completed: 0, failed: 0, running: 0, queued: 0, tasks: [], isBatchRunning: false,
     })
   }
 
   const startBatchTracking = (batchId: string) => {
-    persistBatchId(batchId)
+    persistBatchId(kind, batchId)
     setState(prev => ({ ...prev, batchId, isBatchRunning: true }))
     const poll = async () => {
       try {
@@ -1340,7 +1564,7 @@ function useBatchReadingTracker() {
         }))
         if (allDone) {
           stopPolling()
-          persistBatchId(null)
+          persistBatchId(kind, null)
         }
       } catch {
         stopPolling()
@@ -1353,7 +1577,7 @@ function useBatchReadingTracker() {
   }
 
   useEffect(() => {
-    const savedBatchId = restoreBatchId()
+    const savedBatchId = restoreBatchId(kind)
     if (savedBatchId) {
       startBatchTracking(savedBatchId)
     }
@@ -1795,7 +2019,7 @@ function LongTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [batchConflictInfo, setBatchConflictInfo] = useState<any>(null)
   const pendingBatchFileIdsRef = useRef<string[]>([])
   const pendingBatchKeyRef = useRef<string>('')
-  const batchTracker = useBatchReadingTracker()
+  const batchTracker = useBatchReadingTracker('long')
   const {
     cancelTask,
     isRunning,
@@ -2688,7 +2912,7 @@ function QuantTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [batchConflictInfo, setBatchConflictInfo] = useState<any>(null)
   const pendingBatchFileIdsRef = useRef<string[]>([])
   const pendingBatchKeyRef = useRef<string>('')
-  const batchTracker = useBatchReadingTracker()
+  const batchTracker = useBatchReadingTracker('quant')
   const {
     cancelTask,
     isRunning,
@@ -3140,7 +3364,7 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
   const [batchConflictInfo, setBatchConflictInfo] = useState<any>(null)
   const pendingBatchFileIdsRef = useRef<string[]>([])
   const pendingBatchKeyRef = useRef<string>('')
-  const batchTracker = useBatchReadingTracker()
+  const batchTracker = useBatchReadingTracker('qual')
   const {
     cancelTask,
     isRunning,
@@ -3580,7 +3804,7 @@ function QualTab({ apiKey: _apiKey }: { apiKey: string }) {
 
 type AgentChatEvent = {
   id: string
-  type: 'tool_call' | 'tool_result' | 'answer' | 'error' | 'proposal'
+  type: 'tool_call' | 'tool_result' | 'answer' | 'error' | 'proposal' | 'notice'
   title: string
   body: string
   payload?: unknown
@@ -3597,6 +3821,130 @@ type AgentProposal = {
   status: string
   preview?: any
   arguments?: any
+}
+
+type AgentRuntimeNotice = {
+  code?: string
+  message?: string
+  severity?: string
+  tool?: string
+  blocked_tool?: string
+  suggested_tools?: string[]
+  recommendations?: string[]
+  intent?: string
+  result_set_count?: number
+  budget_snapshot?: Record<string, unknown>
+}
+
+type AgentStructuredError = {
+  code?: string
+  message?: string
+  severity?: string
+  stage?: string
+  retryable?: boolean
+  status_code?: number
+  provider?: string
+  tool?: string
+  details?: unknown
+  recommendations?: string[]
+}
+
+type AgentToolTraceEntry = {
+  tool?: string
+  status?: string
+  blocked?: boolean
+  empty?: boolean
+  hit?: boolean
+  arguments_summary?: Record<string, unknown>
+  result_summary?: string
+  code?: string | null
+  message?: string | null
+}
+
+type AgentWorkingNote = {
+  kind?: string
+  topic?: string
+  batch_index?: number
+  processed_count?: number
+  total_count?: number
+  summary?: string
+  top_clusters?: Array<{ label?: string; count?: number }>
+  priority_candidates?: Array<{ title?: string; journal?: string; year?: number; priority_score?: number }>
+}
+
+type AgentSessionState = {
+  active_task_frame?: Record<string, unknown> | null
+  last_result_set?: {
+    result_set_id?: string
+    query_summary?: string
+    count?: number
+    entries?: Array<{ entry_id?: string; title?: string }>
+  } | null
+  selected_entries?: Array<{ entry_id?: string; title?: string }>
+  last_evidence_pack?: {
+    evidence_pack_id?: string
+    question?: string
+    count?: number
+    tier_summary?: Record<string, number>
+  } | null
+  budget_snapshot?: {
+    tool_counts?: Record<string, number>
+    empty_tool_counts?: Record<string, number>
+  } | null
+  recent_tool_trace?: AgentToolTraceEntry[]
+  last_runtime_notice?: AgentRuntimeNotice | null
+  last_stop_summary?: AgentRuntimeNotice | null
+  last_agent_error?: AgentStructuredError | null
+  last_scan_summary?: {
+    source?: string
+    topic?: string
+    batch_id?: string | null
+    scanned?: number
+    candidate_count?: number
+    relevant_count?: number
+    library_counts?: Record<string, number>
+    skipped_count?: number
+    skipped_reasons?: Record<string, number>
+    skipped_examples?: Array<{ filename?: string; reason?: string; message?: string }>
+    recommendations?: string[]
+  } | null
+  working_notes?: AgentWorkingNote[]
+  last_analysis_summary?: {
+    topic?: string
+    count?: number
+    clusters?: Array<{ label?: string; count?: number }>
+    journal_tier_distribution?: Array<{ label?: string; count?: number }>
+    priority_candidates?: Array<{
+      entry_id?: string
+      title?: string
+      journal?: string
+      year?: number
+      citation_count?: number
+      priority_score?: number
+      local_rule_reasons?: string[]
+      journal_quality?: { label?: string; matched_name?: string } | null
+      model_hint?: string
+    }>
+  } | null
+  analysis_cache_summary?: {
+    cache_id?: string
+    topic?: string
+    entry_count?: number
+    source_scope?: string
+    reused_from_cache_id?: string | null
+    parent_cache_id?: string | null
+  } | null
+  pending_proposal?: Record<string, unknown> | null
+  last_execution?: {
+    proposal_id?: string
+    action_type?: string
+    status?: string
+    job_id?: string
+    batch_id?: string
+    mode?: string
+    selected_count?: number
+    tasks?: Array<{ job_id?: string; file_name?: string; status?: string }>
+  } | null
 }
 
 function tryParseJson(text: string): unknown | null {
@@ -3618,6 +3966,67 @@ function formatJsonScalar(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isAgentRuntimeNotice(value: unknown): value is AgentRuntimeNotice {
+  return isRecord(value) && (typeof value.code === 'string' || typeof value.message === 'string')
+}
+
+function isAgentStructuredError(value: unknown): value is AgentStructuredError {
+  return isRecord(value) && (
+    typeof value.code === 'string'
+    || typeof value.message === 'string'
+    || typeof value.stage === 'string'
+  )
+}
+
+function getAgentErrorTitle(error: AgentStructuredError, fallback = '错误'): string {
+  if (error.code === 'invalid_api_key') return 'API Key 无效'
+  if (error.code === 'llm_auth_error') return '模型认证失败'
+  if (error.code === 'llm_rate_limited') return '模型请求被限流'
+  if (error.code === 'llm_timeout') return '模型响应超时'
+  if (error.code === 'llm_connection_error') return '模型连接失败'
+  if (error.code === 'llm_bad_request') return '模型请求不合法'
+  if (error.code === 'llm_upstream_error') return '模型服务异常'
+  if (error.code === 'tool_execution_error') return '工具执行失败'
+  if (error.code === 'resource_not_found') return '对象不存在'
+  if (error.code === 'permission_denied') return '权限不足'
+  if (error.code === 'http_error') return '请求失败'
+  return fallback
+}
+
+function getAgentErrorMessage(error: AgentStructuredError | null | undefined, fallback = 'AI 助手执行失败。'): string {
+  return error?.message || fallback
+}
+
+function normalizeAgentErrorPayload(value: unknown): AgentStructuredError | null {
+  if (isAgentStructuredError(value)) return value
+  if (isRecord(value) && isAgentStructuredError(value.detail)) return value.detail
+  return null
+}
+
+function stringifyUnknownError(value: unknown, fallback = 'AI 助手请求失败。'): string {
+  if (typeof value === 'string' && value.trim()) return value
+  if (value instanceof Error && value.message.trim()) return value.message
+  if (isRecord(value)) {
+    if (typeof value.message === 'string' && value.message.trim()) return value.message
+    if (typeof value.detail === 'string' && value.detail.trim()) return value.detail
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return fallback
+    }
+  }
+  return fallback
+}
+
+function getRuntimeNoticeTitle(notice: AgentRuntimeNotice, fallback = '运行时提示'): string {
+  if (notice.code === 'max_tool_rounds_reached') return '已触发停止摘要'
+  if (notice.code === 'continuation_context_required') return '需要先确认上一轮对象'
+  if (notice.code === 'prefer_result_set_tools' || notice.code === 'prefer_contextual_result_set') return '已阻止低效工具路径'
+  if (notice.code === 'external_consent_required') return '需要联网授权'
+  if (notice.code === 'duplicate_tool_call_blocked' || notice.code === 'search_library_budget_exhausted') return '已阻止预算空转'
+  return fallback
 }
 
 function JsonHtmlView({ value, depth = 0 }: { value: unknown; depth?: number }) {
@@ -3821,6 +4230,8 @@ function AgentEventList({ events, selectable, selectedIds, onToggle }: {
             className={`rounded-lg border bg-white p-4 shadow-sm ${
               block.event.type === 'error'
                 ? 'border-red-200'
+                : block.event.type === 'notice'
+                  ? 'border-amber-200'
                 : 'border-emerald-200'
             }`}
           >
@@ -3846,8 +4257,254 @@ function AgentEventList({ events, selectable, selectedIds, onToggle }: {
   )
 }
 
+function AgentRuntimeNoticeCard({ notice }: { notice: AgentRuntimeNotice }) {
+  const severity = notice.severity === 'error' ? 'error' : notice.severity === 'info' ? 'info' : 'warning'
+  const wrapperClass =
+    severity === 'error'
+      ? 'border-red-200 bg-red-50/70'
+      : severity === 'info'
+        ? 'border-sky-200 bg-sky-50/70'
+        : 'border-amber-200 bg-amber-50/80'
+  const badgeClass =
+    severity === 'error'
+      ? 'border-red-200 bg-white text-red-700'
+      : severity === 'info'
+        ? 'border-sky-200 bg-white text-sky-700'
+        : 'border-amber-200 bg-white text-amber-700'
+
+  return (
+    <div className={`space-y-3 rounded-lg border p-3 ${wrapperClass}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-gray-900">{getRuntimeNoticeTitle(notice)}</div>
+          <div className="mt-1 text-sm text-gray-700">{notice.message || '暂无详细说明'}</div>
+        </div>
+        {notice.code && (
+          <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
+            {notice.code}
+          </span>
+        )}
+      </div>
+      {(notice.blocked_tool || notice.tool || notice.result_set_count !== undefined) && (
+        <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+          {notice.blocked_tool && (
+            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">blocked: {notice.blocked_tool}</span>
+          )}
+          {notice.tool && notice.tool !== notice.blocked_tool && (
+            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">tool: {notice.tool}</span>
+          )}
+          {typeof notice.result_set_count === 'number' && (
+            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">result_set: {notice.result_set_count}</span>
+          )}
+        </div>
+      )}
+      {Array.isArray(notice.suggested_tools) && notice.suggested_tools.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">建议工具</div>
+          <div className="flex flex-wrap gap-2">
+            {notice.suggested_tools.map((tool) => (
+              <span key={tool} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
+                {tool}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {Array.isArray(notice.recommendations) && notice.recommendations.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">下一步建议</div>
+          <div className="space-y-1 text-sm text-gray-700">
+            {notice.recommendations.map((item, index) => (
+              <div key={`${item}-${index}`}>{index + 1}. {item}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AgentInboxSummaryCard({ summary }: { summary: AgentInboxUploadSummary }) {
+  const errorEntries = Object.entries(summary.error_counts || {})
+  const failedExamples = summary.failed_examples || []
+  const recommendations = summary.recommendations || []
+
+  return (
+    <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-gray-900">最近上传批次摘要</div>
+          <div className="mt-1 text-sm text-gray-700">
+            共 {summary.total_files ?? 0} 个文件，成功 {summary.succeeded ?? 0} 个，失败 {summary.failed ?? 0} 个。
+          </div>
+        </div>
+        {summary.status && (
+          <span className="rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs font-medium text-emerald-700">
+            {summary.status}
+          </span>
+        )}
+      </div>
+      <div className="grid gap-2 text-xs text-gray-700 md:grid-cols-2">
+        <div className="rounded-md border border-emerald-100 bg-white p-3">新导入：{summary.imported_count ?? 0}</div>
+        <div className="rounded-md border border-emerald-100 bg-white p-3">去重复用：{summary.deduplicated_count ?? 0}</div>
+        <div className="rounded-md border border-emerald-100 bg-white p-3">已匹配文献库：{summary.matched_count ?? 0}</div>
+        <div className="rounded-md border border-emerald-100 bg-white p-3">待人工确认：{summary.unmatched_count ?? 0}</div>
+      </div>
+      {errorEntries.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">失败原因聚合</div>
+          <div className="flex flex-wrap gap-2">
+            {errorEntries.map(([code, count]) => (
+              <span key={code} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
+                {code} x {count}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {failedExamples.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">失败样例</div>
+          <div className="space-y-2">
+            {failedExamples.map((item, index) => (
+              <div key={`${item.filename || item.error || 'failed'}-${index}`} className="rounded-md border border-emerald-100 bg-white p-3 text-xs text-gray-700">
+                <div className="font-medium text-gray-800">{item.filename || '未命名文件'}</div>
+                <div className="mt-1">{item.message || item.error || '未知错误'}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {recommendations.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">建议操作</div>
+          <div className="space-y-1 text-sm text-gray-700">
+            {recommendations.map((item, index) => (
+              <div key={`${item}-${index}`}>{index + 1}. {item}</div>
+            ))}
+          </div>
+        </div>
+      )}
+      {summary.created_at && (
+        <div className="text-xs text-gray-500">创建时间：{new Date(summary.created_at).toLocaleString()}</div>
+      )}
+    </div>
+  )
+}
+
+function AgentErrorCard({ error }: { error: AgentStructuredError }) {
+  const retryable = Boolean(error.retryable)
+  const badgeClass = retryable
+    ? 'border-amber-200 bg-white text-amber-700'
+    : 'border-red-200 bg-white text-red-700'
+
+  return (
+    <div className="space-y-3 rounded-lg border border-red-200 bg-red-50/60 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-gray-900">{getAgentErrorTitle(error)}</div>
+          <div className="mt-1 text-sm text-gray-700">{getAgentErrorMessage(error)}</div>
+        </div>
+        {error.code && (
+          <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
+            {error.code}
+          </span>
+        )}
+      </div>
+      {(error.stage || error.provider || error.tool || error.status_code !== undefined) && (
+        <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+          {error.stage && (
+            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">stage: {error.stage}</span>
+          )}
+          {error.provider && (
+            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">provider: {error.provider}</span>
+          )}
+          {error.tool && (
+            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">tool: {error.tool}</span>
+          )}
+          {typeof error.status_code === 'number' && (
+            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">status: {error.status_code}</span>
+          )}
+          <span className="rounded-full border border-gray-200 bg-white px-2 py-1">
+            {retryable ? '可重试' : '需修正后再试'}
+          </span>
+        </div>
+      )}
+      {Array.isArray(error.recommendations) && error.recommendations.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">建议处理</div>
+          <div className="space-y-1 text-sm text-gray-700">
+            {error.recommendations.map((item, index) => (
+              <div key={`${item}-${index}`}>{index + 1}. {item}</div>
+            ))}
+          </div>
+        </div>
+      )}
+      {error.details !== undefined && error.details !== null && (
+        <details className="rounded-md border border-red-100 bg-white p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-gray-500">错误细节</summary>
+          <div className="mt-2">
+            <JsonHtmlView value={error.details} />
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
 function AgentEventBody({ event }: { event: AgentChatEvent }) {
   const parsed = event.payload ?? tryParseJson(event.body)
+  if (isAgentStructuredError(parsed) && event.type === 'error') {
+    return <AgentErrorCard error={parsed} />
+  }
+  if (isAgentRuntimeNotice(parsed)) {
+    return <AgentRuntimeNoticeCard notice={parsed} />
+  }
+  if (isRecord(parsed) && Array.isArray(parsed.open_urls)) {
+    const urls = parsed.open_urls.filter((url): url is string => typeof url === 'string' && url.startsWith('http'))
+    const items = Array.isArray(parsed.items) ? parsed.items : Array.isArray(parsed.results) ? parsed.results : []
+    const openAll = () => {
+      urls.slice(0, 50).forEach((url) => {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      })
+    }
+    return (
+      <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">{String(parsed.tool || '外部检索链接')}</div>
+            <div className="mt-0.5 text-xs text-gray-600">{String(parsed.note || `共 ${urls.length} 个可打开链接`)}</div>
+          </div>
+          <button
+            type="button"
+            onClick={openAll}
+            disabled={urls.length === 0}
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            打开全部链接
+          </button>
+        </div>
+        {items.length > 0 && (
+          <div className="max-h-72 overflow-auto rounded-md border border-blue-100 bg-white">
+            {items.slice(0, 50).map((item, index) => {
+              const row = isRecord(item) ? item : {}
+              const url = typeof row.url === 'string' ? row.url : ''
+              return (
+                <div key={`${url || index}-${index}`} className="border-b border-gray-100 px-3 py-2 last:border-b-0">
+                  <div className="text-sm font-medium text-gray-900">{String(row.title || row.label || row.source || `链接 ${index + 1}`)}</div>
+                  {url && (
+                    <a href={url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-xs text-blue-700 hover:underline">
+                      {url}
+                    </a>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
   if (isRecord(parsed) && Array.isArray(parsed.papers) && isRecord(parsed.library_counts)) {
     const papers = parsed.papers as any[]
     const counts = parsed.library_counts as Record<string, unknown>
@@ -3926,20 +4583,284 @@ function AgentEventBody({ event }: { event: AgentChatEvent }) {
   return <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{event.body}</pre>
 }
 
+function AgentScanSummaryCard({ summary }: { summary: NonNullable<AgentSessionState['last_scan_summary']> }) {
+  const libraryEntries = Object.entries(summary.library_counts || {})
+  const skippedReasonEntries = Object.entries(summary.skipped_reasons || {})
+  const skippedExamples = summary.skipped_examples || []
+  const recommendations = summary.recommendations || []
+  const sourceLabel = summary.source === 'upload_batch'
+    ? '已上传批次'
+    : summary.source === 'server_folder'
+      ? '服务器目录'
+      : summary.source || '未知来源'
+
+  return (
+    <div className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/60 p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-violet-900">最近一次扫描摘要</div>
+          <div className="mt-1 text-sm text-violet-800">
+            来源：{sourceLabel}，主题：{summary.topic || '*'}
+          </div>
+        </div>
+        {summary.batch_id && (
+          <span className="rounded-full border border-violet-200 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+            batch: {summary.batch_id}
+          </span>
+        )}
+      </div>
+      <div className="grid gap-2 text-xs text-gray-700 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-md border border-violet-100 bg-white p-3">扫描文件：{summary.scanned ?? 0}</div>
+        <div className="rounded-md border border-violet-100 bg-white p-3">候选文献：{summary.candidate_count ?? 0}</div>
+        <div className="rounded-md border border-violet-100 bg-white p-3">相关文献：{summary.relevant_count ?? 0}</div>
+        <div className="rounded-md border border-violet-100 bg-white p-3">跳过文件：{summary.skipped_count ?? 0}</div>
+      </div>
+      {libraryEntries.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">文献库映射</div>
+          <div className="flex flex-wrap gap-2">
+            {libraryEntries.map(([key, value]) => (
+              <span key={key} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
+                {key}: {value}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {skippedReasonEntries.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">跳过原因</div>
+          <div className="flex flex-wrap gap-2">
+            {skippedReasonEntries.map(([key, value]) => (
+              <span key={key} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
+                {key} x {value}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {skippedExamples.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">跳过样例</div>
+          <div className="space-y-2">
+            {skippedExamples.map((item, index) => (
+              <div key={`${item.filename || item.reason || 'skipped'}-${index}`} className="rounded-md border border-violet-100 bg-white p-3 text-xs text-gray-700">
+                <div className="font-medium text-gray-800">{item.filename || '未命名文件'}</div>
+                <div className="mt-1">{item.message || item.reason || '未知原因'}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {recommendations.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-gray-500">建议操作</div>
+          <div className="space-y-1 text-sm text-gray-700">
+            {recommendations.map((item, index) => (
+              <div key={`${item}-${index}`}>{index + 1}. {item}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AgentToolTraceCard({ traces }: { traces: AgentToolTraceEntry[] }) {
+  const statusLabel = (status?: string) => {
+    if (status === 'blocked') return '已拦截'
+    if (status === 'proposal') return '提案'
+    if (status === 'empty') return '空结果'
+    if (status === 'error') return '失败'
+    return '命中'
+  }
+
+  const statusClass = (status?: string) => {
+    if (status === 'blocked') return 'border-amber-200 bg-amber-50 text-amber-700'
+    if (status === 'proposal') return 'border-sky-200 bg-sky-50 text-sky-700'
+    if (status === 'empty') return 'border-gray-200 bg-gray-50 text-gray-700'
+    if (status === 'error') return 'border-red-200 bg-red-50 text-red-700'
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">最近工具轨迹</div>
+          <div className="mt-1 text-sm text-slate-700">展示最近几步工具调用的参数摘要、命中情况和停止原因。</div>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-700">
+          {traces.length} 步
+        </span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {traces.map((trace, index) => (
+          <div key={`${trace.tool || 'tool'}-${index}`} className="rounded-md border border-slate-200 bg-white p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium text-gray-900">{trace.tool || `工具 ${index + 1}`}</div>
+                <div className="mt-1 text-sm text-gray-700">{trace.result_summary || '已完成工具调用'}</div>
+              </div>
+              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClass(trace.status)}`}>
+                {statusLabel(trace.status)}
+              </span>
+            </div>
+            {trace.arguments_summary && Object.keys(trace.arguments_summary).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {Object.entries(trace.arguments_summary).map(([key, value]) => (
+                  <span key={key} className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                    {key}: {Array.isArray(value) ? value.join(', ') : String(value)}
+                  </span>
+                ))}
+              </div>
+            )}
+            {(trace.code || trace.message) && (
+              <div className="mt-2 text-xs text-gray-500">
+                {trace.code ? `${trace.code}${trace.message ? ' · ' : ''}` : ''}
+                {trace.message || ''}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AgentTab({ apiKey }: { apiKey: string }) {
+  const user = useAuthStore((state) => state.user)
   const [message, setMessage] = useState('')
   const [events, setEvents] = useState<AgentChatEvent[]>([])
   const [history, setHistory] = useState<AgentChatTurn[]>([])
   const [sessionId, setSessionId] = useState('')
+  const [sessionState, setSessionState] = useState<AgentSessionState | null>(null)
   const [pendingProposal, setPendingProposal] = useState<AgentProposal | null>(null)
   const [confirmingProposal, setConfirmingProposal] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [exportMode, setExportMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [journalKbEffectiveContent, setJournalKbEffectiveContent] = useState('')
+  const [journalKbUserContent, setJournalKbUserContent] = useState('')
+  const [journalKbSystemContent, setJournalKbSystemContent] = useState('')
+  const [journalKbSource, setJournalKbSource] = useState('')
+  const [journalKbHasUserOverride, setJournalKbHasUserOverride] = useState(false)
+  const [journalKbLoading, setJournalKbLoading] = useState(false)
+  const [journalKbMessage, setJournalKbMessage] = useState('')
+  const [journalKbPanelOpen, setJournalKbPanelOpen] = useState(false)
 
   const appendEvent = (event: Omit<AgentChatEvent, 'id'>) => {
     setEvents((prev) => [...prev, { ...event, id: `${Date.now()}-${Math.random()}` }])
+  }
+
+  const readPromptError = async (response: Response) => {
+    const text = await response.text()
+    try {
+      const data = JSON.parse(text)
+      return data?.detail || data?.message || `请求失败（HTTP ${response.status}）`
+    } catch {
+      return text || `请求失败（HTTP ${response.status}）`
+    }
+  }
+
+  const journalKbSourceLabel =
+    journalKbSource === 'user_override'
+      ? '当前生效：我的覆盖'
+      : journalKbSource === 'system_default'
+        ? '当前生效：系统默认'
+        : journalKbSource === 'file_fallback'
+          ? '当前生效：文件兜底'
+          : journalKbSource === 'builtin_fallback'
+            ? '当前生效：代码兜底'
+            : '当前生效：未确定'
+
+  const journalKbLines = journalKbEffectiveContent
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+\*\*/.test(line))
+
+  const loadJournalKb = async () => {
+    const params = new URLSearchParams({ type: 'journal_kb', key: 'top_tier_registry' })
+    const response = await fetch(`/api/prompts/item?${params.toString()}`)
+    if (!response.ok) throw new Error(await readPromptError(response))
+    const data = await response.json()
+    setJournalKbEffectiveContent(data.effective_content || '')
+    setJournalKbUserContent(data.user_content || '')
+    setJournalKbSystemContent(data.system_content || '')
+    setJournalKbSource(data.source || '')
+    setJournalKbHasUserOverride(Boolean(data.has_user_override))
+  }
+
+  const refreshJournalKb = async () => {
+    setJournalKbLoading(true)
+    setJournalKbMessage('')
+    try {
+      await loadJournalKb()
+      setJournalKbMessage('✓ 顶刊名录已加载')
+    } catch (err: any) {
+      setJournalKbMessage(`❌ ${err?.message || '顶刊名录加载失败'}`)
+    }
+    setJournalKbLoading(false)
+  }
+
+  const saveJournalKbUserOverride = async () => {
+    setJournalKbLoading(true)
+    setJournalKbMessage('')
+    try {
+      const response = await fetch('/api/prompts/my', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'journal_kb',
+          key: 'top_tier_registry',
+          content: journalKbUserContent,
+        }),
+      })
+      if (!response.ok) throw new Error(await readPromptError(response))
+      await refreshJournalKb()
+      setJournalKbMessage('✓ 我的顶刊名录覆盖已保存')
+    } catch (err: any) {
+      setJournalKbMessage(`❌ ${err?.message || '保存顶刊名录失败'}`)
+    }
+    setJournalKbLoading(false)
+  }
+
+  const resetJournalKbUserOverride = async () => {
+    setJournalKbLoading(true)
+    setJournalKbMessage('')
+    try {
+      const params = new URLSearchParams({ type: 'journal_kb', key: 'top_tier_registry' })
+      const response = await fetch(`/api/prompts/my?${params.toString()}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error(await readPromptError(response))
+      await refreshJournalKb()
+      setJournalKbMessage('✓ 已恢复为系统默认顶刊名录')
+    } catch (err: any) {
+      setJournalKbMessage(`❌ ${err?.message || '恢复默认顶刊名录失败'}`)
+    }
+    setJournalKbLoading(false)
+  }
+
+  const saveJournalKbSystemDefault = async () => {
+    setJournalKbLoading(true)
+    setJournalKbMessage('')
+    try {
+      const response = await fetch('/api/prompts/system', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'journal_kb',
+          key: 'top_tier_registry',
+          content: journalKbSystemContent,
+        }),
+      })
+      if (!response.ok) throw new Error(await readPromptError(response))
+      await refreshJournalKb()
+      setJournalKbMessage('✓ 系统默认顶刊名录已保存')
+    } catch (err: any) {
+      setJournalKbMessage(`❌ ${err?.message || '保存系统默认顶刊名录失败'}`)
+    }
+    setJournalKbLoading(false)
   }
 
   useEffect(() => {
@@ -3956,6 +4877,7 @@ function AgentTab({ apiKey }: { apiKey: string }) {
         const detail = await detailResponse.json()
         if (cancelled) return
         setSessionId(detail.id)
+        setSessionState(detail.last_state || null)
         const restoredEvents: AgentChatEvent[] = (detail.messages || []).map((item: any) => {
           const payload = item.payload
           if (item.event_type === 'tool_call') {
@@ -3993,6 +4915,10 @@ function AgentTab({ apiKey }: { apiKey: string }) {
     }
   }, [])
 
+  useEffect(() => {
+    void refreshJournalKb()
+  }, [])
+
   const sendMessage = async () => {
     const text = message.trim()
     if (!text || loading) return
@@ -4022,7 +4948,9 @@ function AgentTab({ apiKey }: { apiKey: string }) {
       })
       if (!response.ok) {
         const detail = await response.json().catch(() => null)
-        throw new Error(detail?.detail || 'AI 助手请求失败。')
+        const structuredError = normalizeAgentErrorPayload(detail?.detail ?? detail)
+        if (structuredError) throw structuredError
+        throw new Error(stringifyUnknownError(detail?.detail ?? detail))
       }
       if (!response.body) throw new Error('AI 助手未返回流式内容。')
 
@@ -4038,6 +4966,9 @@ function AgentTab({ apiKey }: { apiKey: string }) {
         const data = JSON.parse(dataLine.slice(6))
         if (eventName === 'session') {
           if (data.session_id) setSessionId(data.session_id)
+          if (data.last_state) setSessionState(data.last_state)
+        } else if (eventName === 'session_state') {
+          if (data.last_state) setSessionState(data.last_state)
         } else if (eventName === 'tool_call') {
           appendEvent({
             type: 'tool_call',
@@ -4064,6 +4995,20 @@ function AgentTab({ apiKey }: { apiKey: string }) {
             body: JSON.stringify(data, null, 2),
             payload: data,
           })
+        } else if (eventName === 'analysis_progress') {
+          appendEvent({
+            type: 'notice',
+            title: `批次分析进度：${data.processed_count || 0}/${data.total_count || 0}`,
+            body: JSON.stringify(data, null, 2),
+            payload: data,
+          })
+        } else if (eventName === 'runtime_notice') {
+          appendEvent({
+            type: 'notice',
+            title: getRuntimeNoticeTitle(data, '运行时提示'),
+            body: JSON.stringify(data, null, 2),
+            payload: data,
+          })
         } else if (eventName === 'answer') {
           answer += data.content || ''
           appendEvent({
@@ -4072,7 +5017,7 @@ function AgentTab({ apiKey }: { apiKey: string }) {
             body: data.content || '',
           })
         } else if (eventName === 'error') {
-          throw new Error(data.message || 'AI 助手执行失败。')
+          throw normalizeAgentErrorPayload(data) || new Error(data.message || 'AI 助手执行失败。')
         }
       }
 
@@ -4092,9 +5037,19 @@ function AgentTab({ apiKey }: { apiKey: string }) {
         { role: 'assistant' as const, content: answer || '已完成工具调用。' },
       ].slice(-12))
     } catch (err) {
-      const messageText = err instanceof Error ? err.message : 'AI 助手执行失败。'
+      const structuredError = normalizeAgentErrorPayload(err)
+      const messageText = structuredError
+        ? getAgentErrorMessage(structuredError)
+        : err instanceof Error
+          ? err.message
+          : 'AI 助手执行失败。'
       setError(messageText)
-      appendEvent({ type: 'error', title: '错误', body: messageText })
+      appendEvent({
+        type: 'error',
+        title: structuredError ? getAgentErrorTitle(structuredError) : '错误',
+        body: structuredError ? JSON.stringify(structuredError, null, 2) : messageText,
+        payload: structuredError || undefined,
+      })
     } finally {
       setLoading(false)
     }
@@ -4117,6 +5072,7 @@ function AgentTab({ apiKey }: { apiKey: string }) {
       if (!response.ok) {
         throw new Error(data?.detail || `确认执行失败（HTTP ${response.status}）`)
       }
+      if (data?.last_state) setSessionState(data.last_state)
       appendEvent({
         type: 'tool_result',
         title: '确认执行结果',
@@ -4144,6 +5100,8 @@ function AgentTab({ apiKey }: { apiKey: string }) {
         const data = await response.json().catch(() => null)
         throw new Error(data?.detail || `取消失败（HTTP ${response.status}）`)
       }
+      const data = await response.json().catch(() => null)
+      if (data?.last_state) setSessionState(data.last_state)
       appendEvent({
         type: 'answer',
         title: 'AI 助手',
@@ -4180,6 +5138,8 @@ function AgentTab({ apiKey }: { apiKey: string }) {
         lines.push(`## 👤 ${ev.title}`, '', ev.body, '')
       } else if (ev.type === 'answer' && ev.title === 'AI 助手') {
         lines.push(`## 🤖 ${ev.title}`, '', ev.body, '')
+      } else if (ev.type === 'notice') {
+        lines.push(`<details><summary>⚠ ${ev.title}</summary>`, '', '```json', ev.body, '```', '</details>', '')
       } else if (ev.type === 'tool_call') {
         lines.push(`<details><summary>🔧 ${ev.title}</summary>`, '', '```json', ev.body, '```', '</details>', '')
       } else if (ev.type === 'tool_result') {
@@ -4209,154 +5169,424 @@ function AgentTab({ apiKey }: { apiKey: string }) {
   }, [events, pendingProposal])
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
-      <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">AI 文献助手</h2>
-            <p className="mt-1 text-sm text-gray-500">可检索文献库、读取精读结果、启动精读任务并整理对比综述。</p>
-          </div>
-          <div className="flex gap-2">
-            {events.length > 0 && !exportMode && (
-              <button
-                onClick={() => {
-                  setExportMode(true)
-                  setSelectedIds(new Set(events.map((e) => e.id)))
-                }}
-                className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
-              >
-                导出对话
-              </button>
-            )}
-            {exportMode && (
-              <>
-                <button
-                  onClick={() => { setExportMode(false); setSelectedIds(new Set()) }}
-                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={() => selectedIds.size === events.length ? deselectAll() : selectAll()}
-                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
-                >
-                  {selectedIds.size === events.length ? '取消全选' : '全选'}
-                </button>
-                <button
-                  onClick={exportSelected}
-                  disabled={selectedIds.size === 0}
-                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  导出 ({selectedIds.size})
-                </button>
-              </>
-            )}
-            {!exportMode && (
-              <button
-                onClick={() => {
-                  const idToArchive = sessionId
-                  setEvents([])
-                  setHistory([])
-                  setError('')
-                  setSessionId('')
-                  setPendingProposal(null)
-                  if (idToArchive) {
-                    fetch(`/api/agent/sessions/${idToArchive}/archive`, { method: 'PATCH' }).catch(() => {})
-                  }
-                }}
-                className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
-              >
-                清空会话
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        {events.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
-            还没有会话。你可以让它先查文献、再启动精读，或者基于已有精读结果写综述。
-          </div>
-        ) : (
-          <AgentEventList
-            events={events}
-            selectable={exportMode}
-            selectedIds={selectedIds}
-            onToggle={toggleSelect}
-          />
-        )}
-      </div>
-
-      {pendingProposal && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-amber-900">需要确认后才会执行</div>
-              <div className="mt-1 text-sm text-amber-800">
-                {pendingProposal.action_type === 'import_folder_and_start_reading'
-                  ? '将导入文件夹中的候选文献并启动精读任务。'
-                  : pendingProposal.action_type === 'start_batch_reading'
-                    ? '将启动批量精读任务。'
-                    : '将启动精读任务。'}
+    <div className={`mx-auto grid max-w-6xl gap-4 ${journalKbPanelOpen ? 'xl:grid-cols-[340px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
+      {journalKbPanelOpen && (
+      <div className="space-y-3 xl:sticky xl:top-4 xl:self-start">
+          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-amber-900">AI 助手顶刊名录</div>
+                <div className="mt-1 text-sm text-amber-800">供 AI 文献助手识别顶刊、优先排序与缓存子集筛选复用。</div>
               </div>
+              <button
+                onClick={() => void refreshJournalKb()}
+                disabled={journalKbLoading}
+                className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              >
+                刷新
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="rounded-full border border-amber-200 bg-white px-2.5 py-1 text-xs font-medium text-amber-700">
+                {journalKbSourceLabel}
+              </span>
+              {journalKbHasUserOverride && (
+                <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700">
+                  已存在个人覆盖
+                </span>
+              )}
+            </div>
+            {journalKbMessage && (
+              <div className={`mt-3 text-xs ${journalKbMessage.startsWith('✓') ? 'text-emerald-700' : 'text-red-600'}`}>
+                {journalKbMessage}
+              </div>
+            )}
+            {journalKbLines.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {journalKbLines.slice(0, 6).map((line, index) => (
+                  <span key={`${line}-${index}`} className="rounded-full border border-amber-200 bg-white px-2 py-1 text-[11px] text-amber-800">
+                    {line.replace(/^-+\s+\*\*(.+?)\*\*:.+$/, '$1')}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-gray-700">当前生效名录</div>
+              </div>
+              <textarea
+                value={journalKbEffectiveContent}
+                readOnly
+                rows={10}
+                className="w-full rounded-lg border border-amber-100 bg-white px-3 py-2 text-xs font-mono text-gray-700"
+              />
+            </div>
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-gray-700">我的覆盖</div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void saveJournalKbUserOverride()}
+                    disabled={journalKbLoading}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    保存
+                  </button>
+                  <button
+                    onClick={() => void resetJournalKbUserOverride()}
+                    disabled={journalKbLoading}
+                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    恢复默认
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={journalKbUserContent}
+                onChange={(event) => setJournalKbUserContent(event.target.value)}
+                rows={10}
+                placeholder="未设置个人覆盖时，将使用系统默认顶刊名录。"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-mono text-gray-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+            {user?.role === 'admin' && (
+              <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50/60 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-violet-800">系统默认顶刊名录</div>
+                  <button
+                    onClick={() => void saveJournalKbSystemDefault()}
+                    disabled={journalKbLoading}
+                    className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    保存系统默认
+                  </button>
+                </div>
+                <textarea
+                  value={journalKbSystemContent}
+                  onChange={(event) => setJournalKbSystemContent(event.target.value)}
+                  rows={10}
+                  className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs font-mono text-gray-700 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                />
+              </div>
+            )}
+          </div>
+          {sessionState?.last_agent_error && (
+            <AgentErrorCard error={sessionState.last_agent_error} />
+          )}
+          {sessionState?.last_runtime_notice && (
+            <AgentRuntimeNoticeCard notice={sessionState.last_runtime_notice} />
+          )}
+          {sessionState?.last_stop_summary && (
+            <AgentRuntimeNoticeCard notice={sessionState.last_stop_summary} />
+          )}
+          {sessionState?.last_scan_summary && (
+            <AgentScanSummaryCard summary={sessionState.last_scan_summary} />
+          )}
+          {sessionState?.last_analysis_summary && (
+          <div className="rounded-lg border border-violet-200 bg-violet-50/70 p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-violet-900">最近一次批量分析</div>
+                <div className="mt-1 text-sm text-violet-800">
+                  {sessionState.last_analysis_summary.topic || '未命名分析'}，共覆盖 {sessionState.last_analysis_summary.count || 0} 篇
+                </div>
+              </div>
+            </div>
+            {(sessionState.last_analysis_summary.clusters || []).length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(sessionState.last_analysis_summary.clusters || []).map((cluster, index) => (
+                  <span key={`${cluster.label || index}-${index}`} className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-xs text-violet-800">
+                    {cluster.label || '未命名主题'} · {cluster.count || 0}
+                  </span>
+                ))}
+              </div>
+            )}
+            {(sessionState.last_analysis_summary.priority_candidates || []).length > 0 && (
+              <div className="mt-3 space-y-2">
+                {(sessionState.last_analysis_summary.priority_candidates || []).slice(0, 5).map((item, index) => (
+                  <div key={`${item.entry_id || item.title || index}-${index}`} className="rounded-md border border-violet-100 bg-white p-3 text-sm text-gray-800">
+                    <div className="font-medium text-violet-900">{item.title || `候选文献 ${index + 1}`}</div>
+                    <div className="mt-1 text-xs text-gray-600">
+                      {[item.journal, item.year ? `${item.year}` : '', typeof item.priority_score === 'number' ? `优先分 ${item.priority_score.toFixed(3)}` : '']
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </div>
+                    {(item.local_rule_reasons || []).length > 0 && (
+                      <div className="mt-2 text-xs text-gray-700">{(item.local_rule_reasons || []).join('；')}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          )}
+          {sessionState?.analysis_cache_summary && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-emerald-900">当前分析缓存</div>
+                <div className="mt-1 text-sm text-emerald-800">
+                  {sessionState.analysis_cache_summary.topic || '未命名缓存'}，当前保留 {sessionState.analysis_cache_summary.entry_count || 0} 篇
+                </div>
+              </div>
+              <span className="rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs font-medium text-emerald-700">
+                {sessionState.analysis_cache_summary.source_scope || 'analysis_cache'}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-emerald-700">
+              {sessionState.analysis_cache_summary.cache_id && (
+                <span className="rounded-full border border-emerald-200 bg-white px-2.5 py-1">
+                  cache: {sessionState.analysis_cache_summary.cache_id}
+                </span>
+              )}
+              {sessionState.analysis_cache_summary.reused_from_cache_id && (
+                <span className="rounded-full border border-emerald-200 bg-white px-2.5 py-1">
+                  复用自: {sessionState.analysis_cache_summary.reused_from_cache_id}
+                </span>
+              )}
+              {sessionState.analysis_cache_summary.parent_cache_id && (
+                <span className="rounded-full border border-emerald-200 bg-white px-2.5 py-1">
+                  父缓存: {sessionState.analysis_cache_summary.parent_cache_id}
+                </span>
+              )}
+            </div>
+          </div>
+          )}
+          {Array.isArray(sessionState?.working_notes) && sessionState.working_notes.length > 0 && (
+          <div className="rounded-lg border border-fuchsia-200 bg-fuchsia-50/70 p-4 shadow-sm">
+            <div className="text-sm font-semibold text-fuchsia-900">最近工作笔记</div>
+            <div className="mt-3 space-y-2">
+              {sessionState.working_notes.slice(-4).reverse().map((note, index) => (
+                <div key={`${note.topic || 'note'}-${note.batch_index || index}-${index}`} className="rounded-md border border-fuchsia-100 bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-fuchsia-900">
+                      {note.topic || '批量分析'} · 第 {note.batch_index || index + 1} 批
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {note.processed_count || 0}/{note.total_count || 0}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-sm text-gray-700">{note.summary || '暂无摘要'}</div>
+                  {(note.top_clusters || []).length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(note.top_clusters || []).map((cluster, clusterIndex) => (
+                        <span key={`${cluster.label || clusterIndex}-${clusterIndex}`} className="rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-0.5 text-xs text-fuchsia-700">
+                          {cluster.label || '未命名主题'} · {cluster.count || 0}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          )}
+          {Array.isArray(sessionState?.recent_tool_trace) && sessionState.recent_tool_trace.length > 0 && (
+            <AgentToolTraceCard traces={sessionState.recent_tool_trace} />
+          )}
+          {sessionState?.last_result_set && (
+          <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-sky-900">当前工作记忆</div>
+                <div className="mt-1 text-sm text-sky-800">
+                  最近结果集：{sessionState.last_result_set.query_summary || '未命名结果集'}，共 {sessionState.last_result_set.count || 0} 篇
+                </div>
+              </div>
+              {Boolean(sessionState.active_task_frame?.intent) && (
+                <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5 text-xs font-medium text-sky-700">
+                  intent: {String(sessionState.active_task_frame?.intent || '')}
+                </span>
+              )}
+            </div>
+            {(sessionState.last_result_set.entries || []).length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(sessionState.last_result_set.entries || []).map((entry, index) => (
+                  <span key={`${entry.entry_id || index}-${index}`} className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs text-sky-800">
+                    {entry.title || entry.entry_id || `文献 ${index + 1}`}
+                  </span>
+                ))}
+              </div>
+            )}
+            {(sessionState.last_evidence_pack || sessionState.budget_snapshot) && (
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <div className="rounded-md border border-sky-100 bg-white p-3">
+                  <div className="text-xs font-semibold text-gray-500">最近证据包</div>
+                  <div className="mt-1 text-sm text-gray-800">
+                    {sessionState.last_evidence_pack?.question || '暂无'}
+                  </div>
+                </div>
+                <div className="rounded-md border border-sky-100 bg-white p-3">
+                  <div className="text-xs font-semibold text-gray-500">预算快照</div>
+                  <div className="mt-1 text-xs text-gray-700">
+                    {JSON.stringify(sessionState.budget_snapshot || {}, null, 2)}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          )}
+      </div>
+      )}
+      <div className="space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">AI 文献助手</h2>
+              <p className="mt-1 text-sm text-gray-500">可检索文献库、读取精读结果、启动精读任务并整理对比综述。</p>
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => void handleRejectProposal()}
-                disabled={confirmingProposal}
-                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                onClick={() => setJournalKbPanelOpen((prev) => !prev)}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  journalKbPanelOpen
+                    ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
               >
-                取消
+                {journalKbPanelOpen ? '收起顶刊名录' : '顶刊名录'}
               </button>
+              {events.length > 0 && !exportMode && (
+                <button
+                  onClick={() => {
+                    setExportMode(true)
+                    setSelectedIds(new Set(events.map((e) => e.id)))
+                  }}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  导出对话
+                </button>
+              )}
+              {exportMode && (
+                <>
+                  <button
+                    onClick={() => { setExportMode(false); setSelectedIds(new Set()) }}
+                    className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={() => selectedIds.size === events.length ? deselectAll() : selectAll()}
+                    className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                  >
+                    {selectedIds.size === events.length ? '取消全选' : '全选'}
+                  </button>
+                  <button
+                    onClick={exportSelected}
+                    disabled={selectedIds.size === 0}
+                    className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    导出 ({selectedIds.size})
+                  </button>
+                </>
+              )}
+              {!exportMode && (
+                <button
+                  onClick={() => {
+                    const idToArchive = sessionId
+                    setEvents([])
+                    setHistory([])
+                    setError('')
+                    setSessionId('')
+                    setSessionState(null)
+                    setPendingProposal(null)
+                    if (idToArchive) {
+                      fetch(`/api/agent/sessions/${idToArchive}/archive`, { method: 'PATCH' }).catch(() => {})
+                    }
+                  }}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  清空会话
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {events.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+              还没有会话。你可以让它先查文献、再启动精读，或者基于已有精读结果写综述。
+            </div>
+          ) : (
+            <AgentEventList
+              events={events}
+              selectable={exportMode}
+              selectedIds={selectedIds}
+              onToggle={toggleSelect}
+            />
+          )}
+
+          {pendingProposal && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-amber-900">需要确认后才会执行</div>
+                  <div className="mt-1 text-sm text-amber-800">
+                    {pendingProposal.action_type === 'import_folder_and_start_reading'
+                      ? '将导入文件夹中的候选文献并启动精读任务。'
+                      : pendingProposal.action_type === 'start_batch_reading'
+                        ? '将启动批量精读任务。'
+                        : '将启动精读任务。'}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void handleRejectProposal()}
+                    disabled={confirmingProposal}
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={() => void handleConfirmProposal()}
+                    disabled={confirmingProposal}
+                    className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {confirmingProposal ? '执行中...' : '确认执行'}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3">
+                <AgentEventBody
+                  event={{
+                    id: pendingProposal.proposal_id,
+                    type: 'proposal',
+                    title: '执行提案',
+                    body: JSON.stringify(pendingProposal.preview || pendingProposal, null, 2),
+                    payload: pendingProposal.preview || pendingProposal,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div ref={eventsEndRef} />
+
+          <div className="sticky bottom-0 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+            <div className="flex gap-2">
+              <textarea
+                ref={inputRef}
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault()
+                    void sendMessage()
+                  }
+                }}
+                className="min-h-20 flex-1 resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                placeholder="例如：列出我库里制度经济学相关且已精读的文献，并基于精读结果写一段对比综述。（Ctrl+Enter 发送）"
+              />
               <button
-                onClick={() => void handleConfirmProposal()}
-                disabled={confirmingProposal}
-                className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                onClick={() => void sendMessage()}
+                disabled={loading || !message.trim()}
+                className="h-20 self-end rounded-lg bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {confirmingProposal ? '执行中...' : '确认执行'}
+                {loading ? '处理中...' : '发送'}
               </button>
             </div>
           </div>
-          <div className="mt-3">
-            <AgentEventBody
-              event={{
-                id: pendingProposal.proposal_id,
-                type: 'proposal',
-                title: '执行提案',
-                body: JSON.stringify(pendingProposal.preview || pendingProposal, null, 2),
-                payload: pendingProposal.preview || pendingProposal,
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      <div ref={eventsEndRef} />
-
-      <div className="sticky bottom-0 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
-        <div className="flex gap-2">
-          <textarea
-            ref={inputRef}
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault()
-                void sendMessage()
-              }
-            }}
-            className="min-h-20 flex-1 resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-            placeholder="例如：列出我库里制度经济学相关且已精读的文献，并基于精读结果写一段对比综述。（Ctrl+Enter 发送）"
-          />
-          <button
-            onClick={() => void sendMessage()}
-            disabled={loading || !message.trim()}
-            className="h-20 self-end rounded-lg bg-emerald-600 px-5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? '处理中...' : '发送'}
-          </button>
         </div>
       </div>
     </div>

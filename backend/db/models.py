@@ -296,7 +296,7 @@ class PromptTemplate(Base):
         ),
         CheckConstraint(
             "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template',"
-            "'translation','library_chat','card_note','ref_format')",
+            "'translation','library_chat','journal_kb','card_note','ref_format')",
             name="ck_prompt_templates_type",
         ),
         UniqueConstraint(

@@ -25,6 +25,7 @@ TEMP_DIR = tempfile.mkdtemp(prefix="dra-library-tests-")
 TEST_DB_PATH = Path(TEMP_DIR) / "test_library.sqlite"
 
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB_PATH.as_posix()}"
+os.environ["UPLOAD_ROOT_DIR"] = str((Path(TEMP_DIR) / "_uploads").resolve())
 os.environ.setdefault("DEPLOY_SECRET", "test-deploy-secret")
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret")
 os.environ.setdefault("JWT_ALGORITHM", "HS256")
@@ -38,6 +39,7 @@ from db import Base, SYNC_DATABASE_URL, engine as async_engine  # noqa: E402
 from db.models import Artifact, BibEntry, File, Job, JobBibEntry, User  # noqa: E402
 from routers import auth as auth_router  # noqa: E402
 from routers import library as library_router  # noqa: E402
+from upload_storage import build_storage_path  # noqa: E402
 
 
 class LibraryRouterTests(unittest.TestCase):
@@ -54,7 +56,6 @@ class LibraryRouterTests(unittest.TestCase):
         cls.client.close()
         cls.sync_engine.dispose()
         asyncio.run(async_engine.dispose())
-        shutil.rmtree(TEMP_DIR, ignore_errors=True)
 
     def setUp(self) -> None:
         Base.metadata.drop_all(self.sync_engine)
@@ -79,6 +80,8 @@ class LibraryRouterTests(unittest.TestCase):
         file_id = str(uuid.uuid4())
         bib_id = str(uuid.uuid4())
         job_id = str(uuid.uuid4())
+        file_path, storage_path = build_storage_path(owner_user_id, file_id, ".pdf")
+        file_path.write_bytes(b"%PDF-1.4 sample")
         with Session(self.sync_engine) as session:
             session.add(
                 File(
@@ -86,9 +89,9 @@ class LibraryRouterTests(unittest.TestCase):
                     owner_user_id=owner_user_id,
                     original_name="sample.pdf",
                     file_type="pdf",
-                    storage_path=f"_uploads/{owner_user_id}/{file_id}.pdf",
+                    storage_path=storage_path,
                     size_bytes=42,
-                    md5=f"md5-{owner_user_id}",
+                    md5=f"md5-{owner_user_id}-{title}",
                     batch_id=None,
                 )
             )
@@ -230,6 +233,23 @@ class LibraryRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(len(response.json()), 1)
 
+    def test_library_page_returns_total_and_slice(self) -> None:
+        alice_id = self.register("alice")
+        for index in range(3):
+            self.create_entry_with_timeline(alice_id, title=f"Paper {index}")
+
+        response = self.client.get(
+            "/api/library/entries/page?page=1&page_size=2",
+            headers=self.login_headers("alice"),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["total"], 3)
+        self.assertEqual(body["page"], 1)
+        self.assertEqual(body["page_size"], 2)
+        self.assertTrue(body["has_more"])
+        self.assertEqual(len(body["items"]), 2)
+
     def test_library_detail_includes_timeline_and_artifacts(self) -> None:
         alice_id = self.register("alice")
         bib_id, job_id = self.create_entry_with_timeline(alice_id)
@@ -246,6 +266,27 @@ class LibraryRouterTests(unittest.TestCase):
         self.assertEqual(body["filter_evaluations"][0]["score"], 92.5)
         self.assertEqual(body["filter_evaluations"][0]["reason"], "high relevance")
         self.assertEqual(body["filter_evaluations"][0]["abstract_translation"], "这是摘要翻译")
+
+    def test_library_detail_clears_missing_source_file_reference(self) -> None:
+        alice_id = self.register("alice")
+        bib_id, _job_id = self.create_entry_with_timeline(alice_id)
+        with Session(self.sync_engine) as session:
+            entry = session.execute(select(BibEntry).where(BibEntry.id == bib_id)).scalar_one()
+            file_record = session.execute(select(File).where(File.id == entry.source_file_id)).scalar_one()
+            missing_path = Path(file_record.storage_path)
+            if not missing_path.is_absolute():
+                missing_path = PROJECT_ROOT / missing_path
+            missing_path.unlink()
+
+        response = self.client.get(f"/api/library/entries/{bib_id}", headers=self.login_headers("alice"))
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertIsNone(body["source_file_id"])
+        self.assertIsNone(body["source_file_name"])
+
+        with Session(self.sync_engine) as session:
+            entry = session.execute(select(BibEntry).where(BibEntry.id == bib_id)).scalar_one()
+            self.assertIsNone(entry.source_file_id)
 
     def test_library_update_allows_editing_metadata_fields(self) -> None:
         alice_id = self.register("alice")

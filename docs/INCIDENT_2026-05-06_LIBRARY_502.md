@@ -18,7 +18,7 @@
 ### 2.1 第一步：查看后端日志
 
 ```bash
-tail -100 /tmp/fastapi.log
+tail -100 /var/log/deepreading/api.log
 ```
 
 发现关键错误：
@@ -47,8 +47,8 @@ git push origin online
 服务器手动拉取：
 
 ```bash
-cd /root/.openclaw/workspace/deep-reading-agent
-git fetch origin online && git reset --hard origin/online && bash start.sh
+cd /root/deep-reading-agent
+git fetch origin online && git reset --hard origin/online && systemctl restart deepreading-api
 ```
 
 ### 2.4 第四步：推送后仍报 502
@@ -131,49 +131,23 @@ curl -s -w "\nHTTP_CODE: %{http_code}\n" http://127.0.0.1:80/api/library/entries
 
 ### 4.1 防止 Nginx 意外停止
 
-**方案 A：添加健康检查脚本**
+**方案 A：systemd 自动恢复 + 健康检查脚本**
 
-创建 `/root/scripts/healthcheck.sh`：
+当前架构下，后端通过 `systemctl` 管理（`deepreading-api.service`），已配置 `Restart=on-failure`，进程崩溃会自动重启。
 
-```bash
-#!/bin/bash
-# 每分钟检查关键服务，自动重启
-
-# Nginx
-if ! systemctl is-active --quiet nginx; then
-    echo "[$(date)] Nginx down, restarting..." >> /tmp/healthcheck.log
-    systemctl start nginx
-fi
-
-# FastAPI
-if ! ss -tlnp | grep -q ':8000 '; then
-    echo "[$(date)] FastAPI down, restarting..." >> /tmp/healthcheck.log
-    cd /root/.openclaw/workspace/deep-reading-agent && bash start.sh
-fi
-
-# Cloudflare Tunnel
-if ! pgrep -x cloudflared > /dev/null; then
-    echo "[$(date)] Cloudflared down, restarting..." >> /tmp/healthcheck.log
-    cloudflared tunnel --config /root/.cloudflared/config.yml run &
-fi
-```
-
-添加 cron 定时任务：
+健康检查脚本 `/root/deep-reading-agent/health_check.py` 由 cron 每 5 分钟执行，检测服务状态和 API 可用性：
 
 ```bash
-chmod +x /root/scripts/healthcheck.sh
+# 设置 cron
 crontab -e
 # 添加：
-* * * * * /root/scripts/healthcheck.sh
+*/5 * * * * /root/deep-reading-agent/venv/bin/python /root/deep-reading-agent/health_check.py >> /var/log/deepreading/healthcheck.log 2>&1
 ```
 
-**方案 B：在 `start.sh` 中添加 Nginx 启动**
-
-确保每次部署重启时，Nginx 也一起启动：
+**方案 B：确保 Nginx 开机自启**
 
 ```bash
-# 在 start.sh 末尾添加
-systemctl start nginx 2>/dev/null || true
+systemctl enable nginx
 ```
 
 ### 4.2 防止 SQL 排序 bug
@@ -193,7 +167,7 @@ systemctl start nginx 2>/dev/null || true
 | 外部可访问性 | 外部定时 curl 域名 | 非 200 超过 2 分钟 |
 | Nginx 状态 | systemctl is-active | inactive |
 | FastAPI 端口 | ss -tlnp | 端口不监听 |
-| 后端日志错误 | grep error fastapi.log | 出现 OperationalError |
+| 后端日志错误 | grep error /var/log/deepreading/api.log | 出现 OperationalError |
 
 ---
 

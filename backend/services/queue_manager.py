@@ -75,6 +75,14 @@ class TaskQueueManager:
             del self._running[task_id]
             logger.info(f"Task {task_id} completed, duration: {duration}s")
 
+    def remove_queued(self, task_id: str) -> bool:
+        original_len = len(self._queue)
+        self._queue = [entry for entry in self._queue if entry["task_id"] != task_id]
+        removed = len(self._queue) != original_len
+        if removed:
+            logger.info("Task %s removed from queue", task_id)
+        return removed
+
     def _get_position(self, task_id: str) -> int:
         for i, entry in enumerate(self._queue):
             if entry["task_id"] == task_id:

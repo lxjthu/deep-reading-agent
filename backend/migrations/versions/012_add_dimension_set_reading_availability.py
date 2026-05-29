@@ -18,9 +18,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _column_exists(table_name: str, column_name: str) -> bool:
-    conn = op.get_bind()
-    rows = conn.execute(sa.text(f"PRAGMA table_info({table_name})")).fetchall()
-    return any(row[1] == column_name for row in rows)
+    inspector = sa.inspect(op.get_bind())
+    return any(column["name"] == column_name for column in inspector.get_columns(table_name))
 
 
 def upgrade() -> None:

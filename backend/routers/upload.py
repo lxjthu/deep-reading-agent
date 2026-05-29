@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 import uuid
@@ -23,6 +24,7 @@ from upload_storage import build_storage_path, get_user_upload_dir, resolve_stor
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".doc", ".docx", ".md", ".markdown"}
 SOURCE_MEDIA_TYPES = {
@@ -64,10 +66,14 @@ def detect_file_type(filename: str, sample: bytes) -> str:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的文件类型。")
 
 
-def compute_expires_at(user: User) -> datetime | None:
-    if user.role == "normal":
+def compute_expires_at_for_role(role: str) -> datetime | None:
+    if role == "normal":
         return utcnow_naive() + timedelta(hours=24)
     return None
+
+
+def compute_expires_at(user: User) -> datetime | None:
+    return compute_expires_at_for_role(user.role)
 
 
 async def persist_upload_to_temp(file: UploadFile, temp_path: Path) -> tuple[str, int, bytes]:
@@ -122,12 +128,56 @@ async def find_matching_bib_entry(db: AsyncSession, user_id: int, title: str) ->
     return None
 
 
-async def bind_uploaded_file_to_existing_bib(db: AsyncSession, user: User, record: File) -> BibEntry | None:
+def snapshot_bib_match(matched_bib: BibEntry | None) -> dict[str, str] | None:
+    if matched_bib is None:
+        return None
+    return {
+        "id": matched_bib.id,
+        "title": matched_bib.title,
+    }
+
+
+def snapshot_file_record(record: File) -> dict:
+    return {
+        "file_id": record.id,
+        "filename": record.original_name,
+        "size": record.size_bytes,
+        "type": record.file_type,
+        "storage_path": record.storage_path,
+        "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+    }
+
+
+def build_upload_response_from_snapshot(
+    record: dict,
+    *,
+    message: str,
+    deduplicated: bool,
+    matched_bib: dict[str, str] | None = None,
+) -> dict:
+    stored_file_path = resolve_storage_path(record["storage_path"])
+    return {
+        "success": True,
+        "file_id": record["file_id"],
+        "filename": record["filename"],
+        "size": record["size"],
+        "type": record["type"],
+        "storage_path": record["storage_path"],
+        "expires_at": record["expires_at"],
+        "exists": stored_file_path.exists(),
+        "deduplicated": deduplicated,
+        "message": message,
+        "matched_bib_entry_id": matched_bib["id"] if matched_bib else None,
+        "matched_bib_title": matched_bib["title"] if matched_bib else None,
+    }
+
+
+async def bind_uploaded_file_to_existing_bib(db: AsyncSession, user_id: int, record: File) -> BibEntry | None:
     if record.file_type not in {"pdf", "markdown"}:
         return None
 
     title = Path(record.original_name or "").stem
-    matched = await find_matching_bib_entry(db, user.id, title)
+    matched = await find_matching_bib_entry(db, user_id, title)
     if matched is None:
         return None
 
@@ -141,7 +191,13 @@ async def bind_uploaded_file_to_existing_bib(db: AsyncSession, user: User, recor
     return matched
 
 
-def build_upload_response(record: File, *, message: str, deduplicated: bool, matched_bib: BibEntry | None = None) -> dict:
+def build_upload_response(
+    record: File,
+    *,
+    message: str,
+    deduplicated: bool,
+    matched_bib: dict[str, str] | None = None,
+) -> dict:
     stored_file_path = resolve_storage_path(record.storage_path)
     return {
         "success": True,
@@ -154,8 +210,8 @@ def build_upload_response(record: File, *, message: str, deduplicated: bool, mat
         "exists": stored_file_path.exists(),
         "deduplicated": deduplicated,
         "message": message,
-        "matched_bib_entry_id": matched_bib.id if matched_bib else None,
-        "matched_bib_title": matched_bib.title if matched_bib else None,
+        "matched_bib_entry_id": matched_bib["id"] if matched_bib else None,
+        "matched_bib_title": matched_bib["title"] if matched_bib else None,
     }
 
 
@@ -166,6 +222,8 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a file into the authenticated user's isolated directory."""
+    user_id = user.id
+    user_role = user.role
     original_name = (file.filename or "").strip()
     if not original_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少文件名。")
@@ -177,7 +235,7 @@ async def upload_file(
             detail=f"Unsupported file type: {file_ext}. Allowed: {sorted(ALLOWED_EXTENSIONS)}",
         )
 
-    user_dir = get_user_upload_dir(user.id)
+    user_dir = get_user_upload_dir(user_id)
     temp_path = user_dir / f".{uuid.uuid4()}.uploading"
     final_path: Path | None = None
 
@@ -187,37 +245,52 @@ async def upload_file(
 
         existing = (
             await db.execute(
-                select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash)
+                select(File).where(File.owner_user_id == user_id, File.md5 == md5_hash)
             )
         ).scalar_one_or_none()
         if existing is not None:
-            matched_bib = await bind_uploaded_file_to_existing_bib(db, user, existing)
+            matched_bib = await bind_uploaded_file_to_existing_bib(db, user_id, existing)
+            matched_bib_snapshot = snapshot_bib_match(matched_bib)
+            existing_snapshot = snapshot_file_record(existing)
             await db.commit()
             if temp_path.exists():
                 temp_path.unlink()
-            return build_upload_response(
-                existing,
+            return build_upload_response_from_snapshot(
+                existing_snapshot,
                 message="文件已存在，返回已有记录。",
                 deduplicated=True,
-                matched_bib=matched_bib,
+                matched_bib=matched_bib_snapshot,
             )
 
         file_id = str(uuid.uuid4())
-        final_path, storage_path = build_storage_path(user.id, file_id, file_ext)
+        final_path, storage_path = build_storage_path(user_id, file_id, file_ext)
         shutil.move(str(temp_path), str(final_path))
+        expires_at = compute_expires_at_for_role(user_role)
 
         record = File(
             id=file_id,
-            owner_user_id=user.id,
+            owner_user_id=user_id,
             original_name=original_name,
             file_type=file_type,
             storage_path=storage_path,
             size_bytes=size_bytes,
             md5=md5_hash,
-            expires_at=compute_expires_at(user),
+            expires_at=expires_at,
         )
         db.add(record)
-        matched_bib = await bind_uploaded_file_to_existing_bib(db, user, record)
+        # PostgreSQL enforces the FK immediately, so the new file row must exist
+        # before we point a matched bib entry at record.id.
+        await db.flush()
+        matched_bib = await bind_uploaded_file_to_existing_bib(db, user_id, record)
+        matched_bib_snapshot = snapshot_bib_match(matched_bib)
+        record_snapshot = {
+            "file_id": file_id,
+            "filename": original_name,
+            "size": size_bytes,
+            "type": file_type,
+            "storage_path": storage_path,
+            "expires_at": expires_at.isoformat() if expires_at else None,
+        }
 
         try:
             await db.commit()
@@ -225,22 +298,26 @@ async def upload_file(
             await db.rollback()
             existing = (
                 await db.execute(
-                    select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash)
+                    select(File).where(File.owner_user_id == user_id, File.md5 == md5_hash)
                 )
             ).scalar_one_or_none()
             if existing is None:
                 raise
             if final_path.exists():
                 final_path.unlink()
-            return build_upload_response(
-                existing,
+            return build_upload_response_from_snapshot(
+                snapshot_file_record(existing),
                 message="文件已存在，返回已有记录。",
                 deduplicated=True,
-                matched_bib=matched_bib,
+                matched_bib=matched_bib_snapshot,
             )
 
-        await db.refresh(record)
-        return build_upload_response(record, message="上传成功。", deduplicated=False, matched_bib=matched_bib)
+        return build_upload_response_from_snapshot(
+            record_snapshot,
+            message="上传成功。",
+            deduplicated=False,
+            matched_bib=matched_bib_snapshot,
+        )
     except HTTPException:
         if temp_path.exists():
             temp_path.unlink()
@@ -250,6 +327,7 @@ async def upload_file(
             temp_path.unlink()
         if final_path is not None and final_path.exists():
             final_path.unlink()
+        logger.exception("Upload failed for user=%s filename=%s", user_id, original_name)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload failed: {exc}",

@@ -21,13 +21,13 @@ from typing import Optional
 import httpx
 import json_repair
 import pdfplumber
-from openai import APITimeoutError, OpenAI
+from openai import APITimeoutError
 from backend.utils.api_key import validate_deepseek_key
+from backend.utils.llm_provider import create_openai_client, model_for_api_key
 
 logger = logging.getLogger(__name__)
 
 MODEL = "deepseek-v4-flash"
-BASE_URL = "https://api.deepseek.com"
 MAX_RETRIES = 3
 DEFAULT_MAX_TOKENS = 16384
 
@@ -294,16 +294,16 @@ def call_deepseek_json(
     api_key: Optional[str] = None,
 ) -> Optional[dict]:
     api_key = validate_deepseek_key(api_key)
-    client = OpenAI(
-        api_key=api_key,
-        base_url=BASE_URL,
+    client = create_openai_client(
+        api_key,
         timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
     )
+    model = model_for_api_key(api_key, MODEL)
 
     for attempt in range(MAX_RETRIES):
         try:
             resp = client.chat.completions.create(
-                model=MODEL,
+                model=model,
                 extra_body={"thinking": {"type": "disabled"}},
                 messages=messages,
                 response_format={"type": "json_object"},

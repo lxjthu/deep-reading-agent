@@ -49,7 +49,7 @@
 |------|----------|----------|
 | **Uvicorn Workers** | 🟡 中 | `--workers 1` 只有 1 个进程，所有请求共享同一进程 |
 | **全局 tasks 字典** | 🟡 中 | 内存中的全局状态，进程重启后丢失 |
-| **SQLite 并发** | 🔴 高 | SQLite 是单文件数据库，写操作会锁库 |
+| **SQLite 并发** | 🔴 高 | ~~SQLite 是单文件数据库，写操作会锁库~~ 已迁移到 PostgreSQL |
 | **DeepSeek API 限流** | 🟡 中 | 共用 API Key 可能触发限流 |
 | **内存占用** | 🟡 中 | 多个大 PDF 同时处理可能耗尽内存 |
 | **磁盘 I/O** | 🟡 中 | 多个任务同时读写文件可能产生竞争 |
@@ -260,7 +260,7 @@ body_text = "\n".join(body_parts)
 
 | 优化项 | 实施难度 | 效果 |
 |--------|----------|------|
-| 迁移到 PostgreSQL | 🔴 高 | 彻底解决 SQLite 并发限制 |
+| 迁移到 PostgreSQL | 🔴 高 | 彻底解决 SQLite 并发限制 | ✅ 已完成 |
 | 分布式任务队列（Celery） | 🔴 高 | 支持大规模并发 |
 | 微服务架构 | 🔴 高 | 完全解耦各模块 |
 
@@ -268,7 +268,9 @@ body_text = "\n".join(body_parts)
 
 ## 8. 立即可执行的优化
 
-### 8.1 启用 SQLite WAL 模式
+### 8.1 启用 SQLite WAL 模式（仅适用本地开发）
+
+> **注意**：生产环境已迁移到 PostgreSQL，此优化仅适用于本地 SQLite 开发环境。
 
 ```python
 # 在数据库连接时添加
@@ -319,10 +321,10 @@ async def start_reading(...):
 
 1. **API Key 配置**：建议不同用户使用不同的 DeepSeek API Key，避免限流
 2. **任务监控**：关注服务器内存和 CPU 使用情况
-3. **数据库优化**：启用 SQLite WAL 模式提高并发能力
+3. **数据库优化**：~~启用 SQLite WAL 模式提高并发能力~~ 生产环境已使用 PostgreSQL
 4. **任务限制**：添加并发任务数量限制，防止系统过载
 
 如果用户量增长到 5+ 并发用户，建议考虑：
 - 增加 Uvicorn workers（需要解决 tasks 状态共享问题）
-- 迁移到 PostgreSQL
+- ~~迁移到 PostgreSQL~~ ✅ 已完成
 - 使用 Redis 作为任务队列

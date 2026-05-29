@@ -428,6 +428,7 @@
 |---|---|---|
 | `reapply_user_retention(...)` | 重算用户保留期和过期时间 | 调整角色后过期策略不对 |
 | `cleanup_expired(...)` | 清理过期文件、任务和产物 | normal 用户数据未按 24h 清理 |
+| `cleanup_normal_user_data(...)` | 清空 normal 用户工作区数据，并先断开跨用户引用再删除 | 零点清理未生效、PostgreSQL 外键阻塞 |
 
 ## 2.19 `new_architecture/conversation_engine.py`
 

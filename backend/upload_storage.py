@@ -49,6 +49,19 @@ def resolve_storage_path(storage_path: str) -> Path:
     return PROJECT_ROOT / path
 
 
+def storage_path_exists(storage_path: str | None) -> bool:
+    if not storage_path:
+        return False
+    path = resolve_storage_path(storage_path)
+    return path.exists() and path.is_file()
+
+
+def file_record_exists(record: File | None) -> bool:
+    if record is None:
+        return False
+    return storage_path_exists(record.storage_path)
+
+
 def lookup_path_by_file_id(file_id: str) -> Optional[Path]:
     """Resolve the path for a file_id, preferring DB storage_path."""
     engine = create_engine(SYNC_DATABASE_URL)

@@ -303,6 +303,7 @@
 
 - `title / authors_json / year / journal / doi`
 - `abstract / abstract_cn`（英文摘要 / 中文翻译摘要）
+- `markdown_source_file_id`（Markdown 来源文件 ID）
 - `owner_user_id`
 - `source_file_id`
 - `dedup_key`
@@ -323,6 +324,8 @@
 - `compare`
 - `synthesis`
 - `translate_abstracts`
+- `library_chat`
+- `ref_format`
 
 ### 4.5 `job_bib_entries`
 
@@ -352,6 +355,8 @@
 - `reading_final`
 - `compare_md`
 - `synthesis_md`
+- `library_chat_md`
+- `ref_format_md`
 
 ### 4.7 `reading_items`
 
@@ -457,6 +462,12 @@
 - `JobBibEntry`
 - `ReadingItem`
 - `Artifact`
+- `RefFormatPreset`
+- `Annotation`
+- `CardNote`
+- `ReadingItemEdit`
+- `UserFeedback`
+- `AgentSession`
 
 ## 5.4 认证：`backend/routers/auth.py`
 
@@ -1008,14 +1019,19 @@ export_20260506_username.dra
 职责：
 
 - 管理员管理用户与邀请码
-- 定时清理过期文件与记录
+- 清理普通用户 24h 工作区数据
+- 提供独立的零点清理执行入口
 
 关键函数：
 
 - `cleanup_expired(...)`
   - 清理过期数据
+- `cleanup_normal_user_data(...)`
+  - 删除 normal 用户工作区数据，先清跨用户外键引用，再提交数据库，最后删磁盘文件
 - `reapply_user_retention(...)`
   - 重算用户保留期
+- `scripts.run_cleanup_normal_users.main()`
+  - 独立命令行入口，供 systemd timer/手工运维执行；默认替代应用进程内调度
 
 ## 6. 前端代码结构
 

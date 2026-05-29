@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-27
+> 最后更新：2026-05-29
 
 ---
 
@@ -37,6 +37,7 @@
 | [TRANSLATION_FULLTEXT_PDF_RESTATE_PLAN.md](TRANSLATION_FULLTEXT_PDF_RESTATE_PLAN.md) | 方案 | PDF 全文不分片中文重述翻译改造计划 | 调整全文翻译提示词与 PDF 翻译管线时 |
 | [CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md](CNKI_PARSER_AND_REVERSE_MATCH_DESIGN.md) | 设计 | CNKI/WoS 解析与反向匹配 | 理解题录解析和文件绑定逻辑 |
 | [SYNTHESIS_CURRENT_DESIGN.md](SYNTHESIS_CURRENT_DESIGN.md) | 设计 | 当前综述实现设计 | 了解对比综述的当前实现 |
+| [POSTGRESQL_DRA_IMPORT_EXPORT_REWRITE_PLAN.md](POSTGRESQL_DRA_IMPORT_EXPORT_REWRITE_PLAN.md) | 方案 | PostgreSQL 导向的 `.dra` 导入导出重构方案（覆盖/追加、旧 SQLite 包兼容） | 重构用户数据导入导出、排查 `.dra` 兼容与冲突策略时 |
 
 ---
 
@@ -44,12 +45,14 @@
 
 | 文档 | 类型 | 内容 | 何时查阅 |
 |------|------|------|----------|
-| [DEPLOYMENT_ARCHITECTURE.md](DEPLOYMENT_ARCHITECTURE.md) | 部署 | 本地→GitHub→服务器部署链路 | 部署流程、Webhook 配置 |
+| [DEPLOYMENT_ARCHITECTURE.md](DEPLOYMENT_ARCHITECTURE.md) | 部署 | 本地→GitHub→服务器部署链路（PostgreSQL + systemd） | 部署流程、服务器配置 |
 | [NEW_SERVER_SQL_MAINTENANCE.md](NEW_SERVER_SQL_MAINTENANCE.md) | 部署/运维 | 新服务器 `8.162.14.154:18080`、SQL 数据库、专用分支和手动部署维护指南 | 维护新服务器、部署本分支、排查 SQL 数据库和日志路径 |
 | [MANUAL_DEPLOY_AFTER_CODE_CHANGES.md](MANUAL_DEPLOY_AFTER_CODE_CHANGES.md) | 部署/运维 | 每次改完代码后，上传到 `8.162.14.154:18080`、迁移、重启和验证的手动 Runbook | 手动上线代码、前端构建、迁移和排查重启问题 |
-| [DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md](DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md) | 部署 | 数据库部署与迁移指南 | 服务器数据库迁移 |
+| [PREDEPLOY_MANUAL_DEPLOY_AND_DB_VERIFICATION_CHECKLIST.md](PREDEPLOY_MANUAL_DEPLOY_AND_DB_VERIFICATION_CHECKLIST.md) | 清单/运维 | 上线前手动部署与数据库验证 checklist，聚焦 PostgreSQL 目标库、systemd、静态资源与业务验收 | 真正上线前逐项勾选，避免 Alembic 跑错库、前端未覆盖、业务接口假阳性 |
+| [DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md](DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md) | 部署 | 数据库部署与迁移指南（当前以 SQLite 本地开发为主描述，生产已迁移至 PostgreSQL） | 服务器数据库迁移 |
 | [OPS_HEALTHCHECK_GUIDE.md](OPS_HEALTHCHECK_GUIDE.md) | 运维 | 服务器健康检查与自动恢复 | 线上故障排查 |
 | [TROUBLESHOOTING_SERVER_ERRORS.md](TROUBLESHOOTING_SERVER_ERRORS.md) | 排错 | 服务器报错排查记录（含修复方案） | **线上报错排查首选**：500错误、401错误、SQL错误等 |
+| [JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md](JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md) | 复盘/经验教训 | AI 助手顶刊名录改动引发的迁移与部署踩坑总结 | 新增 prompt type、CHECK 约束、前端 `dist` 覆盖、Alembic/SQLite/PostgreSQL 环境错配排查 |
 | [PACKAGING_DOWNLOAD_FILTER_REPORT_BUG.md](PACKAGING_DOWNLOAD_FILTER_REPORT_BUG.md) | 排错/修复 | 打包版产物下载、参考文献引用详情、模板市场 AI 生成等问题记录 | 排查 Windows 打包版和模板市场生成链路问题 |
 | [TWO_COLUMN_PDF_FIX.md](TWO_COLUMN_PDF_FIX.md) | 修复 | 双栏 PDF 参考文献提取修复（列感知文本提取） | 双栏论文参考文献提取不全 |
 | [MIGRATION_PLAN_10PLUS_USERS.md](MIGRATION_PLAN_10PLUS_USERS.md) | 方案 | 10+ 并发用户迁移方案（含 SQLite → PostgreSQL 迁移 Runbook） | 并发扩容规划、后端数据库迁移 |
@@ -79,7 +82,8 @@
 | [CHUNKED_DATA_IMPORT_IMPL.md](CHUNKED_DATA_IMPORT_IMPL.md) | 实现 | 分片上传导入（.dra 大文件分片上传协议） | 理解分片导入三阶段流程、API 设计和前端实现 |
 | [LIBRARY_AI_CHAT_IMPL.md](LIBRARY_AI_CHAT_IMPL.md) | 实现 | 文献库 AI 多轮查询、标签确认写库、标签搜索筛选和逐篇 AI 点评 | 维护文献库 AI 助手、结果联动和点评链路 |
 | [AGENT_ASSISTANT_IMPL.md](AGENT_ASSISTANT_IMPL.md) | 实现 | AI 文献助手 tool calling、input 文件夹白名单、文件夹扫描、文献库对比、批量精读编排和前端 JSON HTML 展示 | 升级 AI 助手、Agent 工具、文件夹导入、持久会话和执行确认时 |
-| [RESEARCH_AGENT_UPGRADE_PLAN.md](RESEARCH_AGENT_UPGRADE_PLAN.md) | 方案 | 研究助手智能体升级方案：分级知识库检索、RQ/FTS 非向量检索、全 API 工具能力矩阵、CNKI/英文原文/互联网检索授权策略、DeepSeek/MiMo tool calling 测试报告 | 规划下一代数据库驱动研究智能体、扩展 AI 助手工具和联网检索能力时 |
+| [RESEARCH_AGENT_UPGRADE_PLAN.md](RESEARCH_AGENT_UPGRADE_PLAN.md) | 方案 | 研究助手智能体整改总方案（重写版）：以 runtime-first 为核心，覆盖 Task Frame、状态机、Sufficiency、结构化工作记忆、预算治理、联网授权与分期路线图 | 规划下一代数据库驱动研究智能体、修复 AI 助手“听不懂/幻觉/空转/联网失控”等问题时 |
+| [RESEARCH_AGENT_IMPLEMENTATION_TASKLIST.md](RESEARCH_AGENT_IMPLEMENTATION_TASKLIST.md) | 方案/任务清单 | Research Agent 整改实施任务拆解：按 P0/P1/P2、文件、模块、测试与验收标准组织的执行清单 | 准备真正开工实施 Research Agent 整改、拆分任务和排期时 |
 | [AGENT_SESSION_CONFIRMATION_UI_PLAN.md](AGENT_SESSION_CONFIRMATION_UI_PLAN.md) | 方案 | AI 文献助手持久会话、agent_sessions/agent_messages、执行前确认、导入/精读确认弹窗和结果 UI 改造规划 | 实施可靠多轮对话、执行确认和 JSON 页面美化前 |
 | [TESTSET_AND_P2_PLAN.md](TESTSET_AND_P2_PLAN.md) | 方案 | 测试集与 P2 规划 | 测试相关规划 |
 

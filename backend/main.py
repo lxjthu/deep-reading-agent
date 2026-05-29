@@ -11,10 +11,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 env_path = os.environ.get('DEEP_READING_ENV', os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 load_dotenv(env_path)
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,6 +61,11 @@ async def _recover_hanging_jobs() -> None:
             print(f"[startup] Recovered {result.rowcount} hanging jobs (pending/running -> failed)")
 
 
+def _in_process_cleanup_scheduler_enabled() -> bool:
+    value = os.getenv("ENABLE_IN_PROCESS_CLEANUP_SCHEDULER", "0")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
@@ -89,19 +94,25 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         print(f"[job-recovery] skipped: {exc}")
 
-    scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
-    scheduler.add_job(
-        cleanup_normal_user_data,
-        "cron",
-        hour=0,
-        minute=0,
-        id="cleanup-normal-users",
-        replace_existing=True,
-    )
-    scheduler.start()
+    scheduler = None
+    if _in_process_cleanup_scheduler_enabled():
+        scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
+        scheduler.add_job(
+            cleanup_normal_user_data,
+            "cron",
+            hour=0,
+            minute=0,
+            id="cleanup-normal-users",
+            replace_existing=True,
+        )
+        scheduler.start()
+        print("[cleanup] In-process scheduler enabled via ENABLE_IN_PROCESS_CLEANUP_SCHEDULER")
+    else:
+        print("[cleanup] In-process scheduler disabled; use the standalone cleanup runner + systemd timer")
     app.state.cleanup_scheduler = scheduler
     yield
-    scheduler.shutdown(wait=False)
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
     print("[shutdown] Deep Reading Agent API shutting down...")
 
 

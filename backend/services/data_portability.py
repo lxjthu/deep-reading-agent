@@ -10,6 +10,7 @@ import logging
 import os
 import shutil
 import tempfile
+import uuid
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -44,12 +45,15 @@ from db.models import (
     UploadBatch,
     User,
 )
-from cleanup import get_results_root
-from upload_storage import get_upload_root, resolve_storage_path
+from result_storage import get_results_root, resolve_result_path
+from upload_storage import build_storage_path, get_upload_root, resolve_storage_path
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "023"
+CURRENT_SCHEMA_VERSION = "024"
+IMPORT_MODE_APPEND = "merge_append"
+IMPORT_MODE_REPLACE = "merge_replace"
+SUPPORTED_IMPORT_MODES = {IMPORT_MODE_APPEND, IMPORT_MODE_REPLACE}
 
 # Deliberately excluded from .dra export/import:
 # - user_feedback
@@ -62,6 +66,7 @@ CURRENT_SCHEMA_VERSION = "023"
 # a dedicated anonymization/deletion flow instead of coupling it to .dra.
 
 # FK forward order for export / import
+# CRITICAL: Job must come before BibEntry because bib_entries.source_filter_job_id -> jobs.id
 EXPORT_TABLE_ORDER = [
     UploadBatch,
     File,
@@ -69,8 +74,8 @@ EXPORT_TABLE_ORDER = [
     DimensionSet,
     DimensionItem,
     RefFormatPreset,
+    Job,  # Moved before BibEntry to satisfy FK constraint
     BibEntry,
-    Job,
     BibFilterLink,
     JobBibEntry,
     ReadingItem,
@@ -380,165 +385,533 @@ async def _clear_user_data(db: AsyncSession, user_id: int) -> dict[str, int]:
     return counts
 
 
-async def _pre_delete_conflicts(
-    db: AsyncSession,
-    model: type,
-    records: list[dict],
-    pk_col: str,
-    auto_pk: bool,
+def _new_uuid_str() -> str:
+    return str(uuid.uuid4())
+
+
+def _normalize_schema_version(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    text = str(value).strip()
+    if text.startswith("0"):
+        return text
+    if text.startswith("revision:"):
+        return text.split(":", 1)[1].strip()
+    if text.startswith("0") or text.isdigit():
+        return text
+    return text
+
+
+def _ensure_supported_import_mode(mode: str) -> str:
+    normalized = (mode or IMPORT_MODE_APPEND).strip()
+    if normalized not in SUPPORTED_IMPORT_MODES:
+        raise ValueError(f"不支持的导入模式：{normalized}")
+    return normalized
+
+
+def _empty_table_stats() -> dict[str, int]:
+    return {
+        "created": 0,
+        "reused": 0,
+        "replaced": 0,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+
+def _record_table_stat(table_stats: dict[str, dict[str, int]], table_name: str, key: str) -> None:
+    table_stats.setdefault(table_name, _empty_table_stats())[key] += 1
+
+
+def _safe_extract_zip(dra_path: Path, tmp_dir: Path) -> None:
+    with zipfile.ZipFile(dra_path, "r") as zf:
+        for member in zf.infolist():
+            target_path = (tmp_dir / member.filename).resolve()
+            if not str(target_path).startswith(str(tmp_dir.resolve())):
+                raise ValueError("无效的导出包：包含不安全的压缩路径。")
+        zf.extractall(tmp_dir)
+
+
+def _load_json_records(json_path: Path) -> list[dict[str, Any]]:
+    if not json_path.exists():
+        return []
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict)]
+    raise ValueError(f"无效的 JSON 数据：{json_path.name}")
+
+
+def _remember_id_map(
+    id_map: dict[tuple[str, Any], Any],
+    table_name: str,
+    old_id: Any,
+    new_id: Any,
 ) -> None:
-    """Delete existing DB rows that would collide with export data.
+    if old_id is not None and new_id is not None:
+        id_map[(table_name, old_id)] = new_id
 
-    Three strategies, applied in order:
-    1. Non-auto PK tables: DELETE WHERE pk IN (export PKs)
-    2. Tables with UniqueConstraint: DELETE by unique column combos
-    3. Auto-PK tables: DELETE by FK column values (child rows whose
-       parent was already replaced in step 1)
-    """
-    from sqlalchemy import UniqueConstraint
 
-    # 1) PK-based delete for non-auto tables
-    if not auto_pk:
-        old_pks = [row[pk_col] for row in records if pk_col in row]
-        if old_pks:
-            await db.execute(delete(model).where(getattr(model, pk_col).in_(old_pks)))
+def _mapped_value(
+    id_map: dict[tuple[str, Any], Any],
+    table_name: str,
+    old_id: Any,
+) -> Any:
+    return id_map.get((table_name, old_id), old_id)
 
-    # 2) UniqueConstraint-based delete (junction tables etc.)
-    for constraint in model.__table__.constraints:
-        if not isinstance(constraint, UniqueConstraint):
+
+FK_REMAP_FIELDS: dict[str, dict[str, str]] = {
+    "files": {"batch_id": "upload_batches"},
+    "jobs": {"input_file_id": "files"},
+    "bib_entries": {
+        "source_filter_job_id": "jobs",
+        "source_file_id": "files",
+        "markdown_source_file_id": "files",
+    },
+    "dimension_items": {"set_id": "dimension_sets"},
+    "bib_filter_links": {
+        "bib_entry_id": "bib_entries",
+        "filter_job_id": "jobs",
+    },
+    "job_bib_entries": {
+        "job_id": "jobs",
+        "bib_entry_id": "bib_entries",
+    },
+    "reading_items": {
+        "bib_entry_id": "bib_entries",
+        "job_id": "jobs",
+    },
+    "reading_item_edits": {"reading_item_id": "reading_items"},
+    "agent_messages": {"session_id": "agent_sessions"},
+    "agent_action_proposals": {"session_id": "agent_sessions"},
+    "artifacts": {"job_id": "jobs"},
+    "card_notes": {
+        "source_bib_entry_id": "bib_entries",
+        "source_markdown_file_id": "files",
+        "source_translation_artifact_id": "artifacts",
+    },
+    "bib_references": {
+        "source_bib_entry_id": "bib_entries",
+        "source_job_id": "jobs",
+        "matched_bib_entry_id": "bib_entries",
+    },
+    "bib_reference_citations": {
+        "source_bib_entry_id": "bib_entries",
+        "bib_reference_id": "bib_references",
+        "source_job_id": "jobs",
+    },
+    "annotations": {"bib_entry_id": "bib_entries"},
+}
+
+
+def _rewrite_file_storage_path(user_id: int, file_id: str, original_name: str | None) -> str:
+    ext = Path(original_name or "file.bin").suffix or ".bin"
+    _absolute_path, storage_path = build_storage_path(user_id, file_id, ext)
+    return storage_path
+
+
+def _rewrite_artifact_storage_path(user_id: int, job_id: str | None, filename: str | None) -> str:
+    safe_filename = filename or f"artifact-{_new_uuid_str()}.bin"
+    safe_job_id = job_id or _new_uuid_str()
+    return Path(str(user_id)) / safe_job_id / safe_filename
+    # return relative path as posix string
+
+
+def _artifact_storage_path_as_posix(user_id: int, job_id: str | None, filename: str | None) -> str:
+    return _rewrite_artifact_storage_path(user_id, job_id, filename).as_posix()
+
+
+def _rewrite_card_note_storage_path(user_id: int, card_id: str) -> str:
+    return (Path(str(user_id)) / "notes" / "cards" / f"{card_id}.md").as_posix()
+
+
+def _update_existing_record(
+    obj: Any,
+    kwargs: dict[str, Any],
+    *,
+    exclude: set[str] | None = None,
+) -> None:
+    excluded = exclude or set()
+    for key, value in kwargs.items():
+        if key in excluded:
             continue
-        uq_cols = [c.name for c in constraint.columns]
-        if sorted(uq_cols) == [pk_col]:
-            continue
-        conditions = []
-        for row in records:
-            if all(col in row for col in uq_cols):
-                cond = and_(*[getattr(model, col) == row[col] for col in uq_cols])
-                conditions.append(cond)
-        if conditions:
-            await db.execute(delete(model).where(or_(*conditions)))
-
-    # 3) FK-based delete for auto-PK tables (e.g. Artifact)
-    #    When parent records (jobs, bib_entries…) were deleted in step 1,
-    #    their child rows in auto-PK tables still linger because SQLite
-    #    doesn't enforce FK CASCADE.  Delete by FK column values.
-    if auto_pk:
-        for col in model.__table__.columns:
-            if col.name == "owner_user_id" or col.name == pk_col:
-                continue
-            if not col.foreign_keys:
-                continue
-            fk_vals = list({
-                row[col.name]
-                for row in records
-                if col.name in row and row[col.name] is not None
-            })
-            if fk_vals:
-                await db.execute(
-                    delete(model).where(getattr(model, col.name).in_(fk_vals))
-                )
+        setattr(obj, key, value)
 
 
-async def _deserialize_table(
-    db: AsyncSession,
+def _build_row_kwargs(
     model: type,
-    records: list[dict],
+    row: dict[str, Any],
+    *,
     user_id: int,
     role: str,
-    id_map: dict[tuple[str, int], int] | None = None,
-) -> int:
-    """Deserialize and insert records for one table. Returns inserted count."""
-    if not records:
-        return 0
-
+    id_map: dict[tuple[str, Any], Any],
+) -> dict[str, Any]:
     columns = _get_columns(model)
     pk_col = _get_pk_column(model)
     auto_pk = _is_autoincrement_pk(model)
-    inserted = 0
-    track_ids = id_map is not None and auto_pk
-
-    await _pre_delete_conflicts(db, model, records, pk_col, auto_pk)
-
-    new_expires_at = compute_expires_at_for_role(role)
     table_name = _model_name(model)
-    created_objects: list[tuple[Any, Any]] = []
+    expires_at = compute_expires_at_for_role(role)
+    kwargs: dict[str, Any] = {}
 
-    for row in records:
-        kwargs: dict[str, Any] = {}
-        for col in columns:
-            if col not in row:
-                continue
-
-            if col == pk_col and auto_pk:
-                continue
-
-            value = row[col]
-
-            if col == "owner_user_id":
-                kwargs[col] = user_id
-                continue
-
-            if col == "expires_at":
-                kwargs[col] = new_expires_at
-                continue
-
-            if col == "set_id" and id_map and model is DimensionItem:
-                new_set_id = id_map.get(("dimension_sets", value))
-                if new_set_id is not None:
-                    kwargs[col] = new_set_id
-                    continue
-
-            if col == "reading_item_id" and id_map and model is ReadingItemEdit:
-                new_reading_item_id = id_map.get(("reading_items", value))
-                if new_reading_item_id is not None:
-                    kwargs[col] = new_reading_item_id
-                    continue
-
-            if col == "source_id" and id_map and model is Annotation:
-                source_type = row.get("source_type")
-                if source_type in ("compare_card", "ai_summary"):
-                    try:
-                        old_reading_item_id = int(value)
-                    except (TypeError, ValueError):
-                        old_reading_item_id = None
-                    if old_reading_item_id is not None:
-                        new_reading_item_id = id_map.get(("reading_items", old_reading_item_id))
-                        if new_reading_item_id is not None:
-                            kwargs[col] = str(new_reading_item_id)
-                            continue
-
-            if col == "source_translation_artifact_id" and id_map and model is CardNote:
-                new_artifact_id = id_map.get(("artifacts", value))
-                if new_artifact_id is not None:
-                    kwargs[col] = new_artifact_id
-                    continue
-
-            try:
-                col_type = _get_column_type(model, col)
-                if col_type is datetime and isinstance(value, str):
-                    kwargs[col] = _deserialize_value(value, datetime)
-                    continue
-            except Exception:
-                pass
-
-            kwargs[col] = value
-
-        try:
-            obj = model(**kwargs)
-            db.add(obj)
-            inserted += 1
-            if track_ids:
-                created_objects.append((row.get(pk_col), obj))
-        except Exception:
+    for col in columns:
+        if col not in row:
             continue
 
-    if created_objects:
-        await db.flush()
-        for old_pk, obj in created_objects:
-            if old_pk is not None and id_map is not None:
-                id_map[(table_name, old_pk)] = obj.id
+        if auto_pk and col == pk_col:
+            continue
 
-    return inserted
+        value = row[col]
+
+        if col == "owner_user_id":
+            kwargs[col] = user_id
+            continue
+
+        if col == "updated_by_user_id":
+            kwargs[col] = user_id
+            continue
+
+        if col == "scope" and model is PromptTemplate:
+            kwargs[col] = "user"
+            continue
+
+        if col == "expires_at":
+            kwargs[col] = expires_at
+            continue
+
+        target_table = FK_REMAP_FIELDS.get(table_name, {}).get(col)
+        if target_table and value is not None:
+            value = _mapped_value(id_map, target_table, value)
+
+        if model is Annotation and col == "source_id":
+            source_type = row.get("source_type")
+            if source_type in {"compare_card", "ai_summary"}:
+                try:
+                    source_value = int(value)
+                except (TypeError, ValueError):
+                    source_value = None
+                if source_value is not None:
+                    value = str(_mapped_value(id_map, "reading_items", source_value))
+
+        try:
+            col_type = _get_column_type(model, col)
+            if col_type is datetime and isinstance(value, str):
+                value = _deserialize_value(value, datetime)
+        except Exception:
+            pass
+
+        kwargs[col] = value
+
+    return kwargs
+
+
+async def _select_one(
+    db: AsyncSession,
+    statement: Any,
+) -> Any | None:
+    result = await db.execute(statement)
+    return result.scalars().first()
+
+
+async def _find_existing_record(
+    db: AsyncSession,
+    model: type,
+    kwargs: dict[str, Any],
+    *,
+    user_id: int,
+    old_pk: Any,
+) -> Any | None:
+    if model is File and kwargs.get("md5"):
+        return await _select_one(
+            db,
+            select(File).where(
+                File.owner_user_id == user_id,
+                File.md5 == kwargs["md5"],
+            ),
+        )
+
+    if model is PromptTemplate:
+        return await _select_one(
+            db,
+            select(PromptTemplate).where(
+                PromptTemplate.owner_user_id == user_id,
+                PromptTemplate.scope == "user",
+                PromptTemplate.prompt_type == kwargs.get("prompt_type"),
+                PromptTemplate.prompt_key == kwargs.get("prompt_key"),
+            ),
+        )
+
+    if model is DimensionSet:
+        return await _select_one(
+            db,
+            select(DimensionSet).where(
+                DimensionSet.owner_user_id == user_id,
+                DimensionSet.name == kwargs.get("name"),
+            ),
+        )
+
+    if model is DimensionItem:
+        return await _select_one(
+            db,
+            select(DimensionItem).where(
+                DimensionItem.set_id == kwargs.get("set_id"),
+                DimensionItem.dim_key == kwargs.get("dim_key"),
+            ),
+        )
+
+    if model is RefFormatPreset:
+        return await _select_one(
+            db,
+            select(RefFormatPreset).where(
+                RefFormatPreset.owner_user_id == user_id,
+                RefFormatPreset.name == kwargs.get("name"),
+            ),
+        )
+
+    if model is BibEntry:
+        dedup_key = kwargs.get("dedup_key")
+        if dedup_key:
+            return await _select_one(
+                db,
+                select(BibEntry).where(
+                    BibEntry.owner_user_id == user_id,
+                    BibEntry.dedup_key == dedup_key,
+                ),
+            )
+
+    if model is BibFilterLink:
+        return await _select_one(
+            db,
+            select(BibFilterLink).where(
+                BibFilterLink.bib_entry_id == kwargs.get("bib_entry_id"),
+                BibFilterLink.filter_job_id == kwargs.get("filter_job_id"),
+            ),
+        )
+
+    if model is JobBibEntry:
+        return await _select_one(
+            db,
+            select(JobBibEntry).where(
+                JobBibEntry.job_id == kwargs.get("job_id"),
+                JobBibEntry.bib_entry_id == kwargs.get("bib_entry_id"),
+                JobBibEntry.role == kwargs.get("role"),
+            ),
+        )
+
+    if model is ReadingItem:
+        return await _select_one(
+            db,
+            select(ReadingItem).where(
+                ReadingItem.job_id == kwargs.get("job_id"),
+                ReadingItem.item_key == kwargs.get("item_key"),
+            ),
+        )
+
+    if model is ReadingItemEdit:
+        return await _select_one(
+            db,
+            select(ReadingItemEdit).where(
+                ReadingItemEdit.reading_item_id == kwargs.get("reading_item_id"),
+                ReadingItemEdit.owner_user_id == user_id,
+            ),
+        )
+
+    if model is Artifact:
+        return await _select_one(
+            db,
+            select(Artifact).where(
+                Artifact.owner_user_id == user_id,
+                Artifact.job_id == kwargs.get("job_id"),
+                Artifact.artifact_type == kwargs.get("artifact_type"),
+                Artifact.filename == kwargs.get("filename"),
+            ),
+        )
+
+    if model is CardNote:
+        return await _select_one(
+            db,
+            select(CardNote).where(
+                CardNote.owner_user_id == user_id,
+                CardNote.source_bib_entry_id == kwargs.get("source_bib_entry_id"),
+                CardNote.source_version == kwargs.get("source_version"),
+                CardNote.title == kwargs.get("title"),
+            ),
+        )
+
+    if model is BibReference:
+        if kwargs.get("dedup_key"):
+            return await _select_one(
+                db,
+                select(BibReference).where(
+                    BibReference.owner_user_id == user_id,
+                    BibReference.source_bib_entry_id == kwargs.get("source_bib_entry_id"),
+                    BibReference.dedup_key == kwargs.get("dedup_key"),
+                ),
+            )
+        return await _select_one(
+            db,
+            select(BibReference).where(
+                BibReference.owner_user_id == user_id,
+                BibReference.source_bib_entry_id == kwargs.get("source_bib_entry_id"),
+                BibReference.raw_text == kwargs.get("raw_text"),
+            ),
+        )
+
+    if model is BibReferenceCitation:
+        return await _select_one(
+            db,
+            select(BibReferenceCitation).where(
+                BibReferenceCitation.owner_user_id == user_id,
+                BibReferenceCitation.bib_reference_id == kwargs.get("bib_reference_id"),
+                BibReferenceCitation.citation_index == kwargs.get("citation_index"),
+                BibReferenceCitation.quote_text == kwargs.get("quote_text"),
+            ),
+        )
+
+    if old_pk is not None:
+        existing = await db.get(model, old_pk)
+        if existing is not None and getattr(existing, "owner_user_id", user_id) == user_id:
+            return existing
+
+    return None
+
+
+async def _apply_record_import(
+    db: AsyncSession,
+    model: type,
+    row: dict[str, Any],
+    *,
+    user: User,
+    mode: str,
+    id_map: dict[tuple[str, Any], Any],
+    table_stats: dict[str, dict[str, int]],
+    restore_maps: dict[str, dict[str, str]],
+) -> None:
+    table_name = _model_name(model)
+    pk_col = _get_pk_column(model)
+    auto_pk = _is_autoincrement_pk(model)
+    old_pk = row.get(pk_col)
+    source_job_id = row.get("job_id")
+    source_filename = row.get("filename")
+    kwargs = _build_row_kwargs(model, row, user_id=user.id, role=user.role, id_map=id_map)
+
+    if model is PromptTemplate:
+        kwargs["scope"] = "user"
+
+    # Use nested transaction (SAVEPOINT) to isolate flush failures.
+    # This ensures a single record's FK violation doesn't corrupt the entire session.
+    try:
+        async with db.begin_nested():
+            existing = await _find_existing_record(db, model, kwargs, user_id=user.id, old_pk=old_pk)
+
+            if existing is not None:
+                existing_pk = getattr(existing, pk_col)
+                _remember_id_map(id_map, table_name, old_pk, existing_pk)
+
+                if model is File:
+                    restore_maps["files"][str(old_pk)] = existing.storage_path
+                    if mode == IMPORT_MODE_REPLACE:
+                        _update_existing_record(
+                            existing,
+                            {
+                                "original_name": kwargs.get("original_name"),
+                                "file_type": kwargs.get("file_type"),
+                                "size_bytes": kwargs.get("size_bytes"),
+                                "batch_id": kwargs.get("batch_id"),
+                                "expires_at": kwargs.get("expires_at"),
+                            },
+                        )
+                        _record_table_stat(table_stats, table_name, "replaced")
+                    else:
+                        _record_table_stat(table_stats, table_name, "reused")
+                    await db.flush()
+                    return
+
+                if model in {PromptTemplate, DimensionSet, DimensionItem, RefFormatPreset, BibEntry, ReadingItem, ReadingItemEdit, Artifact, CardNote, BibReference, BibReferenceCitation, BibFilterLink, JobBibEntry}:
+                    if mode == IMPORT_MODE_REPLACE:
+                        exclude = {pk_col, "owner_user_id"}
+                        if model is Artifact:
+                            kwargs["storage_path"] = existing.storage_path or _artifact_storage_path_as_posix(
+                                user.id,
+                                kwargs.get("job_id"),
+                                kwargs.get("filename"),
+                            )
+                        if model is CardNote:
+                            kwargs["storage_path"] = existing.storage_path or _rewrite_card_note_storage_path(
+                                user.id,
+                                getattr(existing, "id"),
+                            )
+                        _update_existing_record(existing, kwargs, exclude=exclude)
+                        _record_table_stat(table_stats, table_name, "replaced")
+                    else:
+                        _record_table_stat(table_stats, table_name, "reused")
+
+                    if model is Artifact and source_job_id is not None and source_filename:
+                        restore_maps["artifacts"][f"{source_job_id}::{source_filename}"] = existing.storage_path
+                    if model is CardNote and old_pk is not None and existing.storage_path:
+                        restore_maps["card_notes"][str(old_pk)] = existing.storage_path
+                    await db.flush()
+                    return
+
+                if model in {UploadBatch, Job, AgentSession, AgentMessage, AgentActionProposal, Annotation}:
+                    if mode == IMPORT_MODE_REPLACE:
+                        _update_existing_record(existing, kwargs, exclude={pk_col, "owner_user_id"})
+                        _record_table_stat(table_stats, table_name, "replaced")
+                        await db.flush()
+                    return
+
+            if not auto_pk:
+                target_pk = old_pk or _new_uuid_str()
+                existing_by_pk = await db.get(model, target_pk) if target_pk is not None else None
+
+                if existing_by_pk is not None and getattr(existing_by_pk, "owner_user_id", user.id) != user.id:
+                    target_pk = _new_uuid_str()
+                    existing_by_pk = None
+
+                if existing_by_pk is not None:
+                    target_pk = _new_uuid_str()
+
+                kwargs[pk_col] = target_pk
+
+                if model is File:
+                    kwargs["storage_path"] = _rewrite_file_storage_path(user.id, target_pk, kwargs.get("original_name"))
+                elif model is CardNote:
+                    kwargs["storage_path"] = _rewrite_card_note_storage_path(user.id, target_pk)
+
+                obj = model(**kwargs)
+                db.add(obj)
+                await db.flush()
+                _remember_id_map(id_map, table_name, old_pk, getattr(obj, pk_col))
+                _record_table_stat(table_stats, table_name, "created")
+
+                if model is File and old_pk is not None:
+                    restore_maps["files"][str(old_pk)] = obj.storage_path
+                elif model is CardNote and old_pk is not None and obj.storage_path:
+                    restore_maps["card_notes"][str(old_pk)] = obj.storage_path
+                return
+
+            if model is Artifact:
+                kwargs["storage_path"] = _artifact_storage_path_as_posix(
+                    user.id,
+                    kwargs.get("job_id"),
+                    kwargs.get("filename"),
+                )
+
+            obj = model(**kwargs)
+            db.add(obj)
+            await db.flush()
+            _remember_id_map(id_map, table_name, old_pk, getattr(obj, pk_col))
+            _record_table_stat(table_stats, table_name, "created")
+
+            if model is Artifact and source_job_id is not None and source_filename:
+                restore_maps["artifacts"][f"{source_job_id}::{source_filename}"] = obj.storage_path
+            if model is CardNote and old_pk is not None and obj.storage_path:
+                restore_maps["card_notes"][str(old_pk)] = obj.storage_path
+
+    except Exception as exc:
+        # Rollback to SAVEPOINT and log error; outer transaction continues
+        logger.warning("[import] Skip %s record due to error: %s", table_name, exc, exc_info=True)
+        _record_table_stat(table_stats, table_name, "errors")
+        # Exception already rolled back the nested transaction, so we swallow it here
 
 
 ProgressCallback = Callable[[str, int], None]
@@ -549,21 +922,19 @@ async def import_user_data(
     user: User,
     dra_path: Path,
     progress_cb: ProgressCallback | None = None,
+    *,
+    mode: str = IMPORT_MODE_APPEND,
 ) -> dict[str, Any]:
-    """Parse .dra package and import user data. Returns import stats."""
+    """Parse .dra package and import user data without clearing the whole workspace."""
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"import_{user.id}_"))
     logger.info("[import] Starting import for user %s, temp dir: %s", user.id, tmp_dir)
 
     try:
-        # Extract zip
+        mode = _ensure_supported_import_mode(mode)
         if progress_cb:
             progress_cb("正在解压导出包...", 5)
-        logger.info("[import] Extracting zip...")
-        with zipfile.ZipFile(dra_path, "r") as zf:
-            zf.extractall(tmp_dir)
-        logger.info("[import] Zip extracted successfully")
+        _safe_extract_zip(dra_path, tmp_dir)
 
-        # Read manifest
         manifest_path = tmp_dir / "manifest.json"
         if not manifest_path.exists():
             raise ValueError("无效的导出包：缺少 manifest.json")
@@ -575,166 +946,150 @@ async def import_user_data(
         if format_version not in SUPPORTED_FORMAT_VERSIONS:
             raise ValueError(f"导出包版本不兼容：{format_version}")
 
+        compat_warnings: list[str] = []
+        manifest_schema = _normalize_schema_version(manifest.get("schema_version"))
+        normalized_from_legacy = manifest_schema not in {CURRENT_SCHEMA_VERSION, "unknown"}
+        if normalized_from_legacy:
+            compat_warnings.append(
+                f"导出包 schema_version={manifest_schema}，已按当前版本兼容导入。"
+            )
+
         data_dir = tmp_dir / "data"
         files_dir = tmp_dir / "files"
         artifacts_dir = tmp_dir / "artifacts"
         card_notes_dir = tmp_dir / "card_notes"
 
-        # Clear existing data
-        if progress_cb:
-            progress_cb("正在清空当前账号数据...", 15)
-        logger.info("[import] Clearing existing user data...")
-        uid = user.id
-        urole = user.role
-        clear_counts = await _clear_user_data(db, uid)
-        await db.flush()
-        logger.info("[import] Cleared data: %s", clear_counts)
+        bundle: dict[str, list[dict[str, Any]]] = {}
+        for model in EXPORT_TABLE_ORDER:
+            table_name = _model_name(model)
+            json_path = data_dir / f"{table_name}.json"
+            records = _load_json_records(json_path)
+            if not json_path.exists():
+                compat_warnings.append(f"{table_name}.json 缺失，按空表处理。")
+            bundle[table_name] = records
 
-        # Import tables in order
+        uid = user.id
+        table_stats: dict[str, dict[str, int]] = {}
         import_counts: dict[str, int] = {}
-        id_map: dict[tuple[str, int], int] = {}
+        id_map: dict[tuple[str, Any], Any] = {}
+        restore_maps: dict[str, dict[str, str]] = {
+            "files": {},
+            "artifacts": {},
+            "card_notes": {},
+        }
+
         total_tables = len(EXPORT_TABLE_ORDER)
         for index, model in enumerate(EXPORT_TABLE_ORDER):
             table_name = _model_name(model)
-            json_path = data_dir / f"{table_name}.json"
-            if not json_path.exists():
-                import_counts[table_name] = 0
-                continue
-
-            with open(json_path, "r", encoding="utf-8") as f:
-                records = json.load(f)
+            records = bundle.get(table_name, [])
+            table_stats.setdefault(table_name, _empty_table_stats())
 
             if progress_cb:
-                progress = 20 + int((index / max(total_tables, 1)) * 55)
-                progress_cb(f"正在导入 {table_name}（{len(records)} 条）...", progress)
-            logger.info("[import] Importing table %s, %d records...", table_name, len(records))
-            count = await _deserialize_table(db, model, records, uid, urole, id_map)
-            await db.flush()
-            import_counts[table_name] = count
-            logger.info("[import] Table %s imported: %d records", table_name, count)
+                progress = 18 + int((index / max(total_tables, 1)) * 54)
+                progress_cb(
+                    f"正在以{'覆盖' if mode == IMPORT_MODE_REPLACE else '追加'}模式导入 {table_name}（{len(records)} 条）...",
+                    progress,
+                )
 
-        # Commit all data changes in one transaction
+            for row in records:
+                await _apply_record_import(
+                    db,
+                    model,
+                    row,
+                    user=user,
+                    mode=mode,
+                    id_map=id_map,
+                    table_stats=table_stats,
+                    restore_maps=restore_maps,
+                )
+
+            stats = table_stats[table_name]
+            import_counts[table_name] = stats["created"] + stats["reused"] + stats["replaced"]
+
         if progress_cb:
             progress_cb("正在提交数据库事务...", 78)
-        logger.info("[import] Committing transaction...")
         await db.commit()
-        logger.info("[import] Transaction committed")
 
-        # Prepare file restoration info BEFORE closing transaction context
-        # (collect all needed info while session is still valid)
-        files_to_restore: list[tuple[Path, Path]] = []
-        artifacts_to_restore: list[tuple[Path, Path]] = []
-        card_notes_to_restore: list[tuple[Path, Path]] = []
-
-        upload_root = get_upload_root()
-        results_root = get_results_root()
-
-        # Collect file restoration info
-        if progress_cb:
-            progress_cb("正在准备恢复源文件和产物...", 82)
-        if files_dir.exists():
-            for src_path in files_dir.iterdir():
-                if not src_path.is_file():
-                    continue
-                file_id = src_path.stem
-                result = await db.execute(select(File).where(File.id == file_id))
-                record = result.scalars().first()
-                if record is None:
-                    logger.warning("[import] File record not found for id=%s", file_id)
-                    continue
-                if getattr(record, "_file_missing", False):
-                    logger.warning("[import] File marked as missing: id=%s", file_id)
-                    continue
-                dst = resolve_storage_path(record.storage_path)
-                files_to_restore.append((src_path, dst))
-
-        # Collect artifact restoration info
-        if artifacts_dir.exists():
-            for job_dir in artifacts_dir.iterdir():
-                if not job_dir.is_dir():
-                    continue
-                job_id = job_dir.name
-                for src_path in job_dir.iterdir():
-                    if not src_path.is_file():
-                        continue
-                    filename = src_path.name
-                    result = await db.execute(
-                        select(Artifact).where(
-                            Artifact.job_id == job_id,
-                            Artifact.filename == filename,
-                        )
-                    )
-                    record = result.scalars().first()
-                    if record is None:
-                        logger.warning("[import] Artifact record not found: job_id=%s, filename=%s", job_id, filename)
-                        continue
-                    if getattr(record, "_file_missing", False):
-                        logger.warning("[import] Artifact marked as missing: job_id=%s, filename=%s", job_id, filename)
-                        continue
-                    dst = results_root / record.storage_path
-                    artifacts_to_restore.append((src_path, dst))
-
-        # Collect card note mirror restoration info
-        if card_notes_dir.exists():
-            for src_path in card_notes_dir.iterdir():
-                if not src_path.is_file():
-                    continue
-                card_id = src_path.stem
-                result = await db.execute(select(CardNote).where(CardNote.id == card_id))
-                record = result.scalars().first()
-                if record is None or getattr(record, "_file_missing", False) or not record.storage_path:
-                    continue
-                dst = results_root / record.storage_path
-                card_notes_to_restore.append((src_path, dst))
-
-        # Restore physical files (outside transaction, best-effort)
         files_restored = 0
         files_missing = 0
 
         if progress_cb:
-            progress_cb("正在恢复源文件和产物...", 88)
-        for src_path, dst_path in files_to_restore:
-            try:
-                dst_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_path, dst_path)
-                files_restored += 1
-                logger.info("[import] Restored file: %s -> %s", src_path, dst_path)
-            except Exception as exc:
-                files_missing += 1
-                logger.error("[import] Failed to restore file %s: %s", src_path, exc)
+            progress_cb("正在恢复源文件和产物...", 86)
 
-        for src_path, dst_path in artifacts_to_restore:
-            try:
-                dst_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_path, dst_path)
-                files_restored += 1
-                logger.info("[import] Restored artifact: %s -> %s", src_path, dst_path)
-            except Exception as exc:
-                files_missing += 1
-                logger.error("[import] Failed to restore artifact %s: %s", src_path, exc)
+        if files_dir.exists():
+            for src_path in files_dir.iterdir():
+                if not src_path.is_file():
+                    continue
+                storage_path = restore_maps["files"].get(src_path.stem)
+                if not storage_path:
+                    files_missing += 1
+                    continue
+                dst = resolve_storage_path(storage_path)
+                try:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_path, dst)
+                    files_restored += 1
+                except Exception as exc:
+                    logger.error("[import] Failed to restore file %s: %s", src_path, exc)
+                    files_missing += 1
 
-        for src_path, dst_path in card_notes_to_restore:
-            try:
-                dst_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_path, dst_path)
-                files_restored += 1
-                logger.info("[import] Restored card note: %s -> %s", src_path, dst_path)
-            except Exception as exc:
-                files_missing += 1
-                logger.error("[import] Failed to restore card note %s: %s", src_path, exc)
+        if artifacts_dir.exists():
+            for job_dir in artifacts_dir.iterdir():
+                if not job_dir.is_dir():
+                    continue
+                for src_path in job_dir.iterdir():
+                    if not src_path.is_file():
+                        continue
+                    storage_path = restore_maps["artifacts"].get(f"{job_dir.name}::{src_path.name}")
+                    if not storage_path:
+                        files_missing += 1
+                        continue
+                    dst = resolve_result_path(storage_path)
+                    try:
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src_path, dst)
+                        files_restored += 1
+                    except Exception as exc:
+                        logger.error("[import] Failed to restore artifact %s: %s", src_path, exc)
+                        files_missing += 1
 
-        logger.info("[import] Import completed. restored=%d, missing=%d", files_restored, files_missing)
+        if card_notes_dir.exists():
+            for src_path in card_notes_dir.iterdir():
+                if not src_path.is_file():
+                    continue
+                storage_path = restore_maps["card_notes"].get(src_path.stem)
+                if not storage_path:
+                    files_missing += 1
+                    continue
+                dst = resolve_result_path(storage_path)
+                try:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_path, dst)
+                    files_restored += 1
+                except Exception as exc:
+                    logger.error("[import] Failed to restore card note %s: %s", src_path, exc)
+                    files_missing += 1
+
         if progress_cb:
             progress_cb("导入完成。", 100)
+
         return {
-            "cleared": clear_counts,
+            "mode": mode,
+            "cleared": {},
             "imported": import_counts,
+            "table_stats": table_stats,
             "files_restored": files_restored,
             "files_missing": files_missing,
             "manifest": manifest,
+            "compat": {
+                "schema_version": manifest_schema,
+                "normalized_from_legacy": normalized_from_legacy,
+                "warnings": compat_warnings,
+            },
         }
 
     except Exception as exc:
+        await db.rollback()
         logger.error("[import] Import failed: %s", exc, exc_info=True)
         raise
     finally:

@@ -2,10 +2,10 @@ import json
 from typing import Optional
 
 import httpx
-from openai import OpenAI
 from json_repair import loads as repair_json_loads
 
 from backend.utils.api_key import validate_deepseek_key
+from backend.utils.llm_provider import create_openai_client, model_for_api_key
 
 MODEL = "deepseek-v4-flash"
 DEFAULT_MAX_TOKENS = 4000
@@ -91,11 +91,11 @@ def generate_template_from_paper(
         dim_count=dim_count,
     )
 
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com",
+    client = create_openai_client(
+        api_key,
         timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
     )
+    model = model_for_api_key(api_key, MODEL)
 
     token_budget = _max_tokens_for_dimension_count(dim_count)
     budgets = [token_budget]
@@ -106,7 +106,7 @@ def generate_template_from_paper(
     last_finish_reason = None
     for budget in budgets:
         response = client.chat.completions.create(
-            model=MODEL,
+            model=model,
             extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {

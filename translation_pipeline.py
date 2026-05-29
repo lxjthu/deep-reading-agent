@@ -20,6 +20,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 from dotenv import load_dotenv
+from backend.utils.llm_provider import create_openai_client, model_for_api_key, resolve_llm_provider
 
 load_dotenv()
 
@@ -43,8 +44,10 @@ _EXTRACTION_SUFFIXES = ("_paddleocr", "_raw", "_segmented")
 
 def _get_client(api_key: str | None = None, base_url: str | None = None) -> OpenAI:
     key = api_key or DEEPSEEK_API_KEY
-    url = base_url or DEEPSEEK_BASE_URL
-    return OpenAI(api_key=key, base_url=url)
+    provider = resolve_llm_provider(key, source="environment variable" if not api_key else "前端设置")
+    if base_url:
+        return OpenAI(api_key=provider.api_key, base_url=base_url)
+    return create_openai_client(key)
 
 
 # ---------------------------------------------------------------------------
@@ -606,6 +609,7 @@ def translate_pdf_fulltext(
     cn_path = os.path.join(out_dir, f"{stem}_cn.md")
     glossary_path = os.path.join(out_dir, f"{stem}_glossary.md")
     client = _get_client(api_key=api_key, base_url=base_url)
+    model = model_for_api_key(api_key or DEEPSEEK_API_KEY, model)
 
     log(f"[PDF全文重述] 读取提取全文：{len(full_text):,} 字符")
     check()
@@ -696,6 +700,7 @@ def translate_md_file(
     log(f"[重述] 文本长度：{len(md_text):,} 字符")
 
     client = _get_client(api_key=api_key, base_url=base_url)
+    model = model_for_api_key(api_key or DEEPSEEK_API_KEY, model)
 
     if progress_cb:
         progress_cb("front_sections", 10, 100)

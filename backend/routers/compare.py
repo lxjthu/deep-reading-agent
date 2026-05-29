@@ -23,6 +23,7 @@ from db.models import Annotation, Artifact, BibEntry, DimensionItem, DimensionSe
 from db.utils import compute_dedup_key
 from result_storage import build_result_storage_path, get_results_root
 from backend.utils.api_key import validate_deepseek_key
+from backend.utils.llm_provider import create_openai_client, model_for_api_key
 from services.deepseek_limiter import deepseek_semaphore
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -109,6 +110,11 @@ def get_api_key(provided_key: Optional[str] = None) -> str:
         return validate_deepseek_key(provided_key)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+def get_chat_client(provided_key: Optional[str], *, timeout: float = 300.0):
+    api_key = get_api_key(provided_key)
+    return create_openai_client(api_key, timeout=timeout), model_for_api_key(api_key, "deepseek-v4-flash")
 
 
 def utcnow_naive() -> datetime:
@@ -1291,8 +1297,6 @@ async def analyze_comparison(
 ):
     """Generate AI synthesis for 7-step or 4-step comparison."""
     try:
-        from openai import OpenAI
-
         members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
         paper_data = await ensure_paper_data(db, req.paperData, members)
         mode = req.mode or ("multi" if len(req.subQuestions) > 1 else "single")
@@ -1314,7 +1318,7 @@ async def analyze_comparison(
         job.started_at = utcnow_naive()
         await db.flush()
 
-        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
+        client, model = get_chat_client(req.api_key, timeout=300.0)
 
         if mode == "cross":
             prompt = await build_cross_dim_prompt(paper_data, user_id=user.id, db=db)
@@ -1332,7 +1336,7 @@ async def analyze_comparison(
             pass
 
         response = client.chat.completions.create(
-            model="deepseek-v4-flash",
+            model=model,
             extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": compare_system_prompt},
@@ -1374,8 +1378,6 @@ async def analyze_long_comparison(
 ):
     """Generate AI synthesis for long context comparison."""
     try:
-        from openai import OpenAI
-
         members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
         paper_data = await ensure_paper_data(db, req.paperData, members)
         mode = req.mode or "single"
@@ -1396,7 +1398,7 @@ async def analyze_long_comparison(
         job.started_at = utcnow_naive()
         await db.flush()
 
-        client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
+        client, model = get_chat_client(req.api_key, timeout=300.0)
 
         if mode == "multi":
             all_dims = []
@@ -1417,7 +1419,7 @@ async def analyze_long_comparison(
             pass
 
         response = client.chat.completions.create(
-            model="deepseek-v4-flash",
+            model=model,
             extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": compare_system_prompt},
@@ -1457,8 +1459,6 @@ async def synthesize_dimensions(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from openai import OpenAI
-
     members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
     paper_data = await ensure_paper_data(db, req.paperData, members)
     bib_refs = await gather_bib_references(db, members)
@@ -1489,7 +1489,7 @@ async def synthesize_dimensions(
 
     async def _stream():
         try:
-            client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
+            client, model = get_chat_client(req.api_key, timeout=300.0)
             metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
 
             total = len(dimensions)
@@ -1508,7 +1508,7 @@ async def synthesize_dimensions(
                 with deepseek_semaphore:
                     user_message = metadata_block + "\n\n" + dim_prompt
                     response = client.chat.completions.create(
-                        model="deepseek-v4-flash",
+                        model=model,
                         extra_body={"thinking": {"type": "disabled"}},
                         messages=[
                             {"role": "system", "content": synthesis_system_prompt},
@@ -1544,7 +1544,7 @@ async def synthesize_dimensions(
                 check_prompt = _build_secondary_ref_check_prompt(synthesis_body, flat_refs)
                 user_message = metadata_block + "\n\n" + check_prompt
                 ref_check_resp = client.chat.completions.create(
-                    model="deepseek-v4-flash",
+                    model=model,
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
                         {"role": "system", "content": synthesis_system_prompt},
@@ -1618,8 +1618,6 @@ async def synthesis_stream(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from openai import OpenAI
-
     if req.mode not in ("long", "quant", "qual"):
         raise HTTPException(status_code=400, detail="mode 必须为 long / quant / qual")
 
@@ -1655,7 +1653,7 @@ async def synthesis_stream(
 
     async def _stream():
         try:
-            client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
+            client, model = get_chat_client(req.api_key, timeout=300.0)
             metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
 
             total = len(dimensions)
@@ -1673,7 +1671,7 @@ async def synthesis_stream(
                 with deepseek_semaphore:
                     user_message = metadata_block + "\n\n" + dim_prompt
                     response = client.chat.completions.create(
-                        model="deepseek-v4-flash",
+                        model=model,
                         extra_body={"thinking": {"type": "disabled"}},
                         messages=[
                             {"role": "system", "content": synthesis_system_prompt},
@@ -1709,7 +1707,7 @@ async def synthesis_stream(
                 check_prompt = _build_secondary_ref_check_prompt(synthesis_body, flat_refs)
                 user_message = metadata_block + "\n\n" + check_prompt
                 ref_check_resp = client.chat.completions.create(
-                    model="deepseek-v4-flash",
+                    model=model,
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
                         {"role": "system", "content": synthesis_system_prompt},
@@ -1782,8 +1780,6 @@ async def synthesize_long_dimensions(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from openai import OpenAI
-
     members = await resolve_compare_members(db, user, req.bib_entry_ids, req.paperData)
     paper_data = await ensure_paper_data(db, req.paperData, members)
     bib_refs = await gather_bib_references(db, members)
@@ -1814,7 +1810,7 @@ async def synthesize_long_dimensions(
 
     async def _stream():
         try:
-            client = OpenAI(api_key=get_api_key(req.api_key), base_url="https://api.deepseek.com", timeout=300.0)
+            client, model = get_chat_client(req.api_key, timeout=300.0)
             metadata_block = build_paper_metadata_block(paper_data, bib_refs, members)
 
             dimension_sections = []
@@ -1829,7 +1825,7 @@ async def synthesize_long_dimensions(
                 user_message = metadata_block + "\n\n" + dim_prompt
 
                 response = client.chat.completions.create(
-                    model="deepseek-v4-flash",
+                    model=model,
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
                         {"role": "system", "content": synthesis_system_prompt},
@@ -1857,7 +1853,7 @@ async def synthesize_long_dimensions(
                 check_prompt = _build_secondary_ref_check_prompt(synthesis_body, flat_refs)
                 user_message = metadata_block + "\n\n" + check_prompt
                 ref_check_resp = client.chat.completions.create(
-                    model="deepseek-v4-flash",
+                    model=model,
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
                         {"role": "system", "content": synthesis_system_prompt},
@@ -2083,7 +2079,7 @@ async def ai_summary(
     if not text.strip() or not api_key:
         raise HTTPException(400, "text and api_key required")
 
-    validate_deepseek_key(api_key)
+    api_key = validate_deepseek_key(api_key)
 
     from prompt_service import get_prompt_payload
     payload = await get_prompt_payload(
@@ -2091,10 +2087,10 @@ async def ai_summary(
     )
     prompt_text = payload.effective_content.replace("{selected_text}", text)
 
-    from openai import OpenAI
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com", timeout=120.0)
+    client = create_openai_client(api_key, timeout=120.0)
+    model = model_for_api_key(api_key, "deepseek-v4-flash")
     response = client.chat.completions.create(
-        model="deepseek-v4-flash",
+        model=model,
         extra_body={"thinking": {"type": "disabled"}},
         messages=[
             {"role": "system", "content": "你是一位学术文本总结助手。"},

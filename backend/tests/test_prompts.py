@@ -102,6 +102,12 @@ class PromptRouterTests(unittest.TestCase):
                 )
             ).scalars().all()
         self.assertTrue(seeded)
+        journal_rows = [
+            row
+            for row in seeded
+            if row.prompt_type == "journal_kb" and row.prompt_key == "top_tier_registry"
+        ]
+        self.assertTrue(journal_rows)
 
     def test_user_override_has_priority_and_can_be_reset(self) -> None:
         self.register("alice", "pwd12345")
@@ -185,3 +191,30 @@ class PromptRouterTests(unittest.TestCase):
         data = read_back.json()
         self.assertEqual(data["source"], "system_default")
         self.assertEqual(data["effective_content"], "管理员系统默认提示词")
+
+    def test_journal_kb_prompt_is_editable_via_standard_prompt_api(self) -> None:
+        self.create_admin()
+        self.register("alice", "pwd12345")
+        admin_headers = self.login_headers("admin", "pwd12345")
+        alice_headers = self.login_headers("alice", "pwd12345")
+
+        update = self.client.put(
+            "/api/prompts/system",
+            headers=admin_headers,
+            json={
+                "type": "journal_kb",
+                "key": "top_tier_registry",
+                "content": "- **Custom Tier**: Journal of Widget Economics, JWE",
+            },
+        )
+        self.assertEqual(update.status_code, 200, update.text)
+
+        read_back = self.client.get(
+            "/api/prompts/item",
+            headers=alice_headers,
+            params={"type": "journal_kb", "key": "top_tier_registry"},
+        )
+        self.assertEqual(read_back.status_code, 200, read_back.text)
+        data = read_back.json()
+        self.assertEqual(data["source"], "system_default")
+        self.assertIn("Custom Tier", data["effective_content"])

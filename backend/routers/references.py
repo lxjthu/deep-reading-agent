@@ -715,8 +715,10 @@ def write_trace_outputs(
 
 
 def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: str, file_path: str, source_title: str, api_key: Optional[str] = None) -> None:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        asyncio.run(mark_trace_started(task_id, source_bib_entry_id, stage="读取文档...", progress=10))
+        loop.run_until_complete(mark_trace_started(task_id, source_bib_entry_id, stage="读取文档...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "读取文档..."
@@ -751,7 +753,7 @@ def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: st
         tasks[task_id]["progress"] = 95
         tasks[task_id]["stage"] = "写入数据库..."
 
-        asyncio.run(
+        loop.run_until_complete(
             persist_trace_success(
                 task_id,
                 user_id,
@@ -779,7 +781,12 @@ def run_reference_trace_task(task_id: str, user_id: int, source_bib_entry_id: st
         tasks[task_id]["stage"] = f"错误: {exc}"
         tasks[task_id]["logs"].append(f"❌ {exc}")
         tasks[task_id]["error"] = str(exc)
-        asyncio.run(persist_trace_failure(task_id, str(exc)))
+        try:
+            loop.run_until_complete(persist_trace_failure(task_id, str(exc)))
+        except Exception:
+            pass
+    finally:
+        loop.close()
 
 
 async def get_owned_entry_with_file(db: AsyncSession, user: User, entry_id: str) -> tuple[BibEntry, File]:

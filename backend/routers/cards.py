@@ -8,13 +8,13 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from openai import OpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from backend.utils.api_key import validate_deepseek_key
+from backend.utils.llm_provider import create_openai_client, model_for_api_key
 from cleanup import compute_expires_at_for_role, utcnow_naive
 from db import get_db
 from db.models import Artifact, BibEntry, CardNote, File, User
@@ -183,9 +183,9 @@ async def generate_card_payload(
 title, summary, tags, body_markdown
 """.strip()
 
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com", timeout=180.0)
+    client = create_openai_client(api_key, timeout=180.0)
     response = client.chat.completions.create(
-        model="deepseek-v4-flash",
+        model=model_for_api_key(api_key, "deepseek-v4-flash"),
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},

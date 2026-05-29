@@ -27,6 +27,14 @@ type LibraryEntrySummary = {
   filter_score: number | null
 }
 
+type LibraryEntryPageResponse = {
+  items: LibraryEntrySummary[]
+  total: number
+  page: number
+  page_size: number
+  has_more: boolean
+}
+
 type LibraryArtifact = {
   id: number
   filename: string
@@ -108,6 +116,8 @@ type EditDraft = {
 }
 
 type LibraryChatScope = 'auto' | 'library' | 'previous_results'
+
+const LIBRARY_PAGE_SIZE = 100
 
 type LibraryChatCitation = {
   from_id: string
@@ -259,6 +269,14 @@ function updateLastChatTurn(
   return turns.map((turn) => (turn.id === turnId ? update(turn) : turn))
 }
 
+function createClientId(prefix: string) {
+  const randomUUID = globalThis.crypto?.randomUUID
+  if (typeof randomUUID === 'function') {
+    return randomUUID.call(globalThis.crypto)
+  }
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 function languageLabel(language: LibraryEntrySummary['language']) {
   if (!language) return '未标注语言'
   return {
@@ -357,6 +375,9 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [sortBy, setSortBy] = useState('updated')
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc')
   const [entries, setEntries] = useState<LibraryEntrySummary[]>([])
+  const [totalEntries, setTotalEntries] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [hasMorePages, setHasMorePages] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<LibraryEntryDetail | null>(null)
   const [draft, setDraft] = useState<EditDraft | null>(null)
@@ -421,6 +442,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     preferredId?: string | null,
     filteredIds = chatFilteredIds,
     filteredTags = tagFilters,
+    targetPage = currentPage,
   ) {
     setListLoading(true)
     setListError('')
@@ -437,7 +459,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       const query = params.toString()
       const response =
         filteredIds === null
-          ? await fetch(`/api/library/entries${query ? `?${query}` : ''}`)
+          ? await fetch(`/api/library/entries/page?${query ? `${query}&` : ''}page=${targetPage}&page_size=${LIBRARY_PAGE_SIZE}`)
           : await fetch(`/api/library/entries/by-ids${query ? `?${query}` : ''}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -446,18 +468,28 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       if (filteredIds !== null && response.status === 405) {
         throw new Error('当前后端尚未加载 AI 文献列表筛选接口，请重启后端后重试。')
       }
-      const data = await parseJsonOrThrow<LibraryEntrySummary[]>(response)
-      setEntries(data)
+      const data =
+        filteredIds === null
+          ? await parseJsonOrThrow<LibraryEntryPageResponse>(response)
+          : await parseJsonOrThrow<LibraryEntrySummary[]>(response)
+      const nextEntries = Array.isArray(data) ? data : data.items
+      setEntries(nextEntries)
+      setTotalEntries(Array.isArray(data) ? data.length : data.total)
+      setCurrentPage(Array.isArray(data) ? 1 : data.page)
+      setHasMorePages(Array.isArray(data) ? false : data.has_more)
       const nextId =
-        preferredId && data.some((entry) => entry.id === preferredId)
+        preferredId && nextEntries.some((entry) => entry.id === preferredId)
           ? preferredId
-          : selectedId && data.some((entry) => entry.id === selectedId)
+          : selectedId && nextEntries.some((entry) => entry.id === selectedId)
             ? selectedId
-            : data[0]?.id || null
+            : nextEntries[0]?.id || null
       setSelectedId(nextId)
     } catch (error: unknown) {
       setListError(error instanceof Error ? error.message : '加载文献库失败。')
       setEntries([])
+      setTotalEntries(0)
+      setCurrentPage(1)
+      setHasMorePages(false)
       setSelectedId(null)
     } finally {
       setListLoading(false)
@@ -478,13 +510,13 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     setTagFilters(nextTags)
     setTagFilterQuery('')
     setTagFilterOpen(false)
-    void loadEntries(undefined, chatFilteredIds, nextTags)
+    void loadEntries(undefined, chatFilteredIds, nextTags, 1)
   }
 
   function removeTagFilter(tag: string) {
     const nextTags = tagFilters.filter((item) => item !== tag)
     setTagFilters(nextTags)
-    void loadEntries(undefined, chatFilteredIds, nextTags)
+    void loadEntries(undefined, chatFilteredIds, nextTags, 1)
   }
 
   function toggleSelect(id: string) {
@@ -592,7 +624,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   }
 
   useEffect(() => {
-    void loadEntries()
+    void loadEntries(undefined, chatFilteredIds, tagFilters, 1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readingStatus, pinnedOnly, sortBy, sortOrder])
 
@@ -767,7 +799,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       keywords: turn.keywords,
       result_count: turn.resultCount,
     }))
-    const turnId = crypto.randomUUID()
+    const turnId = createClientId('library-chat-turn')
     const nextTurn: LibraryChatTurn = {
       id: turnId,
       question,
@@ -1204,7 +1236,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.preventDefault()
-                  void loadEntries()
+                  void loadEntries(undefined, chatFilteredIds, tagFilters, 1)
                 }
               }}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
@@ -1220,7 +1252,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.preventDefault()
-                  void loadEntries()
+                  void loadEntries(undefined, chatFilteredIds, tagFilters, 1)
                 }
               }}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
@@ -1378,7 +1410,8 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               <div>
                 <h3 className="text-sm font-semibold text-gray-800">文献列表</h3>
                 <p className="mt-1 text-xs text-gray-400">
-                  {listLoading ? '加载中...' : `共 ${entries.length} 篇`}
+                  {listLoading ? '加载中...' : `共 ${totalEntries} 篇`}
+                  {chatFilteredIds === null && totalEntries > 0 && ` · 第 ${currentPage} 页`}
                   {selectedIds.size > 0 && ` · 已选 ${selectedIds.size} 篇`}
                 </p>
               </div>
@@ -1440,6 +1473,30 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               batchTagsMessage.includes('失败') ? 'text-red-600' : 'text-emerald-700'
             }`}>
               {batchTagsMessage}
+            </div>
+          )}
+
+          {chatFilteredIds === null && (currentPage > 1 || hasMorePages) && (
+            <div className="flex items-center justify-between border-t border-gray-100 px-5 py-3 text-xs text-gray-500">
+              <span>每页 {LIBRARY_PAGE_SIZE} 篇</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => void loadEntries(selectedId, null, tagFilters, Math.max(1, currentPage - 1))}
+                  disabled={listLoading || currentPage <= 1}
+                  className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-gray-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-40"
+                  type="button"
+                >
+                  上一页
+                </button>
+                <button
+                  onClick={() => void loadEntries(selectedId, null, tagFilters, currentPage + 1)}
+                  disabled={listLoading || !hasMorePages}
+                  className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-gray-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-40"
+                  type="button"
+                >
+                  下一页
+                </button>
+              </div>
             </div>
           )}
 

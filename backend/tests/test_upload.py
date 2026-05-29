@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -207,10 +208,32 @@ class UploadRouterTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["matched_bib_entry_id"], bib_id)
+        self.assertEqual(
+            payload["matched_bib_title"],
+            "生态产品价值实现的中国经验-基于国家部委典型案例的实践解构与理论阐释",
+        )
         with Session(self.sync_engine) as session:
             entry = session.execute(select(BibEntry).where(BibEntry.id == bib_id)).scalar_one()
             self.assertEqual(entry.source_file_id, payload["file_id"])
             self.assertEqual(entry.reading_status, "has_pdf")
+
+    def test_upload_flushes_file_before_binding_bib_entry(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        observed = {"seen": False}
+
+        async def _assert_file_exists_before_bind(db, user_id, record):
+            persisted = (
+                await db.execute(select(File).where(File.id == record.id, File.owner_user_id == user_id))
+            ).scalar_one_or_none()
+            observed["seen"] = persisted is not None
+            return None
+
+        with patch.object(upload_router, "bind_uploaded_file_to_existing_bib", side_effect=_assert_file_exists_before_bind):
+            payload = self.upload_pdf(headers, filename="flush-check.pdf", content=b"%PDF-1.4 flush check")
+
+        self.assertTrue(payload["success"])
+        self.assertTrue(observed["seen"])
 
     def test_different_users_same_md5_create_separate_records(self) -> None:
         self.register("alice", "pwd12345")

@@ -11,7 +11,7 @@
 | ~~P0~~ | ~~参考文献梳理标签页 + 引用关系入库~~ | **已完成（2026-05）** | 无 | [REFERENCE_CITATION_TAB_PLAN.md](./REFERENCE_CITATION_TAB_PLAN.md) | 全链路已实现：后端 7 个 API 端点（`/api/references/*`）、DeepSeek v4-flash 提取+追踪服务、`bib_references` + `bib_reference_citations` 表+迁移、前端 `ReferenceTraceTab` 组件。 |
 | P0.5 | 双栏 PDF 参考文献提取修复 | **已完成（2026-05-03）** | 建议在 P0 进入实施前先修 | [REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md](./REFERENCE_EXTRACTION_TWO_COLUMN_FIX_PLAN.md) | pypdf 对 CJK 编码双栏 PDF 的文本提取完全失败（中文乱码），需切换为 pdfplumber。影响所有中文学术期刊论文的参考文献提取。 |
 | P1 | PDF 题录/元数据在线匹配增强 | **已完成（2026-05-03）** | 无 | [PDF_METADATA_MATCH_PLAN.md](./PDF_METADATA_MATCH_PLAN.md) | PDF 前 1-3 页提取、DeepSeek 结构化抽取、Crossref/OpenAlex 在线候选匹配、前端匹配面板 |
-| P2~P4 | AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点） | **已完成（2026-05-11）**，P3 提示词管理未做 | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | P2 兜底修复（None 年份、缺作者）、P4 引用锚点（SSE 分维度流式）、二次引用过滤（DeepSeek 识别）已完成。P3 提示词管理未纳入。 |
+| ~~P2~P4~~ | ~~AI 综述模块重构（参考文献兜底 + 提示词管理 + 引用锚点）~~ | **已完成（2026-05）** | 无 | [SYNTHESIS_PROMPT_PLAN.md](./SYNTHESIS_PROMPT_PLAN.md) | P2 兜底修复（None 年份、缺作者）、P4 引用锚点（SSE 分维度流式）、二次引用过滤（DeepSeek 识别）已完成。P3 提示词管理：`synthesis` 类型+8 个槽位已注册到 `prompt_registry.py`，提示词文件已入库 `prompts/synthesis/`。 |
 | P2.5 | AI 综述二次引用目录过滤 | **已完成（2026-05-11）** | AI 综述模块已上线 | 无 | 改用 DeepSeek 识别综述正文实际引用的二次文献，复用 system prompt + metadata_block 缓存命中。 |
 | ~~P3.5~~ | ~~批量精读（文件夹上传）~~ | **已完成（2026-05-11）** | 无 | [实施计划](./superpowers/plans/2026-05-11-batch-folder-reading.md) | 三个 Tab 各有「上传文件夹」按钮，复用单篇精读逻辑，`POST /batch/start` + `GET /batch/{batch_id}/status`。修复了 `create_reading_job` 后缺少 `flush` 导致 `scalar_one()` 找不到新 Job 的 bug。 |
 
@@ -19,11 +19,14 @@
 | ~~P6~~ | ~~用户数据一键导出/导入~~ | **已完成（2026-05）** | 无 | [设计文档](./superpowers/specs/2026-05-06-user-data-export-import-design.md) | JSON + 文件打包为 `.dra`，清空后导入策略。`data_portability.py` + `routers/data.py` 完整实现。 |
 | P7 | Playwright E2E + 部署验收 | 已规划，未实施 | 建议在主要交互和文案稳定后进行 | [MULTIUSER_PROGRESS.md](./MULTIUSER_PROGRESS.md) | 属于最终验收阶段，不宜提前启动 |
 | ~~P8~~ | ~~长文本精读维度用户化~~ | **已完成（2026-05）** | 无 | [CUSTOM_DIMENSION_PLAN.md](./CUSTOM_DIMENSION_PLAN.md) | 用户维度集合 + 模板市场 + AI 生成 + 文档导入 + 共享。`dimensions.py` 22 端点、`TemplateMarket.tsx`、4 张新表。 |
-| P9 | 对比页 AnswerCard 三按钮（编辑/点评/AI总结） | **设计完成**，待实施 | 无 | [设计文档](./superpowers/specs/2026-05-14-compare-card-actions-design.md) | AnswerCard 级三个按钮：编辑覆盖层+回退、点评模式高亮+全局点评库、AI总结模式三种子视图。新增 `reading_item_edits` + `annotations` 两张表。 |
+| ~~P9~~ | ~~对比页 AnswerCard 三按钮（编辑/点评/AI总结）~~ | **已完成（2026-05）** | 无 | [设计文档](./superpowers/specs/2026-05-14-compare-card-actions-design.md) | AnswerCard 级三个按钮：编辑覆盖层+回退、点评模式高亮+全局点评库、AI总结模式三种子视图。`reading_item_edits` + `annotations` 两张表+迁移 011、`compare.py` 编辑/点评/AI总结端点、前端 AnswerCard/AccordionPanel 多模式切换。 |
 | P10 | 前端 ESLint 规则分级治理 | 已发现规则基线问题，待规划实施 | 前端主要功能稳定后 | 无 | 当前 `npm run lint` 被大量规则阻断，需区分真正错误、可维护性警告和 React Compiler 建议类规则，避免 lint 作为上线门禁时误伤。 |
 | P11 | Online 页面提供打包版下载 | 方案 B 已确定，待 online 分支实施 | OSS 打包产物已上传；服务器需配置 OSS 凭据 | 无 | 后端动态生成短期 OSS 签名 URL，前端按钮点击后请求后端获取下载链接；当前分支只记录方案，不在 packaging 直接实现。 |
 | P12 | 七步/四步小问题对比解析稳健性 | 已定位，待修复 | 无 | 无 | 2026-05-16 导出的 `.dra` 中 quant/qual 只有 step 没有 subquestion；模型输出从 `### **1. 标题**` 漂移到 `#### 1.1 标题`/`### 一、标题` 等格式，当前解析器未识别，导致对比页只能显示大维度。建议在 P9 大功能前处理。 |
 | P13 | 对比页 AI 总结选中文本未进入提示词 | 打包路径已修复，待重新打包与干净数据目录验证 | 无 | 无 | 旧打包产物运行时 `PROJECT_ROOT` 指错，找不到 `prompts/compare/ai_summary.md`，因此初始化时写入了缺少 `{selected_text}` 的 fallback 提示词；`426f8d2d` 已改为 frozen 环境使用 `sys._MEIPASS`。 |
+| P15 | 新服务器部署结构归一化 | 已定位，待单独规划实施 | 当前新服务器功能验证稳定后 | [NEW_SERVER_SQL_MAINTENANCE.md](./NEW_SERVER_SQL_MAINTENANCE.md) 7.1.1 节 | 服务器同时存在 `/root/deep-reading-agent/backend/routers/reading.py` 和 `/root/deep-reading-agent/routers/reading.py`；当前 uvicorn cwd 是 `backend`，但 `backend/main.py` 把项目根目录插入 `sys.path` 并 `from routers import reading`，容易导入根目录副本。后续应统一为 `uvicorn backend.main:app` + 显式 `backend.routers` 导入，再删除兼容副本。 |
+| P16 | 七步/四步精读并发复用长文本稳定方案 | 已形成实施计划，待实施 | 新服务器批量长文本精读验证成功后 | [实施计划](./superpowers/plans/2026-05-26-quant-qual-concurrency-reuse-long-fix.md) | 为七步/四步增加 `QUANT_STEP_CONCURRENCY`、`QUAL_STEP_CONCURRENCY`，继续复用文件级 `READING_FILE_CONCURRENCY` 和 PostgreSQL `NullPool`。 |
+| P17 | 文献库已有 PDF/Markdown 直接发起精读 | 已形成实施计划，待实施 | P16 或当前 reading batch 稳定方案 | [实施计划](./superpowers/plans/2026-05-26-library-existing-files-start-reading.md) | 文献库多选已有可读文件后直接启动长文本/七步/四步精读；AI 助手增加 `start_library_batch_reading`，通过 entry_ids 解析已有 file_ids 后复用 reading batch API。 |
 
 ## 2. 各事项说明
 
@@ -323,7 +326,7 @@ PDF 结构复杂度：
 
 ### 2.9 对比页 AnswerCard 三按钮（P9）
 
-**状态：设计完成，待实施**
+**状态：已完成（2026-05）**
 
 设计文档：[2026-05-14-compare-card-actions-design.md](./superpowers/specs/2026-05-14-compare-card-actions-design.md)
 
@@ -604,8 +607,8 @@ PDF 结构复杂度：
 5. `对比页 AI 总结选中文本未进入提示词`（P13，路径修复已提交，需重新打包并用干净数据目录验证）
 6. `七步/四步小问题对比解析稳健性`（P12，先修解析器和历史补齐，再做更大的对比页交互）
 7. `Online 页面提供打包版下载`（P11，切到 online 分支实施后端签名 URL 接口与前端下载按钮）
-8. `文献综述提示词纳入提示词管理`（P3，作为 AI 综述模块剩余项单独推进）
-9. `对比页 AnswerCard 三按钮 — 编辑/点评/AI总结`（P9，设计完成，实施工作量约 2 天）
+8. ~~`文献综述提示词纳入提示词管理`~~（P3，`synthesis` 类型+8 槽位已注册到 `prompt_registry.py`，提示词文件已入库 `prompts/synthesis/`）
+9. ~~`对比页 AnswerCard 三按钮 — 编辑/点评/AI总结`~~（P9，**已完成（2026-05）**）
 10. `Playwright E2E + 部署验收`（P7）
 
 ## 4. 待补充区域

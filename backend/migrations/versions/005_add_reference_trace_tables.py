@@ -19,9 +19,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _replace_check_constraint(table_name: str, old_sql: str, new_sql: str) -> None:
-    with op.batch_alter_table(table_name, recreate="always") as batch_op:
-        batch_op.drop_constraint(old_sql, type_="check")
-        batch_op.create_check_constraint(old_sql, new_sql)
+    if op.get_context().dialect.name == "sqlite":
+        with op.batch_alter_table(table_name, recreate="always") as batch_op:
+            batch_op.drop_constraint(old_sql, type_="check")
+            batch_op.create_check_constraint(old_sql, new_sql)
+        return
+
+    op.drop_constraint(old_sql, table_name, type_="check")
+    op.create_check_constraint(old_sql, table_name, new_sql)
 
 
 def upgrade() -> None:

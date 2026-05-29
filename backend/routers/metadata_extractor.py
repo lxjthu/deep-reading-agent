@@ -19,11 +19,11 @@ def sanitize_filename(name: str) -> str:
 def extract_metadata(paper_text: str, api_key: str) -> dict:
     """Extract paper metadata using DeepSeek API"""
     try:
-        from openai import OpenAI
         import httpx
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com",
+        from backend.utils.llm_provider import create_openai_client, model_for_api_key
+
+        client = create_openai_client(
+            api_key,
             timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
         )
         
@@ -38,7 +38,7 @@ def extract_metadata(paper_text: str, api_key: str) -> dict:
 {paper_text[:3000]}
 """
         response = client.chat.completions.create(
-            model="deepseek-v4-flash",
+            model=model_for_api_key(api_key, "deepseek-v4-flash"),
             extra_body={"thinking": {"type": "disabled"}},
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,

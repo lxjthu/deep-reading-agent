@@ -139,6 +139,33 @@ class TestMarkCompleted(unittest.TestCase):
         self.qm.mark_completed("nonexistent")
 
 
+class TestRemoveQueued(unittest.TestCase):
+    """remove_queued: remove tasks that never reached running state."""
+
+    def setUp(self):
+        self.qm = TaskQueueManager()
+
+    def test_remove_queued_task_removes_from_queue(self):
+        self.qm.enqueue("t1", user_id=1, task_type="long")
+        self.qm.enqueue("t2", user_id=1, task_type="long")
+
+        removed = self.qm.remove_queued("t1")
+
+        self.assertTrue(removed)
+        status = self.qm.get_queue_status()
+        self.assertEqual(status["queue_length"], 1)
+        self.assertEqual(status["queue_tasks"][0]["task_id"], "t2")
+
+    def test_remove_queued_running_task_returns_false(self):
+        self.qm.enqueue("t1", user_id=1, task_type="long")
+        self.qm.mark_running("t1")
+
+        removed = self.qm.remove_queued("t1")
+
+        self.assertFalse(removed)
+        self.assertEqual(self.qm.get_queue_status()["running_count"], 1)
+
+
 class TestGetTaskQueueInfo(unittest.TestCase):
     """get_task_queue_info: 查询特定任务的队列信息"""
 

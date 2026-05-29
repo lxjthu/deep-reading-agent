@@ -28,7 +28,7 @@ from services.metadata_sources import CandidateMetadata
 from services.openalex_source import OpenAlexSource
 from services.pdf_metadata_extract import extract_front_matter
 from services.pdf_metadata_llm import extract_metadata_with_llm
-from upload_storage import resolve_storage_path
+from upload_storage import file_record_exists, resolve_storage_path
 from backend.utils.api_key import validate_deepseek_key
 from services.abstract_translator import run_batch_translate
 from routers.upload import compute_expires_at, detect_file_type, persist_upload_to_temp, utcnow_naive
@@ -59,6 +59,14 @@ class LibraryEntrySummary(BaseModel):
     tags: list[str]
     note: Optional[str]
     filter_score: Optional[float] = None
+
+
+class LibraryEntryPageResponse(BaseModel):
+    items: list[LibraryEntrySummary]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
 
 
 class LibraryArtifactResponse(BaseModel):
@@ -284,6 +292,27 @@ def build_entry_summary(
     )
 
 
+def sanitize_entry_source_files(
+    entry: BibEntry,
+    source_file: File | None,
+    markdown_file: File | None,
+) -> tuple[File | None, File | None, bool]:
+    valid_source = source_file if file_record_exists(source_file) else None
+    valid_markdown = markdown_file if file_record_exists(markdown_file) else None
+    changed = False
+    if entry.source_file_id and valid_source is None:
+        entry.source_file_id = None
+        changed = True
+    if entry.markdown_source_file_id and valid_markdown is None:
+        entry.markdown_source_file_id = None
+        changed = True
+    if changed:
+        entry.updated_at = utcnow_naive()
+    if valid_markdown is None and valid_source is not None and valid_source.file_type == "markdown":
+        valid_markdown = valid_source
+    return valid_source, valid_markdown, changed
+
+
 def _candidate_response(candidate) -> FullTextCandidateResponse:
     return FullTextCandidateResponse(
         url=candidate.url,
@@ -338,6 +367,7 @@ async def _attach_pdf_bytes_to_entry(
         expires_at=compute_expires_at(user),
     )
     db.add(record)
+    await db.flush()
     entry.source_file_id = record.id
     if entry.reading_status == "none":
         entry.reading_status = "has_pdf"
@@ -515,6 +545,36 @@ async def list_entries(
     )
 
 
+@router.get("/entries/page", response_model=LibraryEntryPageResponse)
+async def list_entries_page(
+    search: str = Query(default=""),
+    journal: str = Query(default=""),
+    tags: str = Query(default=""),
+    reading_status: str = Query(default=""),
+    pinned_only: bool = Query(default=False),
+    sort_by: str = Query(default="updated"),
+    sort_order: str = Query(default="desc"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=200),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LibraryEntryPageResponse:
+    return await _list_entries_page(
+        db=db,
+        user=user,
+        search=search,
+        journal=journal,
+        tags=_clean_tags(tags.split(",")),
+        reading_status=reading_status,
+        pinned_only=pinned_only,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        entry_ids=[],
+        page=page,
+        page_size=page_size,
+    )
+
+
 @router.post("/entries/by-ids", response_model=list[LibraryEntrySummary])
 async def list_entries_by_ids(
     request: LibraryEntryIdsRequest,
@@ -545,19 +605,16 @@ async def list_entries_by_ids(
     )
 
 
-async def _list_entries(
+def _build_entries_stmt(
     *,
-    db: AsyncSession,
     user: User,
     search: str,
     journal: str,
     tags: list[str],
     reading_status: str,
     pinned_only: bool,
-    sort_by: str,
-    sort_order: str,
     entry_ids: list[str],
-) -> list[LibraryEntrySummary]:
+):
     score_subq = (
         select(BibFilterLink.bib_entry_id, func.max(BibFilterLink.score).label("max_score"))
         .group_by(BibFilterLink.bib_entry_id)
@@ -587,31 +644,110 @@ async def _list_entries(
         stmt = stmt.where(BibEntry.is_pinned == 1)
     if entry_ids:
         stmt = stmt.where(BibEntry.id.in_(entry_ids))
+    for tag in tags:
+        escaped = tag.replace('"', '\\"')
+        stmt = stmt.where(BibEntry.user_tags_json.ilike(f'%"{escaped}"%'))
+    return stmt, score_subq
 
+
+def _apply_entry_sorting(stmt, *, sort_by: str, sort_order: str):
     if sort_by == "score":
         if sort_order == "desc":
-            stmt = stmt.order_by(desc(func.coalesce(score_subq.c.max_score, 0)), BibEntry.created_at.desc())
-        else:
-            stmt = stmt.order_by(asc(func.coalesce(score_subq.c.max_score, 0)), BibEntry.created_at.desc())
-    elif sort_by == "year":
+            return stmt.order_by(desc(func.coalesce(stmt.selected_columns.max_score, 0)), BibEntry.created_at.desc())
+        return stmt.order_by(asc(func.coalesce(stmt.selected_columns.max_score, 0)), BibEntry.created_at.desc())
+    if sort_by == "year":
         if sort_order == "desc":
-            stmt = stmt.order_by(desc(BibEntry.year), BibEntry.created_at.desc())
-        else:
-            stmt = stmt.order_by(asc(BibEntry.year), BibEntry.created_at.desc())
-    elif sort_by == "journal":
+            return stmt.order_by(desc(BibEntry.year), BibEntry.created_at.desc())
+        return stmt.order_by(asc(BibEntry.year), BibEntry.created_at.desc())
+    if sort_by == "journal":
         if sort_order == "desc":
-            stmt = stmt.order_by(desc(func.coalesce(BibEntry.journal, "")), BibEntry.created_at.desc())
-        else:
-            stmt = stmt.order_by(asc(func.coalesce(BibEntry.journal, "")), BibEntry.created_at.desc())
-    else:
-        stmt = stmt.order_by(BibEntry.is_pinned.desc(), BibEntry.updated_at.desc(), BibEntry.created_at.desc())
+            return stmt.order_by(desc(func.coalesce(BibEntry.journal, "")), BibEntry.created_at.desc())
+        return stmt.order_by(asc(func.coalesce(BibEntry.journal, "")), BibEntry.created_at.desc())
+    return stmt.order_by(BibEntry.is_pinned.desc(), BibEntry.updated_at.desc(), BibEntry.created_at.desc())
+
+
+async def _list_entries(
+    *,
+    db: AsyncSession,
+    user: User,
+    search: str,
+    journal: str,
+    tags: list[str],
+    reading_status: str,
+    pinned_only: bool,
+    sort_by: str,
+    sort_order: str,
+    entry_ids: list[str],
+) -> list[LibraryEntrySummary]:
+    stmt, _score_subq = _build_entries_stmt(
+        user=user,
+        search=search,
+        journal=journal,
+        tags=tags,
+        reading_status=reading_status,
+        pinned_only=pinned_only,
+        entry_ids=entry_ids,
+    )
+    stmt = _apply_entry_sorting(stmt, sort_by=sort_by, sort_order=sort_order)
 
     rows = (await db.execute(stmt)).all()
-    summaries = [build_entry_summary(entry, source_file, max_score) for entry, source_file, max_score in rows]
-    if tags:
-        expected_tags = set(tags)
-        summaries = [summary for summary in summaries if expected_tags.issubset(set(summary.tags))]
+    summaries: list[LibraryEntrySummary] = []
+    changed = False
+    for entry, source_file, max_score in rows:
+        source_file, markdown_file, repaired = sanitize_entry_source_files(entry, source_file, None)
+        changed = changed or repaired
+        summaries.append(build_entry_summary(entry, source_file, max_score, markdown_file))
+    if changed:
+        await db.commit()
     return summaries
+
+
+async def _list_entries_page(
+    *,
+    db: AsyncSession,
+    user: User,
+    search: str,
+    journal: str,
+    tags: list[str],
+    reading_status: str,
+    pinned_only: bool,
+    sort_by: str,
+    sort_order: str,
+    entry_ids: list[str],
+    page: int,
+    page_size: int,
+) -> LibraryEntryPageResponse:
+    stmt, _score_subq = _build_entries_stmt(
+        user=user,
+        search=search,
+        journal=journal,
+        tags=tags,
+        reading_status=reading_status,
+        pinned_only=pinned_only,
+        entry_ids=entry_ids,
+    )
+    total = (
+        await db.execute(
+            select(func.count()).select_from(stmt.order_by(None).subquery())
+        )
+    ).scalar_one()
+    paged_stmt = _apply_entry_sorting(stmt, sort_by=sort_by, sort_order=sort_order).offset((page - 1) * page_size).limit(page_size)
+    rows = (await db.execute(paged_stmt)).all()
+    items: list[LibraryEntrySummary] = []
+    changed = False
+    for entry, source_file, max_score in rows:
+        source_file, markdown_file, repaired = sanitize_entry_source_files(entry, source_file, None)
+        changed = changed or repaired
+        items.append(build_entry_summary(entry, source_file, max_score, markdown_file))
+    if changed:
+        await db.commit()
+    return LibraryEntryPageResponse(
+        items=items,
+        total=int(total or 0),
+        page=page,
+        page_size=page_size,
+        has_more=page * page_size < int(total or 0),
+    )
 
 
 @router.get("/entries/{entry_id}", response_model=LibraryEntryDetail)
@@ -623,6 +759,9 @@ async def get_entry_detail(
     entry = await get_owned_entry(db, user, entry_id)
     source_file = await db.get(File, entry.source_file_id) if entry.source_file_id else None
     markdown_file = await db.get(File, entry.markdown_source_file_id) if entry.markdown_source_file_id else None
+    source_file, markdown_file, changed = sanitize_entry_source_files(entry, source_file, markdown_file)
+    if changed:
+        await db.commit()
 
     timeline_rows = (
         await db.execute(
@@ -897,8 +1036,9 @@ async def get_entry_reader(
     entry = await get_owned_entry(db, user, entry_id)
     source_file = await db.get(File, entry.source_file_id) if entry.source_file_id else None
     markdown_file = await db.get(File, entry.markdown_source_file_id) if entry.markdown_source_file_id else None
-    if markdown_file is None and source_file is not None and source_file.file_type == "markdown":
-        markdown_file = source_file
+    source_file, markdown_file, changed = sanitize_entry_source_files(entry, source_file, markdown_file)
+    if changed:
+        await db.commit()
 
     translation_row = (
         await db.execute(
@@ -934,9 +1074,11 @@ async def get_entry_reader(
         source_translation_artifact_id = translation_row.id if translation_row else None
         source_markdown_file_id = None
     else:
-        markdown = read_markdown_file(markdown_file.storage_path) if markdown_file else ""
+        if markdown_file is None:
+            raise HTTPException(status_code=404, detail="当前文献原文文件已丢失，请重新上传 Markdown 原文。")
+        markdown = read_markdown_file(markdown_file.storage_path)
         source_translation_artifact_id = None
-        source_markdown_file_id = markdown_file.id if markdown_file else None
+        source_markdown_file_id = markdown_file.id
 
     card_rows = (
         await db.execute(

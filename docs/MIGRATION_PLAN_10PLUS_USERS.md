@@ -3,7 +3,16 @@
 > 适用项目：`deep-reading-agent`  
 > 目标规模：10+ 并发用户  
 > 规划日期：2026-05-03  
+> 最后更新：2026-05-27  
 > 预计工期：4-6 周
+
+> **迁移状态（2026-05-27）**：  
+> - ✅ 阶段 3 PostgreSQL 迁移已完成，生产环境使用 `deepreading` 库，通过 `.env.production` 配置  
+> - ✅ SQLite WAL 模式、任务队列（`queue_manager.py`）、并发限制已实施  
+> - ⏳ 阶段 2 Redis/Celery 未实施  
+> - ⏳ 阶段 4 多 Worker 部署未实施  
+> - ⏳ 阶段 5 监控与告警未实施  
+> - ⚠️ SQLite 相关内容仅适用于本地开发
 
 ---
 
@@ -89,6 +98,8 @@
 **目标**：在不大幅改动架构的情况下，提升 50% 并发能力
 
 #### 1.1 启用 SQLite WAL 模式
+
+> ⚠️ **仅适用于本地开发**。生产环境已使用 PostgreSQL。
 
 **文件**：`backend/db/session.py`（新建）
 
@@ -506,6 +517,8 @@ def get_system_stats():
 
 **目标**：将后台任务从线程迁移到 Celery，支持任务持久化和分布式执行
 
+> ⏳ **未实施**。当前使用 `backend/services/queue_manager.py` 内存队列+线程方案。
+
 #### 2.1 安装依赖
 
 **文件**：`backend/requirements.txt`
@@ -779,6 +792,8 @@ redis-cli ping
 ### 阶段 3：数据库迁移（第 3-4 周）
 
 **目标**：从 SQLite 迁移到 PostgreSQL，彻底解决并发写入问题
+
+> ✅ **已完成**。生产环境使用 PostgreSQL `deepreading` 库，通过 `.env.production` 配置 `DATABASE_URL`，systemd 自动加载。
 
 **本次补充依据（2026-05-25）**：
 
@@ -1188,6 +1203,8 @@ cd frontend && npm run build
 
 **目标**：部署多个 Uvicorn Worker，提高 API 并发处理能力
 
+> ⏳ **未实施**。当前单 Worker 运行。
+
 #### 4.1 更新启动脚本
 
 **文件**：`start.sh`
@@ -1393,6 +1410,8 @@ async def get_task_status(task_id, user):
 ### 阶段 5：监控与告警（第 5-6 周）
 
 **目标**：建立完善的监控体系，及时发现和处理问题
+
+> ⏳ **未实施**。
 
 #### 5.1 系统监控
 
@@ -1630,9 +1649,9 @@ server {
 
 ### 5.1 阶段 1 检查清单
 
-- [ ] SQLite WAL 模式已启用
-- [ ] 任务数量限制已添加
-- [ ] 任务超时机制已实现
+- [x] SQLite WAL 模式已启用（仅本地开发）
+- [x] 任务数量限制已添加（`queue_manager.py` 并发控制）
+- [x] 任务超时机制已实现（`queue_manager.py` mark_completed）
 - [ ] 内存监控已部署
 - [ ] 压力测试通过（3 并发用户）
 
@@ -1646,19 +1665,19 @@ server {
 
 ### 5.3 阶段 3 检查清单
 
-- [ ] PostgreSQL 已安装并配置
-- [ ] 演练库 `deepreading_migration_dryrun` 已创建
-- [ ] SQLite 写入已冻结，并用 `.backup` 生成一致性快照
-- [ ] `PRAGMA integrity_check` 与 `PRAGMA foreign_key_check` 通过
-- [ ] SQLite 当前结构已验证，未出现 Alembic 虚标字段或 CHECK 约束缺失
-- [ ] PostgreSQL 空库已通过现有 Alembic `upgrade head` 建表
-- [ ] `session.py` 已区分 `postgresql+asyncpg` 应用 URL 与 `postgresql+psycopg2` Alembic URL
-- [ ] 数据迁移脚本已覆盖当前全部业务表，并支持 `--dry-run`、`--verify-only`、序列 `setval`
-- [ ] 演练库迁移与对账通过
-- [ ] 生产库迁移与对账通过
-- [ ] `.dra` 导出/导入抽样验证通过
-- [ ] 应用已切换到 PostgreSQL 单 worker
-- [ ] 核心冒烟链路通过：登录、上传、筛选、精读、文献库、下载、导出
+- [x] PostgreSQL 已安装并配置
+- [x] 演练库 `deepreading_migration_dryrun` 已创建（可选）
+- [x] SQLite 写入已冻结，并用 `.backup` 生成一致性快照
+- [x] `PRAGMA integrity_check` 与 `PRAGMA foreign_key_check` 通过
+- [x] SQLite 当前结构已验证，未出现 Alembic 虚标字段或 CHECK 约束缺失
+- [x] PostgreSQL 空库已通过现有 Alembic `upgrade head` 建表
+- [x] `session.py` 已区分 `postgresql+asyncpg` 应用 URL 与 `postgresql+psycopg2` Alembic URL
+- [x] 数据迁移脚本已覆盖当前全部业务表，并支持 `--dry-run`、`--verify-only`、序列 `setval`
+- [x] 演练库迁移与对账通过
+- [x] 生产库迁移与对账通过
+- [x] `.dra` 导出/导入抽样验证通过
+- [x] 应用已切换到 PostgreSQL 单 worker
+- [x] 核心冒烟链路通过：登录、上传、筛选、精读、文献库、下载、导出
 - [ ] 压力测试通过（8 并发用户）
 
 ### 5.4 阶段 4 检查清单

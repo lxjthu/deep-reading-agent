@@ -6,13 +6,33 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import delete as sa_delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import AsyncSessionLocal, DB_DIR, PROJECT_ROOT
-from sqlalchemy import delete as sa_delete, select, update
-
-from db.models import Annotation, Artifact, BibEntry, CardNote, File, Job, ReadingItem, ReadingItemEdit, UploadBatch
+from db.models import (
+    AgentActionProposal,
+    AgentMessage,
+    AgentSession,
+    Annotation,
+    Artifact,
+    BibEntry,
+    BibFilterLink,
+    BibReference,
+    BibReferenceCitation,
+    CardNote,
+    DimensionItem,
+    DimensionSet,
+    File,
+    Job,
+    JobBibEntry,
+    PromptTemplate,
+    ReadingItem,
+    ReadingItemEdit,
+    RefFormatPreset,
+    UploadBatch,
+    UserFeedback,
+)
 from upload_storage import get_upload_root, resolve_storage_path
 
 
@@ -87,6 +107,31 @@ def _remove_file_if_exists(path: Path) -> bool:
     except FileNotFoundError:
         return False
     return False
+
+
+def _resolve_result_storage_path(root: Path, storage_path: str | None) -> Path | None:
+    if not storage_path:
+        return None
+    candidate = Path(storage_path)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    return candidate
+
+
+def _count_existing_paths(paths: set[Path]) -> int:
+    return sum(1 for path in paths if path.exists() and path.is_file())
+
+
+def _delete_physical_paths(paths: set[Path]) -> int:
+    deleted = 0
+    for path in sorted(paths):
+        if _remove_file_if_exists(path):
+            deleted += 1
+    return deleted
+
+
+async def _scalar_count(db: AsyncSession, statement) -> int:
+    return int((await db.execute(statement)).scalar_one() or 0)
 
 
 def remove_empty_directories(root: Path) -> int:
@@ -260,9 +305,29 @@ async def _cleanup_normal_with_session(
     dry_run: bool,
 ) -> dict[str, Any]:
     """Delete all records owned by users with role='normal', plus physical files."""
-    from sqlalchemy import select as sa_select
+    from db.models import User
+
     stats = {
         "dry_run": dry_run,
+        "agent_sessions_deleted": 0,
+        "agent_messages_deleted": 0,
+        "agent_action_proposals_deleted": 0,
+        "prompt_templates_deleted": 0,
+        "ref_format_presets_deleted": 0,
+        "dimension_sets_deleted": 0,
+        "dimension_items_deleted": 0,
+        "bib_filter_links_deleted": 0,
+        "job_bib_entries_deleted": 0,
+        "bib_references_deleted": 0,
+        "bib_reference_citations_deleted": 0,
+        "bib_reference_matches_cleared": 0,
+        "user_feedback_links_cleared": 0,
+        "bib_cross_links_cleared": 0,
+        "job_links_cleared": 0,
+        "card_links_cleared": 0,
+        "reading_items_deleted": 0,
+        "reading_item_edits_deleted": 0,
+        "annotations_deleted": 0,
         "artifacts_deleted": 0,
         "card_notes_deleted": 0,
         "jobs_deleted": 0,
@@ -274,10 +339,8 @@ async def _cleanup_normal_with_session(
         "users_affected": 0,
     }
 
-    # Find all normal users
-    from db.models import User
     normal_users = (
-        await db.execute(sa_select(User).where(User.role == "normal"))
+        await db.execute(select(User).where(User.role == "normal"))
     ).scalars().all()
     normal_user_ids = [u.id for u in normal_users]
     stats["users_affected"] = len(normal_user_ids)
@@ -288,110 +351,239 @@ async def _cleanup_normal_with_session(
 
     results_root = get_results_root()
 
-    # 1. Artifacts
-    artifacts = (
-        await db.execute(
-            sa_select(Artifact).where(Artifact.owner_user_id.in_(normal_user_ids))
-        )
-    ).scalars().all()
-    for artifact in artifacts:
-        file_path = results_root / artifact.storage_path
-        if dry_run:
-            stats["artifacts_deleted"] += 1
-            if file_path.exists():
-                stats["physical_files_deleted"] += 1
-            continue
-        if _remove_file_if_exists(file_path):
-            stats["physical_files_deleted"] += 1
-        await db.delete(artifact)
-        stats["artifacts_deleted"] += 1
+    normal_dim_set_ids = select(DimensionSet.id).where(DimensionSet.owner_user_id.in_(normal_user_ids))
+    normal_job_ids = select(Job.id).where(Job.owner_user_id.in_(normal_user_ids))
+    normal_bib_ids = select(BibEntry.id).where(BibEntry.owner_user_id.in_(normal_user_ids))
+    normal_file_ids = select(File.id).where(File.owner_user_id.in_(normal_user_ids))
+    normal_artifact_ids = select(Artifact.id).where(Artifact.owner_user_id.in_(normal_user_ids))
 
-    # 2. Jobs
-    jobs = (
-        await db.execute(
-            sa_select(Job).where(Job.owner_user_id.in_(normal_user_ids))
-        )
+    physical_paths: set[Path] = set()
+    artifact_storage_paths = (
+        await db.execute(select(Artifact.storage_path).where(Artifact.owner_user_id.in_(normal_user_ids)))
     ).scalars().all()
-    for job in jobs:
-        if not dry_run:
-            await db.delete(job)
-        stats["jobs_deleted"] += 1
+    for storage_path in artifact_storage_paths:
+        resolved = _resolve_result_storage_path(results_root, storage_path)
+        if resolved is not None:
+            physical_paths.add(resolved)
 
-    # 2.5 ReadingItemEdits and Annotations (before ReadingItems)
-    if not dry_run:
-        await db.execute(sa_delete(ReadingItemEdit).where(ReadingItemEdit.owner_user_id.in_(normal_user_ids)))
-        await db.execute(sa_delete(Annotation).where(Annotation.owner_user_id.in_(normal_user_ids)))
-
-    cards = (
-        await db.execute(
-            sa_select(CardNote).where(CardNote.owner_user_id.in_(normal_user_ids))
-        )
+    card_storage_paths = (
+        await db.execute(select(CardNote.storage_path).where(CardNote.owner_user_id.in_(normal_user_ids)))
     ).scalars().all()
-    for card in cards:
-        file_path = results_root / card.storage_path if card.storage_path else None
-        if dry_run:
-            stats["card_notes_deleted"] += 1
-            if file_path and file_path.exists():
-                stats["physical_files_deleted"] += 1
-            continue
-        if file_path and _remove_file_if_exists(file_path):
-            stats["physical_files_deleted"] += 1
-        await db.delete(card)
-        stats["card_notes_deleted"] += 1
+    for storage_path in card_storage_paths:
+        resolved = _resolve_result_storage_path(results_root, storage_path)
+        if resolved is not None:
+            physical_paths.add(resolved)
 
-    # 3. BibEntries
-    bibs = (
-        await db.execute(
-            sa_select(BibEntry).where(BibEntry.owner_user_id.in_(normal_user_ids))
-        )
+    file_storage_paths = (
+        await db.execute(select(File.storage_path).where(File.owner_user_id.in_(normal_user_ids)))
     ).scalars().all()
-    for bib in bibs:
-        if not dry_run:
-            await db.execute(sa_delete(ReadingItem).where(ReadingItem.bib_entry_id == bib.id))
-            await db.delete(bib)
-        stats["bib_entries_deleted"] += 1
+    for storage_path in file_storage_paths:
+        physical_paths.add(resolve_storage_path(storage_path))
 
-    # 4. Files (with physical cleanup)
-    files = (
-        await db.execute(
-            sa_select(File).where(File.owner_user_id.in_(normal_user_ids))
-        )
-    ).scalars().all()
-    for record in files:
-        physical_path = resolve_storage_path(record.storage_path)
-        if dry_run:
-            stats["files_deleted"] += 1
-            if physical_path.exists():
-                stats["physical_files_deleted"] += 1
-            continue
-        if _remove_file_if_exists(physical_path):
-            stats["physical_files_deleted"] += 1
-        await db.delete(record)
-        stats["files_deleted"] += 1
+    stats["physical_files_deleted"] = _count_existing_paths(physical_paths)
 
-    # 5. UploadBatches
-    batches = (
-        await db.execute(
-            sa_select(UploadBatch).where(UploadBatch.owner_user_id.in_(normal_user_ids))
-        )
-    ).scalars().all()
-    for batch in batches:
-        if not dry_run:
-            await db.delete(batch)
-        stats["upload_batches_deleted"] += 1
+    stats["agent_sessions_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(AgentSession).where(AgentSession.owner_user_id.in_(normal_user_ids))
+    )
+    stats["agent_messages_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(AgentMessage).where(AgentMessage.owner_user_id.in_(normal_user_ids))
+    )
+    stats["agent_action_proposals_deleted"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(AgentActionProposal).where(
+            AgentActionProposal.owner_user_id.in_(normal_user_ids)
+        ),
+    )
+    stats["prompt_templates_deleted"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(PromptTemplate).where(PromptTemplate.owner_user_id.in_(normal_user_ids)),
+    )
+    stats["ref_format_presets_deleted"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(RefFormatPreset).where(
+            RefFormatPreset.owner_user_id.in_(normal_user_ids)
+        ),
+    )
+    stats["dimension_sets_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(DimensionSet).where(DimensionSet.owner_user_id.in_(normal_user_ids))
+    )
+    stats["dimension_items_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(DimensionItem).where(DimensionItem.set_id.in_(normal_dim_set_ids))
+    )
+    stats["artifacts_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(Artifact).where(Artifact.owner_user_id.in_(normal_user_ids))
+    )
+    stats["card_notes_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(CardNote).where(CardNote.owner_user_id.in_(normal_user_ids))
+    )
+    stats["jobs_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(Job).where(Job.owner_user_id.in_(normal_user_ids))
+    )
+    stats["bib_filter_links_deleted"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(BibFilterLink).where(
+            BibFilterLink.filter_job_id.in_(normal_job_ids) | BibFilterLink.bib_entry_id.in_(normal_bib_ids)
+        ),
+    )
+    stats["job_bib_entries_deleted"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(JobBibEntry).where(
+            JobBibEntry.job_id.in_(normal_job_ids) | JobBibEntry.bib_entry_id.in_(normal_bib_ids)
+        ),
+    )
+    stats["reading_item_edits_deleted"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(ReadingItemEdit).where(
+            ReadingItemEdit.owner_user_id.in_(normal_user_ids)
+        ),
+    )
+    stats["annotations_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(Annotation).where(Annotation.owner_user_id.in_(normal_user_ids))
+    )
+    stats["reading_items_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(ReadingItem).where(ReadingItem.owner_user_id.in_(normal_user_ids))
+    )
+    stats["bib_reference_citations_deleted"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(BibReferenceCitation).where(
+            BibReferenceCitation.owner_user_id.in_(normal_user_ids)
+        ),
+    )
+    stats["bib_references_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(BibReference).where(BibReference.owner_user_id.in_(normal_user_ids))
+    )
+    stats["bib_reference_matches_cleared"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(BibReference).where(BibReference.matched_bib_entry_id.in_(normal_bib_ids)),
+    )
+    stats["user_feedback_links_cleared"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(UserFeedback).where(
+            UserFeedback.related_job_id.in_(normal_job_ids)
+            | UserFeedback.related_file_id.in_(normal_file_ids)
+            | UserFeedback.related_bib_entry_id.in_(normal_bib_ids)
+            | UserFeedback.related_artifact_id.in_(normal_artifact_ids)
+        ),
+    )
+    stats["bib_cross_links_cleared"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(BibEntry).where(
+            BibEntry.source_filter_job_id.in_(normal_job_ids)
+            | BibEntry.source_file_id.in_(normal_file_ids)
+            | BibEntry.markdown_source_file_id.in_(normal_file_ids)
+        ),
+    )
+    stats["job_links_cleared"] = await _scalar_count(
+        db, select(func.count()).select_from(Job).where(Job.input_file_id.in_(normal_file_ids))
+    )
+    stats["card_links_cleared"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(CardNote).where(
+            CardNote.source_markdown_file_id.in_(normal_file_ids)
+            | CardNote.source_translation_artifact_id.in_(normal_artifact_ids)
+        ),
+    )
+    stats["bib_entries_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(BibEntry).where(BibEntry.owner_user_id.in_(normal_user_ids))
+    )
+    stats["files_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(File).where(File.owner_user_id.in_(normal_user_ids))
+    )
+    stats["upload_batches_deleted"] = await _scalar_count(
+        db, select(func.count()).select_from(UploadBatch).where(UploadBatch.owner_user_id.in_(normal_user_ids))
+    )
 
     if dry_run:
         await db.rollback()
     else:
+        await db.execute(
+            update(BibReference)
+            .where(BibReference.matched_bib_entry_id.in_(normal_bib_ids))
+            .values(matched_bib_entry_id=None, match_method=None, match_score=None)
+        )
+        await db.execute(
+            update(UserFeedback)
+            .where(
+                UserFeedback.related_job_id.in_(normal_job_ids)
+                | UserFeedback.related_file_id.in_(normal_file_ids)
+                | UserFeedback.related_bib_entry_id.in_(normal_bib_ids)
+                | UserFeedback.related_artifact_id.in_(normal_artifact_ids)
+            )
+            .values(
+                related_job_id=None,
+                related_file_id=None,
+                related_bib_entry_id=None,
+                related_artifact_id=None,
+            )
+        )
+        await db.execute(
+            update(BibEntry)
+            .where(
+                BibEntry.source_filter_job_id.in_(normal_job_ids)
+                | BibEntry.source_file_id.in_(normal_file_ids)
+                | BibEntry.markdown_source_file_id.in_(normal_file_ids)
+            )
+            .values(
+                source_filter_job_id=None,
+                source_file_id=None,
+                markdown_source_file_id=None,
+            )
+        )
+        await db.execute(
+            update(Job)
+            .where(Job.input_file_id.in_(normal_file_ids))
+            .values(input_file_id=None)
+        )
+        await db.execute(
+            update(CardNote)
+            .where(
+                CardNote.source_markdown_file_id.in_(normal_file_ids)
+                | CardNote.source_translation_artifact_id.in_(normal_artifact_ids)
+            )
+            .values(source_markdown_file_id=None, source_translation_artifact_id=None)
+        )
+        await db.execute(sa_delete(AgentActionProposal).where(AgentActionProposal.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(AgentMessage).where(AgentMessage.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(AgentSession).where(AgentSession.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(PromptTemplate).where(PromptTemplate.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(RefFormatPreset).where(RefFormatPreset.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(DimensionItem).where(DimensionItem.set_id.in_(normal_dim_set_ids)))
+        await db.execute(sa_delete(DimensionSet).where(DimensionSet.owner_user_id.in_(normal_user_ids)))
+        await db.execute(
+            sa_delete(BibReferenceCitation).where(BibReferenceCitation.owner_user_id.in_(normal_user_ids))
+        )
+        await db.execute(sa_delete(BibReference).where(BibReference.owner_user_id.in_(normal_user_ids)))
+        await db.execute(
+            sa_delete(BibFilterLink).where(
+                BibFilterLink.filter_job_id.in_(normal_job_ids) | BibFilterLink.bib_entry_id.in_(normal_bib_ids)
+            )
+        )
+        await db.execute(
+            sa_delete(JobBibEntry).where(
+                JobBibEntry.job_id.in_(normal_job_ids) | JobBibEntry.bib_entry_id.in_(normal_bib_ids)
+            )
+        )
+        await db.execute(sa_delete(ReadingItemEdit).where(ReadingItemEdit.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(Annotation).where(Annotation.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(ReadingItem).where(ReadingItem.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(CardNote).where(CardNote.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(Artifact).where(Artifact.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(Job).where(Job.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(BibEntry).where(BibEntry.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(File).where(File.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(UploadBatch).where(UploadBatch.owner_user_id.in_(normal_user_ids)))
         await db.commit()
+        stats["physical_files_deleted"] = _delete_physical_paths(physical_paths)
         stats["empty_dirs_deleted"] += remove_empty_directories(get_upload_root())
         stats["empty_dirs_deleted"] += remove_empty_directories(get_results_root())
 
     summary = (
         "cleanup_normal_users dry_run={dry_run} users={users_affected} "
-        "artifacts={artifacts_deleted} jobs={jobs_deleted} "
-        "bib_entries={bib_entries_deleted} files={files_deleted} "
-        "batches={upload_batches_deleted} physical_files={physical_files_deleted} "
+        "sessions={agent_sessions_deleted} messages={agent_messages_deleted} "
+        "proposals={agent_action_proposals_deleted} refs={bib_references_deleted} "
+        "ref_citations={bib_reference_citations_deleted} "
+        "artifacts={artifacts_deleted} jobs={jobs_deleted} bib_entries={bib_entries_deleted} "
+        "files={files_deleted} batches={upload_batches_deleted} physical_files={physical_files_deleted} "
         "empty_dirs={empty_dirs_deleted}"
     ).format(**stats)
     log_cleanup(summary)

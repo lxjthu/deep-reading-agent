@@ -87,7 +87,7 @@ $ python -m scripts.seed_admin
 $ python -m scripts.seed_admin                # 幂等
 [seed_admin] admin 'admin' already exists (id=1); skipping.
 
-$ sqlite3 db/app.sqlite '.tables'
+$ sqlite3 db/app.sqlite '.tables'  # 注意：生产环境已迁移到 PostgreSQL
 alembic_version  bib_filter_links  invite_codes      upload_batches
 artifacts        files             job_bib_entries   user_settings
 bib_entries      jobs              users
@@ -115,7 +115,7 @@ M  backend/requirements.txt
 
 ## 3. 服务器手动部署指引（首次）⭐
 
-> **注意**：项目的自动部署机制是 — push 到 `online` 分支后服务器自动跑 `deploy.sh` —— 它会执行 `git pull → pip install → start.sh`。  
+> **注意**：当前部署方式为 SCP 上传改动文件后执行 `systemctl restart deepreading-api`，无自动部署机制。  
 > 但**首次**部署多用户系统额外需要：① 跑数据库迁移；② seed admin。这两步**没有**自动化，必须手动一次。
 
 ### 3.1 推荐方式：先 ssh 准备好 DB，再 push 触发部署
@@ -137,7 +137,7 @@ git commit -m "feat(p0): 多用户系统数据库 schema + admin seed
 # 2. ssh 到服务器，先装依赖 + 建库 + seed admin
 ssh root@<服务器>          # 用你常用的 ssh 入口
 
-cd /root/.openclaw/workspace/deep-reading-agent
+cd /root/deep-reading-agent
 
 # 拉取本次 commit 之前的代码（保持服务先不变）—— 也可跳过这步直接等 push 后再装
 git fetch origin online
@@ -148,17 +148,17 @@ pip install 'sqlalchemy>=2.0.0' 'aiosqlite>=0.19.0' 'alembic>=1.13.0' \
             'python-jose[cryptography]>=3.3.0' 'apscheduler>=3.10.0' \
             'email-validator>=2.0.0'
 
-# 3. 本地：push 触发自动部署（deploy.sh 会跑 git reset --hard + pip install + start.sh）
+# 3. 本地：push，然后 SCP 上传到服务器或 git pull，执行 systemctl restart deepreading-api
 git push origin online
 
 # 4. 等 30 秒后再回到服务器，跑迁移和 seed
 ssh root@<服务器>
-cd /root/.openclaw/workspace/deep-reading-agent
+cd /root/deep-reading-agent
 source venv/bin/activate
 cd backend
 alembic upgrade head                                   # 创建 db/app.sqlite + 全部表
 python -m scripts.seed_admin                           # seed admin 账号
-sqlite3 ../db/app.sqlite "SELECT id, username, role FROM users;"
+sqlite3 ../db/app.sqlite "SELECT id, username, role FROM users;"  # 注意：生产环境已迁移到 PostgreSQL，应用 psql 查询
 # 期望输出：1|admin|admin
 
 # 5. 健康检查（deploy.sh 已经重启过服务了，但 P0 没接路由，行为应保持原状）
@@ -174,7 +174,7 @@ git push origin online
 
 # 等 deploy.sh 跑完（pip install 会自动装新依赖），ssh 上去
 ssh root@<服务器>
-cd /root/.openclaw/workspace/deep-reading-agent
+cd /root/deep-reading-agent
 source venv/bin/activate
 cd backend
 alembic upgrade head
@@ -188,9 +188,9 @@ python -m scripts.seed_admin
 服务器上：
 
 ```
-/root/.openclaw/workspace/deep-reading-agent/
+/root/deep-reading-agent/
 ├── db/
-│   ├── app.sqlite                 # ← 主库，被 .gitignore 忽略
+│   ├── app.sqlite                 # ← 主库，被 .gitignore 忽略（生产环境已迁移到 PostgreSQL）
 │   └── (将来会有 backups/、cleanup.log)
 ├── backend/
 └── _uploads/、deep_reading_results/   # 现存无主文件，待 P8 迁移
@@ -209,7 +209,7 @@ git push origin online
 
 # 2. 若本次包含 Alembic 新迁移，再手动上服务器执行
 ssh root@<服务器>
-cd /root/.openclaw/workspace/deep-reading-agent
+cd /root/deep-reading-agent
 source venv/bin/activate
 cd backend
 alembic upgrade head
@@ -1422,6 +1422,6 @@ OK
 ## 6. 联系点
 
 - Cloudflare Tunnel 域名：https://deepreading.qzz.io/
-- 服务器路径：`/root/.openclaw/workspace/deep-reading-agent`
+- 服务器路径：`/root/deep-reading-agent`
 - 自动部署触发：push 到 `online` 分支
 - 主分支：`main`（PR 目标），当前工作分支：`online`

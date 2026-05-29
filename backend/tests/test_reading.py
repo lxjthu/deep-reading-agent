@@ -557,6 +557,44 @@ class ReadingRouterTests(unittest.TestCase):
             jobs = session.execute(select(Job).where(Job.job_type == "reading_quant")).scalars().all()
             self.assertEqual(len(jobs), 2)
 
+    def test_normalize_long_analysis_dims_falls_back_to_defaults(self) -> None:
+        dims = reading_router.normalize_long_analysis_dims([])
+        self.assertGreater(len(dims), 0)
+        self.assertIn("研究问题", dims)
+        self.assertNotIn("自定义问题", dims)
+
+    def test_batch_long_without_analysis_dims_uses_default_dimensions(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        payload = self.upload_pdf(headers)
+
+        response = self.client.post(
+            "/api/reading/batch/start",
+            headers=headers,
+            json={
+                "file_ids": [payload["file_id"]],
+                "mode": "long",
+                "api_key": "dummy",
+                "conflict_resolution": "skip",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["tasks"][0]["status"], "queued")
+        self.assertIsNotNone(body["tasks"][0]["task_id"])
+
+        run_pending_reading_tasks()
+
+        with Session(self.sync_engine) as session:
+            job = session.execute(select(Job).where(Job.id == body["tasks"][0]["task_id"])).scalar_one()
+            self.assertEqual(job.job_type, "reading_long")
+            self.assertEqual(job.status, "success")
+            reading_items = session.execute(
+                select(ReadingItem).where(ReadingItem.job_id == job.id).order_by(ReadingItem.sort_order)
+            ).scalars().all()
+            labels = [item.item_label for item in reading_items]
+            self.assertIn("研究问题", labels)
+
     def test_reading_status_and_cancel_require_owner(self) -> None:
         self.register("alice", "pwd12345")
         self.register("bob", "pwd12345")

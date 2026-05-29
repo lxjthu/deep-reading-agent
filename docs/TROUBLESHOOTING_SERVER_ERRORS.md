@@ -1,8 +1,8 @@
 # 服务器报错排查记录
 
 > 适用项目：`deep-reading-agent`  
-> 记录日期：2026-05-03  
-> 服务器环境：Ubuntu, Nginx, Cloudflare Tunnel, FastAPI (uvicorn)
+> 记录日期：2026-05-03（2026-05-27 更新为当前架构）  
+> 服务器环境：Ubuntu, Nginx, PostgreSQL, FastAPI (uvicorn)
 
 ---
 
@@ -23,7 +23,7 @@
 查看服务器日志：
 
 ```bash
-tail -100 /tmp/fastapi.log
+tail -100 /var/log/deepreading/api.log
 ```
 
 发现关键错误：
@@ -57,7 +57,9 @@ File "backend/prompt_service.py", line 84, in _get_template_row
 cat > /tmp/fix_prompt.py << 'EOF'
 import sqlite3
 
-conn = sqlite3.connect('/root/.openclaw/workspace/deep-reading-agent/db/app.sqlite')
+# 注意：项目已迁移到 PostgreSQL，以下为历史记录。
+# 当前环境应使用 psql 或 SQLAlchemy 连接 PostgreSQL。
+conn = sqlite3.connect('/root/deep-reading-agent/db/app.sqlite')
 cursor = conn.cursor()
 
 # 查看重复记录
@@ -98,8 +100,8 @@ python3 /tmp/fix_prompt.py
 #### 3. 重启服务
 
 ```bash
-cd /root/.openclaw/workspace/deep-reading-agent
-bash start.sh
+# 注意：项目已迁移到 PostgreSQL，当前应使用 systemctl 管理服务
+systemctl restart deepreading-api
 ```
 
 ---
@@ -209,7 +211,7 @@ nginx -s reload   # 重新加载配置
 #### 1. 检查服务器代码是否更新
 
 ```bash
-cd /root/.openclaw/workspace/deep-reading-agent
+cd /root/deep-reading-agent
 git log --oneline -3
 ```
 
@@ -324,7 +326,10 @@ git push origin online
 #### 1. 确认数据库和连接正常
 
 ```python
-# 检查数据库文件和表
+# 注意：项目已迁移到 PostgreSQL，以下为历史 SQLite 命令。
+# 当前应使用 psql 或 SQLAlchemy 连接 PostgreSQL：
+# psql -h localhost -U postgres -d deepreading
+
 import sqlite3
 conn = sqlite3.connect('db/app.sqlite')
 cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -340,7 +345,7 @@ cur.execute("SELECT id, username, role FROM users")
 #### 2. 确认前后端通信正常
 
 ```
-Frontend (localhost:5173) → Vite proxy /api → Backend (localhost:8000) ✅
+Frontend (Nginx 静态文件) → Nginx 反代 /api → Backend (localhost:18000) ✅
 Backend /health → 200 OK ✅
 Backend /api/auth/login → 200 OK ✅
 Backend /api/auth/me → 200 OK ✅
@@ -449,10 +454,10 @@ async with AsyncSessionLocal() as db:
 │   Nginx (端口 80, 默认 1MB 限制)                                 │
 │       │                                                         │
 │       ▼                                                         │
-│   FastAPI/Uvicorn (端口 8000)                                   │
+│   FastAPI/Uvicorn (端口 18000)                                  │
 │       │                                                         │
 │       ▼                                                         │
-│   SQLite 数据库                                                  │
+│   PostgreSQL 数据库（deepreading 库）                            │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -463,14 +468,12 @@ async with AsyncSessionLocal() as db:
 
 | 目的 | 命令 |
 |------|------|
-| 查看后端日志 | `tail -100 /tmp/fastapi.log` |
-| 查看前端日志 | `tail -100 /tmp/vite.log` |
-| 检查服务进程 | `ps aux \| grep -E "uvicorn\|vite\|cloudflared\|nginx"` |
-| 检查端口监听 | `ss -tlnp` |
-| 测试 Nginx 配置 | `nginx -t` |
-| 重启 Nginx | `nginx -s reload` |
-| 检查数据库重复记录 | 见问题 1 的修复脚本 |
-| 查看错误日志 | `grep -i "error\|401\|authentication\|failed" /tmp/fastapi.log \| tail -20` |
+| 查看后端日志 | `tail -100 /var/log/deepreading/api.log` |
+| 查看后端错误日志 | `tail -100 /var/log/deepreading/api-error.log` |
+| 检查服务进程 | `systemctl status deepreading-api` |
+| 检查端口监听 | `ss -tlnp \| grep ':18000 '` |
+| 重启后端 | `systemctl restart deepreading-api` |
+| 查看错误日志 | `grep -i "error\|401\|authentication\|failed" /var/log/deepreading/api.log \| tail -20` |
 
 ---
 
@@ -575,10 +578,10 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 │   Nginx (端口 80, 默认 1MB 限制)                                 │
 │       │                                                         │
 │       ▼                                                         │
-│   FastAPI/Uvicorn (端口 8000)                                   │
+│   FastAPI/Uvicorn (端口 18000)                                  │
 │       │                                                         │
 │       ▼                                                         │
-│   SQLite 数据库                                                  │
+│   PostgreSQL 数据库（deepreading 库）                            │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -589,14 +592,12 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 
 | 目的 | 命令 |
 |------|------|
-| 查看后端日志 | `tail -100 /tmp/fastapi.log` |
-| 查看前端日志 | `tail -100 /tmp/vite.log` |
-| 检查服务进程 | `ps aux \| grep -E "uvicorn\|vite\|cloudflared\|nginx"` |
-| 检查端口监听 | `ss -tlnp` |
-| 测试 Nginx 配置 | `nginx -t` |
-| 重启 Nginx | `nginx -s reload` |
-| 检查数据库重复记录 | 见问题 1 的修复脚本 |
-| 查看错误日志 | `grep -i "error\|401\|authentication\|failed" /tmp/fastapi.log \| tail -20` |
+| 查看后端日志 | `tail -100 /var/log/deepreading/api.log` |
+| 查看后端错误日志 | `tail -100 /var/log/deepreading/api-error.log` |
+| 检查服务进程 | `systemctl status deepreading-api` |
+| 检查端口监听 | `ss -tlnp \| grep ':18000 '` |
+| 重启后端 | `systemctl restart deepreading-api` |
+| 查看错误日志 | `grep -i "error\|401\|authentication\|failed" /var/log/deepreading/api.log \| tail -20` |
 
 ---
 

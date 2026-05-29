@@ -5,9 +5,9 @@ import logging
 import json
 import concurrent.futures
 from tqdm import tqdm
-from openai import OpenAI
 from dotenv import load_dotenv
 from backend.utils.api_key import validate_deepseek_key
+from backend.utils.llm_provider import create_openai_client, model_for_api_key
 import re
 
 # Import the new parser factory
@@ -47,13 +47,11 @@ class PromptManager:
 
 class AIEvaluator:
     def __init__(self, model="deepseek-v4-flash", api_key=None):
-        self.base_url = "https://api.deepseek.com"
-        self.model = model
-        
         # Use provided key first, fallback to env
         self.api_key = validate_deepseek_key(api_key)
+        self.model = model_for_api_key(self.api_key, model)
 
-        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        self.client = create_openai_client(self.api_key)
 
     def evaluate_paper(self, paper_row, prompt_template, topic):
         """Evaluates a single paper using LLM."""

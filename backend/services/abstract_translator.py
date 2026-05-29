@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Optional
 
-from openai import OpenAI
+from backend.utils.llm_provider import create_openai_client, model_for_api_key
 
 
 _SYSTEM_PROMPT = """你是一位学术翻译专家。将英文学术摘要翻译为中文。
@@ -25,7 +25,8 @@ def _translate_one(
     api_key: str,
     model: str = "deepseek-v4-flash",
 ) -> str:
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    client = create_openai_client(api_key)
+    model = model_for_api_key(api_key, model)
     last_err = None
     for attempt in range(MAX_RETRIES + 1):
         try:

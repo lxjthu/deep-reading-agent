@@ -24,6 +24,7 @@ PROMPT_TYPE_LABELS: dict[str, str] = {
     "ai_template": "AI 模板生成",
     "translation": "全文翻译",
     "library_chat": "文献库 AI 查询",
+    "journal_kb": "AI 助手顶刊名录",
     "card_note": "Markdown 卡片笔记",
     "ref_format": "参考文献格式",
 }
@@ -148,6 +149,12 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
             "file_path": "prompts/library_chat/paper_comment_writer.md",
         },
     },
+    "journal_kb": {
+        "top_tier_registry": {
+            "title": "AI 助手顶刊名录",
+            "file_path": "prompts/journal_kb/top_tier_registry.md",
+        },
+    },
     "card_note": {
         "atomic_card_writer": {
             "title": "原子阅读卡生成",
@@ -179,6 +186,20 @@ FILTER_FALLBACK_TEMPLATE = """你是一位学术文献筛选助手。请围绕�
 - score: 0-100 的相关性评分
 - reason: 说明为什么相关或不相关
 - abstract_cn: 摘要中文翻译；如果原文已是中文可直接整理
+"""
+
+JOURNAL_KB_FALLBACK_TEMPLATE = """# Journal Knowledge Base (Top Tier)
+
+用于 AI 文献助手识别高质量期刊、做优先精读排序与子集筛选。请按以下格式维护：
+- 每一行代表一个期刊层级
+- 使用 `- **层级名称**: 期刊1, 期刊2, 缩写...`
+- 逗号分隔期刊名与常用缩写
+
+- **Economics Top 5**: American Economic Review, AER, Quarterly Journal of Economics, QJE, Journal of Political Economy, JPE, Review of Economic Studies, RES, Econometrica
+- **Management UTD 24 (Selected)**: Academy of Management Journal, AMJ, Academy of Management Review, AMR, Administrative Science Quarterly, ASQ, Strategic Management Journal, SMJ, Organization Science, OrgSci, MIS Quarterly, MISQ, Information Systems Research, ISR, Marketing Science, Journal of Marketing, JM, Journal of Consumer Research, JCR
+- **Finance Top 3**: Journal of Finance, Journal of Financial Economics, Review of Financial Studies
+- **Chinese Top Tier**: 中国社会科学, 经济研究, 管理世界, 经济学季刊, 经济学（季刊）, 世界经济, 中国工业经济, 金融研究, 会计研究, 管理科学学报, 南开管理评论, 中国农村经济, 中国农村观察, 公共管理学报, 数量经济技术经济研究, 财贸经济, 经济学动态
+- **General Science**: Nature, Science, PNAS, Proceedings of the National Academy of Sciences
 """
 
 
@@ -253,6 +274,8 @@ def get_builtin_fallback(prompt_type: str, prompt_key: str) -> str:
         return "请直接输出分析内容，不要客套开场白。"
     if prompt_type == "library_chat":
         return "你是一位学术文献库助手。请严格基于用户提供的文献信息完成当前任务。"
+    if prompt_type == "journal_kb":
+        return JOURNAL_KB_FALLBACK_TEMPLATE
     if prompt_type == "card_note":
         return """你是一位学术阅读卡片助手。请基于用户给出的论文选段、上下文和论文元数据，生成中文“原子阅读卡”。
 

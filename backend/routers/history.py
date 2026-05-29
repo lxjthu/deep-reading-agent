@@ -503,25 +503,24 @@ async def save_library_chat_report(
 
     job_id = str(uuid.uuid4())
     now = utcnow_naive()
-    db.add(
-        Job(
-            id=job_id,
-            owner_user_id=user.id,
-            job_type="library_chat",
-            status="success",
-            params_json=json.dumps(
-                {"question": req.question, "keywords": req.keywords},
-                ensure_ascii=False,
-            ),
-            progress=100,
-            current_stage="完成",
-            created_at=now,
-            started_at=now,
-            finished_at=now,
-            expires_at=compute_expires_at(user),
-        )
+    job = Job(
+        id=job_id,
+        owner_user_id=user.id,
+        job_type="library_chat",
+        status="success",
+        params_json=json.dumps(
+            {"question": req.question, "keywords": req.keywords},
+            ensure_ascii=False,
+        ),
+        progress=100,
+        current_stage="完成",
+        created_at=now,
+        started_at=now,
+        finished_at=now,
+        expires_at=compute_expires_at(user),
     )
-    await db.flush()
+    db.add(job)
+    await db.flush([job])
 
     for sort_order, entry in enumerate(members):
         db.add(

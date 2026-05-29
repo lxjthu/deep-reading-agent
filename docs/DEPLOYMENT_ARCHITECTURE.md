@@ -88,7 +88,10 @@ GitHub 发送 Webhook (POST /deploy)
 |------|------|------|
 | `models.py` | `backend/db/` | ORM 模型定义，告诉代码数据库结构 |
 | `migrations/versions/*.py` | `backend/migrations/` | Alembic 迁移脚本，告诉数据库如何升级 |
-| `db/app.sqlite` | 项目根目录下的 `db/` | SQLite 数据库文件（本地和服务器各自独立） |
+| `.env.production` | 项目根目录 | PostgreSQL DATABASE_URL（**不要提交到 Git**） |
+
+> **⚠️ 新服务器已切换到 PostgreSQL**，不再使用 SQLite。`db/app.sqlite` 仅用于本地开发。
+> 服务器数据库通过 `.env.production` 中的 `DATABASE_URL` 连接，由 systemd service 自动加载。
 
 ---
 
@@ -98,7 +101,8 @@ GitHub 发送 Webhook (POST /deploy)
 
 - **代码部署是自动的**：push 到 GitHub 后，服务器自动拉取并重启
 - **数据库迁移是自动的**：`deploy.sh` 已集成 `alembic upgrade head`，部署时自动执行
-- **数据库文件不互传**：本地和服务器的 `db/app.sqlite` 各自独立，不互相覆盖
+- **服务器用 PostgreSQL**：通过 systemd service + `.env.production` 加载 DATABASE_URL
+- **本地开发用 SQLite**：`db/app.sqlite` 仅限本地，不上传服务器
 
 ### 5.2 数据库变更上线流程
 
@@ -160,3 +164,4 @@ python -m alembic upgrade head
 2. **推送前确保本地测试通过** - 自动部署会直接上线代码
 3. **数据库变更必须有迁移脚本** - 只改 `models.py` 不会自动更新服务器数据库
 4. **不要用本机数据库覆盖服务器数据库** - 会导致线上数据丢失
+5. **重启必须用 `systemctl restart deepreading-api`** - 不要手动 `nohup uvicorn`，否则丢失 PostgreSQL 配置，回退到空 SQLite

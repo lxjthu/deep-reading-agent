@@ -49,12 +49,12 @@ def _rebuild_table_sqlite(table: str, new_ddl: str) -> None:
         return
     bind = op.get_bind()
     tmp = f"_tmp_{table}"
-    bind.execute(f"ALTER TABLE {table} RENAME TO {tmp}")
-    bind.execute(new_ddl)
-    cols = bind.execute(f"PRAGMA table_info({tmp})").fetchall()
+    bind.exec_driver_sql(f"ALTER TABLE {table} RENAME TO {tmp}")
+    bind.exec_driver_sql(new_ddl)
+    cols = bind.exec_driver_sql(f"PRAGMA table_info({tmp})").fetchall()
     col_names = ", ".join(c[1] for c in cols)
-    bind.execute(f"INSERT INTO {table} ({col_names}) SELECT {col_names} FROM {tmp}")
-    bind.execute(f"DROP TABLE {tmp}")
+    bind.exec_driver_sql(f"INSERT INTO {table} ({col_names}) SELECT {col_names} FROM {tmp}")
+    bind.exec_driver_sql(f"DROP TABLE {tmp}")
 
 
 JBE_TABLE_DDL = (

@@ -45,6 +45,21 @@ logger.setLevel(logging.DEBUG)
 
 RESULTS_ROOT = get_results_root()
 
+
+def _parse_positive_int(raw: object, default: int) -> int:
+    try:
+        value = int(str(raw))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+READING_FILE_CONCURRENCY = _parse_positive_int(os.getenv("READING_FILE_CONCURRENCY"), 3)
+LONG_DIMENSION_CONCURRENCY = _parse_positive_int(os.getenv("LONG_DIMENSION_CONCURRENCY"), 6)
+QUANT_STEP_CONCURRENCY = _parse_positive_int(os.getenv("QUANT_STEP_CONCURRENCY"), 4)
+QUAL_STEP_CONCURRENCY = _parse_positive_int(os.getenv("QUAL_STEP_CONCURRENCY"), 3)
+reading_file_semaphore = threading.BoundedSemaphore(READING_FILE_CONCURRENCY)
+
 LONG_DIMENSION_KEYS = {
     "研究问题": "long.research_question",
     "理论框架": "long.theory_framework",
@@ -60,6 +75,8 @@ LONG_DIMENSION_KEYS = {
     "写作质量": "long.writing_quality",
     "自定义问题": "long.custom_question",
 }
+
+DEFAULT_LONG_ANALYSIS_DIMS = [label for label in LONG_DIMENSION_KEYS.keys() if label != "自定义问题"]
 
 QUANT_STEP_KEYS = {
     "第一步：核心贡献识别": "quant.step1",
@@ -203,6 +220,11 @@ def build_step_reading_items(results: dict[str, str], *, mode: str) -> list[dict
             )
 
     return items
+
+
+def normalize_long_analysis_dims(analysis_dims: Optional[list[str]]) -> list[str]:
+    normalized = [str(item).strip() for item in (analysis_dims or []) if str(item).strip()]
+    return normalized or list(DEFAULT_LONG_ANALYSIS_DIMS)
 
 
 # In-memory task store
@@ -858,11 +880,13 @@ def _try_extract_references(
 ) -> list[dict] | None:
     """Try to extract references during reading.
     Returns artifact files on success, empty list on failure, None if skipped (already exists)."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
         from routers.references import write_trace_outputs, persist_trace_success
         from services.deepseek_refs import extract_references_deepseek, trace_citations_deepseek
 
-        import asyncio
         from db import AsyncSessionLocal
 
         async def _has_existing_refs() -> bool:
@@ -874,7 +898,7 @@ def _try_extract_references(
                 )
                 return result.scalar_one_or_none() is not None
 
-        if asyncio.run(_has_existing_refs()):
+        if loop.run_until_complete(_has_existing_refs()):
             logger = logging.getLogger(__name__)
             logger.info("References already exist for bib_entry %s, skipping extraction", bib_entry_id)
             return None
@@ -897,7 +921,7 @@ def _try_extract_references(
         artifact_files = write_trace_outputs(user_id, task_id, source_title, references)
 
         ref_task_id = str(uuid.uuid4())
-        asyncio.run(_create_ref_trace_job_and_persist(
+        loop.run_until_complete(_create_ref_trace_job_and_persist(
             ref_task_id, user_id, bib_entry_id, references, artifact_files,
         ))
 
@@ -906,6 +930,8 @@ def _try_extract_references(
         logger = logging.getLogger(__name__)
         logger.error("Reference extraction during reading failed for task %s: %s", task_id, e, exc_info=True)
         return []
+    finally:
+        loop.close()
 
 
 async def _create_ref_trace_job_and_persist(
@@ -1059,11 +1085,22 @@ def run_long_context_task(
     conflict_resolution: Optional[str] = None,
 ):
     """Run long context analysis in background thread. api_key is REQUIRED."""
+    import asyncio
+    acquired_slot = False
+    running_started = False
+    loop = None
     try:
-        import asyncio
-
+        analysis_dims = normalize_long_analysis_dims(analysis_dims)
+        reading_file_semaphore.acquire()
+        acquired_slot = True
+        if tasks.get(task_id, {}).get("status") == "cancelled":
+            task_queue.remove_queued(task_id)
+            return
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         task_queue.mark_running(task_id)
-        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
+        running_started = True
+        loop.run_until_complete(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取文本..."
@@ -1120,7 +1157,6 @@ def run_long_context_task(
                 from db.models import DimensionItem
 
                 def _load_custom_dims():
-                    import asyncio
                     from db import AsyncSessionLocal
                     from sqlalchemy import select as sa_select
 
@@ -1142,7 +1178,7 @@ def run_long_context_task(
                                 }
                                 for it in items
                             }
-                    return asyncio.run(_inner())
+                    return loop.run_until_complete(_inner())
 
                 custom_dim_map = _load_custom_dims()
             except Exception:
@@ -1151,9 +1187,9 @@ def run_long_context_task(
         prev_items: dict[str, str] = {}
         if conflict_resolution == "incremental":
             try:
-                prev_job_ids = asyncio.run(_query_prev_reading_jobs(user_id, bib_entry_id, "reading_long"))
+                prev_job_ids = loop.run_until_complete(_query_prev_reading_jobs(user_id, bib_entry_id, "reading_long"))
                 if prev_job_ids:
-                    prev_ri = asyncio.run(_query_prev_reading_items(prev_job_ids[0]))
+                    prev_ri = loop.run_until_complete(_query_prev_reading_items(prev_job_ids[0]))
                     prev_items = {it.item_key: it.content for it in prev_ri if it.section_type in ("dimension", "custom")}
             except Exception:
                 prev_items = {}
@@ -1194,23 +1230,26 @@ def run_long_context_task(
                 except Exception as e:
                     return dim_key, f"[分析出错: {str(e)[:200]}]", str(e)
 
-        workers = min(len(dims_to_analyze), 12)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_analyze_long_dim, dk): dk for dk in dims_to_analyze}
-            done_count = 0
-            for future in as_completed(futures):
-                if tasks[task_id]["status"] == "cancelled":
-                    break
-                dim_key, answer, err = future.result()
-                if err == "cancelled":
-                    return
-                results[dim_key] = answer
-                done_count += 1
-                tasks[task_id]["progress"] = 50 + int(40 * done_count / max(len(dims_to_analyze), 1))
-                if err:
-                    tasks[task_id]["logs"].append(f"⚠ {dim_key} 出错: {str(err)[:80]}")
-                else:
-                    tasks[task_id]["logs"].append(f"✓ {dim_key} 完成")
+        workers = min(len(dims_to_analyze), LONG_DIMENSION_CONCURRENCY)
+        if workers > 0:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(_analyze_long_dim, dk): dk for dk in dims_to_analyze}
+                done_count = 0
+                for future in as_completed(futures):
+                    if tasks[task_id]["status"] == "cancelled":
+                        break
+                    dim_key, answer, err = future.result()
+                    if err == "cancelled":
+                        return
+                    results[dim_key] = answer
+                    done_count += 1
+                    tasks[task_id]["progress"] = 50 + int(40 * done_count / max(len(dims_to_analyze), 1))
+                    if err:
+                        tasks[task_id]["logs"].append(f"⚠ {dim_key} 出错: {str(err)[:80]}")
+                    else:
+                        tasks[task_id]["logs"].append(f"✓ {dim_key} 完成")
+        else:
+            tasks[task_id]["logs"].append("ℹ 无需新增维度分析，直接进入后处理。")
         
         # Handle custom question after all dimensions
         if custom_question and custom_question.strip():
@@ -1298,7 +1337,7 @@ def run_long_context_task(
         report_path = result_dir / f"{safe_name}_long_context.md"
 
         try:
-            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
+            updated_fields = loop.run_until_complete(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
         except Exception as exc:
@@ -1338,7 +1377,7 @@ def run_long_context_task(
         # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
         # Only pass reading_final artifact to avoid duplicates
         all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
-        asyncio.run(
+        loop.run_until_complete(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
@@ -1348,16 +1387,30 @@ def run_long_context_task(
             )
         )
         task_queue.mark_completed(task_id)
+        running_started = False
         
     except Exception as e:
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ {str(e)}")
         tasks[task_id]["error"] = str(e)
-        import asyncio
 
-        task_queue.mark_completed(task_id)
-        asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
+        if running_started:
+            task_queue.mark_completed(task_id)
+        else:
+            task_queue.remove_queued(task_id)
+        if loop is not None:
+            try:
+                loop.run_until_complete(finalize_reading_failure(task_id, bib_entry_id, str(e)))
+            except Exception:
+                pass
+    finally:
+        if running_started and tasks.get(task_id, {}).get("status") == "cancelled":
+            task_queue.mark_completed(task_id)
+        if loop is not None:
+            loop.close()
+        if acquired_slot:
+            reading_file_semaphore.release()
 
 
 def run_quant_task(
@@ -1369,12 +1422,28 @@ def run_quant_task(
     api_key: Optional[str] = None,
 ):
     """Run 7-step quantitative analysis. api_key is REQUIRED."""
+    import asyncio
+    acquired_slot = False
+    running_started = False
+    loop = None
     try:
-        import asyncio
-
+        reading_file_semaphore.acquire()
+        acquired_slot = True
+        if tasks.get(task_id, {}).get("status") == "cancelled":
+            task_queue.remove_queued(task_id)
+            return
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         logger.info("[quant:%s] 开始七步精读 user=%s bib=%s file=%s", task_id[:8], user_id, bib_entry_id, file_path)
         task_queue.mark_running(task_id)
-        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
+        logger.info(
+            "[quant:%s] concurrency file=%s steps=%s",
+            task_id[:8],
+            READING_FILE_CONCURRENCY,
+            QUANT_STEP_CONCURRENCY,
+        )
+        running_started = True
+        loop.run_until_complete(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取文本..."
@@ -1416,7 +1485,7 @@ def run_quant_task(
                     return step_name, f"[分析出错: {str(e)[:200]}]", str(e)
 
         results = {}
-        with ThreadPoolExecutor(max_workers=min(len(steps), 7)) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(steps), QUANT_STEP_CONCURRENCY)) as pool:
             futures = {pool.submit(_analyze_quant_step, sn, pk): sn for sn, pk in steps}
             done_count = 0
             for future in as_completed(futures):
@@ -1494,7 +1563,7 @@ def run_quant_task(
             tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功")
 
         try:
-            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
+            updated_fields = loop.run_until_complete(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
         except Exception as exc:
@@ -1526,7 +1595,7 @@ def run_quant_task(
         # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
         # Only pass reading_final artifact to avoid duplicates
         all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
-        asyncio.run(
+        loop.run_until_complete(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
@@ -1536,6 +1605,7 @@ def run_quant_task(
             )
         )
         task_queue.mark_completed(task_id)
+        running_started = False
         
     except Exception as e:
         logger.error("[quant:%s] 七步精读失败: %s\n%s", task_id[:8], e, traceback.format_exc())
@@ -1543,10 +1613,23 @@ def run_quant_task(
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ {str(e)}")
         tasks[task_id]["error"] = str(e)
-        import asyncio
 
-        task_queue.mark_completed(task_id)
-        asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
+        if running_started:
+            task_queue.mark_completed(task_id)
+        else:
+            task_queue.remove_queued(task_id)
+        if loop is not None:
+            try:
+                loop.run_until_complete(finalize_reading_failure(task_id, bib_entry_id, str(e)))
+            except Exception:
+                pass
+    finally:
+        if running_started and tasks.get(task_id, {}).get("status") == "cancelled":
+            task_queue.mark_completed(task_id)
+        if loop is not None:
+            loop.close()
+        if acquired_slot:
+            reading_file_semaphore.release()
 
 
 def run_qual_task(
@@ -1558,12 +1641,28 @@ def run_qual_task(
     api_key: Optional[str] = None,
 ):
     """Run 4-step qualitative analysis. api_key is REQUIRED."""
+    import asyncio
+    acquired_slot = False
+    running_started = False
+    loop = None
     try:
-        import asyncio
-
+        reading_file_semaphore.acquire()
+        acquired_slot = True
+        if tasks.get(task_id, {}).get("status") == "cancelled":
+            task_queue.remove_queued(task_id)
+            return
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         logger.info("[qual:%s] 开始四步精读 user=%s bib=%s file=%s", task_id[:8], user_id, bib_entry_id, file_path)
         task_queue.mark_running(task_id)
-        asyncio.run(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
+        logger.info(
+            "[qual:%s] concurrency file=%s steps=%s",
+            task_id[:8],
+            READING_FILE_CONCURRENCY,
+            QUAL_STEP_CONCURRENCY,
+        )
+        running_started = True
+        loop.run_until_complete(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
         tasks[task_id]["status"] = "running"
         tasks[task_id]["progress"] = 10
         tasks[task_id]["stage"] = "提取文本..."
@@ -1605,7 +1704,7 @@ def run_qual_task(
                     return step_name, f"[分析出错: {str(e)[:200]}]", str(e)
 
         results = {}
-        with ThreadPoolExecutor(max_workers=min(len(steps), 4)) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(steps), QUAL_STEP_CONCURRENCY)) as pool:
             futures = {pool.submit(_analyze_qual_step, sn, pk): sn for sn, pk in steps}
             done_count = 0
             for future in as_completed(futures):
@@ -1683,7 +1782,7 @@ def run_qual_task(
             tasks[task_id]["logs"].append("⚠ 参考文献自动提取未成功")
 
         try:
-            updated_fields = asyncio.run(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
+            updated_fields = loop.run_until_complete(_try_update_bib_metadata(bib_entry_id, file_path, original_name, api_key=api_key, metadata=metadata))
             if updated_fields:
                 tasks[task_id]["logs"].append(f"✓ 文献库元数据已更新: {', '.join(updated_fields)}")
         except Exception as exc:
@@ -1715,7 +1814,7 @@ def run_qual_task(
         # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
         # Only pass reading_final artifact to avoid duplicates
         all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
-        asyncio.run(
+        loop.run_until_complete(
             finalize_reading_success(
                 task_id,
                 bib_entry_id,
@@ -1725,6 +1824,7 @@ def run_qual_task(
             )
         )
         task_queue.mark_completed(task_id)
+        running_started = False
         
     except Exception as e:
         logger.error("[qual:%s] 四步精读失败: %s\n%s", task_id[:8], e, traceback.format_exc())
@@ -1732,10 +1832,23 @@ def run_qual_task(
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ {str(e)}")
         tasks[task_id]["error"] = str(e)
-        import asyncio
 
-        task_queue.mark_completed(task_id)
-        asyncio.run(finalize_reading_failure(task_id, bib_entry_id, str(e)))
+        if running_started:
+            task_queue.mark_completed(task_id)
+        else:
+            task_queue.remove_queued(task_id)
+        if loop is not None:
+            try:
+                loop.run_until_complete(finalize_reading_failure(task_id, bib_entry_id, str(e)))
+            except Exception:
+                pass
+    finally:
+        if running_started and tasks.get(task_id, {}).get("status") == "cancelled":
+            task_queue.mark_completed(task_id)
+        if loop is not None:
+            loop.close()
+        if acquired_slot:
+            reading_file_semaphore.release()
 
 
 @router.post("/long/start")
@@ -1745,6 +1858,7 @@ async def start_long_context(
     db: AsyncSession = Depends(get_db),
 ):
     """Start long context analysis"""
+    normalized_dims = normalize_long_analysis_dims(request.analysis_dims)
     file_record = await get_file_record(db, user, request.file_id)
     ensure_readable_file_type(file_record)
     file_path = get_file_path(request.file_id)
@@ -1774,7 +1888,7 @@ async def start_long_context(
         bib_entry,
         "reading_long",
         {
-            "analysis_dims": request.analysis_dims,
+            "analysis_dims": normalized_dims,
             "custom_question": request.custom_question,
             "extraction_method": request.extraction_method,
         },
@@ -1790,7 +1904,7 @@ async def start_long_context(
             user.id,
             bib_entry.id,
             file_path,
-            request.analysis_dims,
+            normalized_dims,
             request.custom_question,
             request.extraction_method,
             prompt_overrides,
@@ -2040,8 +2154,9 @@ async def start_batch_reading(
 
             params: dict = {}
             if request.mode == "long":
+                normalized_dims = normalize_long_analysis_dims(request.analysis_dims)
                 params = {
-                    "analysis_dims": request.analysis_dims or [],
+                    "analysis_dims": normalized_dims,
                     "custom_question": request.custom_question,
                     "extraction_method": request.extraction_method,
                 }
@@ -2059,7 +2174,7 @@ async def start_batch_reading(
             if request.mode == "long":
                 thread = threading.Thread(
                     target=run_long_context_task,
-                    args=(task_id, user.id, bib_entry.id, file_path, request.analysis_dims or [], request.custom_question, request.extraction_method, prompt_overrides, request.api_key, request.dimension_set_id, batch_resolution),
+                    args=(task_id, user.id, bib_entry.id, file_path, normalized_dims, request.custom_question, request.extraction_method, prompt_overrides, request.api_key, request.dimension_set_id, batch_resolution),
                     daemon=True,
                 )
             elif request.mode == "quant":
@@ -2199,7 +2314,8 @@ async def cancel_task(
     if task_id in tasks:
         tasks[task_id]["status"] = "cancelled"
         tasks[task_id]["stage"] = "已取消"
-    task_queue.mark_completed(task_id)
+    if not task_queue.remove_queued(task_id):
+        task_queue.mark_completed(task_id)
     target_link = (
         await db.execute(
             select(JobBibEntry).where(JobBibEntry.job_id == task_id, JobBibEntry.role == "target")

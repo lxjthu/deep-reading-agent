@@ -1,6 +1,7 @@
 """Tool-calling literature assistant router."""
 from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import shutil
@@ -12,7 +13,10 @@ from typing import Any, Literal, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, UploadFile
-from openai import OpenAI
+try:
+    from openai import APIConnectionError, APIStatusError, APITimeoutError
+except ImportError:  # pragma: no cover - compatibility with older SDKs
+    APIConnectionError = APIStatusError = APITimeoutError = ()  # type: ignore[assignment]
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -28,10 +32,66 @@ for import_path in (str(PROJECT_ROOT), str(BACKEND_DIR)):
 from auth.dependencies import current_user
 try:
     from backend.routers import reading
+    from backend.services.agent_external_retrieval import tool_lookup_english_fulltext, tool_search_cnki
+    from backend.services.research_agent_runtime import (
+        append_working_note,
+        apply_execution_result_to_state,
+        build_stop_summary,
+        build_runtime_system_prompts,
+        build_task_frame,
+        enforce_tool_policy,
+        normalize_tool_args,
+        resolve_context_refs,
+        summarize_state_for_ui,
+        update_state_after_tool,
+    )
+    from backend.services.reading_candidate_analysis import analyze_reading_candidates, filter_analysis_cache
+    from backend.services.agent_tool_registry import TOOL_SCHEMAS as REGISTERED_TOOL_SCHEMAS, list_tool_capabilities
+    from backend.services.research_retrieval import (
+        ResearchQuery,
+        get_evidence_pack,
+        get_source_windows,
+        research_search,
+    )
     from backend.utils.api_key import validate_deepseek_key
+    from backend.utils.llm_provider import (
+        create_openai_client,
+        describe_llm_provider,
+        model_for_api_key,
+        probe_llm_provider,
+        resolve_llm_provider,
+    )
 except ModuleNotFoundError:  # Support the backend/ working directory used by local checks.
     from routers import reading
+    from services.agent_external_retrieval import tool_lookup_english_fulltext, tool_search_cnki
+    from services.research_agent_runtime import (
+        append_working_note,
+        apply_execution_result_to_state,
+        build_stop_summary,
+        build_runtime_system_prompts,
+        build_task_frame,
+        enforce_tool_policy,
+        normalize_tool_args,
+        resolve_context_refs,
+        summarize_state_for_ui,
+        update_state_after_tool,
+    )
+    from services.reading_candidate_analysis import analyze_reading_candidates, filter_analysis_cache
+    from services.agent_tool_registry import TOOL_SCHEMAS as REGISTERED_TOOL_SCHEMAS, list_tool_capabilities
+    from services.research_retrieval import (
+        ResearchQuery,
+        get_evidence_pack,
+        get_source_windows,
+        research_search,
+    )
     from utils.api_key import validate_deepseek_key
+    from utils.llm_provider import (
+        create_openai_client,
+        describe_llm_provider,
+        model_for_api_key,
+        probe_llm_provider,
+        resolve_llm_provider,
+    )
 from db import get_db
 from db.models import (
     AgentActionProposal,
@@ -83,6 +143,10 @@ class AgentProposalConfirmRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class AgentProviderCheckRequest(BaseModel):
+    api_key: Optional[str] = None
+
+
 def sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -117,6 +181,225 @@ def _json_loads(value: str | None, default: Any = None) -> Any:
 def _session_title(message: str) -> str:
     title = " ".join(message.strip().split())
     return title[:40] or "AI 文献助手会话"
+
+
+def _as_error_message(detail: Any) -> str:
+    if isinstance(detail, dict):
+        for key in ("message", "detail", "error"):
+            value = detail.get(key)
+            if value:
+                return str(value)
+        return json.dumps(detail, ensure_ascii=False)
+    return str(detail or "")
+
+
+def _structured_agent_error(
+    *,
+    code: str,
+    message: str,
+    stage: str,
+    retryable: bool,
+    status_code: int | None = None,
+    provider: str | None = None,
+    tool: str | None = None,
+    details: Any = None,
+    recommendations: list[str] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "code": code,
+        "message": message,
+        "stage": stage,
+        "retryable": retryable,
+        "severity": "error",
+    }
+    if status_code is not None:
+        payload["status_code"] = status_code
+    if provider:
+        payload["provider"] = provider
+    if tool:
+        payload["tool"] = tool
+    if details not in (None, "", {}):
+        payload["details"] = details
+    if recommendations:
+        payload["recommendations"] = recommendations
+    return payload
+
+
+def classify_agent_exception(
+    exc: Exception,
+    *,
+    stage: str,
+    provider: str | None = None,
+    tool: str | None = None,
+) -> dict[str, Any]:
+    exc_name = exc.__class__.__name__
+
+    if isinstance(exc, HTTPException):
+        status_code = int(exc.status_code)
+        message = _as_error_message(exc.detail) or f"HTTP {status_code}"
+        if status_code == 400 and "key" in message.lower():
+            return _structured_agent_error(
+                code="invalid_api_key",
+                message=message,
+                stage=stage,
+                retryable=False,
+                status_code=status_code,
+                provider=provider,
+                tool=tool,
+                details=exc.detail,
+                recommendations=[
+                    "检查右上角 API Key 是否完整、未过期，且不要包含占位符。",
+                    "如果使用 provider 前缀，请确认 Key 类型和前缀匹配。",
+                ],
+            )
+        if status_code in {401, 403}:
+            return _structured_agent_error(
+                code="permission_denied",
+                message=message,
+                stage=stage,
+                retryable=False,
+                status_code=status_code,
+                provider=provider,
+                tool=tool,
+                details=exc.detail,
+                recommendations=["检查当前账号权限、会话状态或相关资源是否属于当前用户。"],
+            )
+        if status_code == 404:
+            return _structured_agent_error(
+                code="resource_not_found",
+                message=message,
+                stage=stage,
+                retryable=False,
+                status_code=status_code,
+                provider=provider,
+                tool=tool,
+                details=exc.detail,
+                recommendations=["确认引用的 session、proposal、job 或文献对象仍然存在。"],
+            )
+        return _structured_agent_error(
+            code="http_error",
+            message=message,
+            stage=stage,
+            retryable=status_code >= 500,
+            status_code=status_code,
+            provider=provider,
+            tool=tool,
+            details=exc.detail,
+            recommendations=["如问题持续存在，请刷新后重试，或缩小当前操作范围。"],
+        )
+
+    if isinstance(exc, ValueError) and "key" in str(exc).lower():
+        return _structured_agent_error(
+            code="invalid_api_key",
+            message=str(exc),
+            stage=stage,
+            retryable=False,
+            provider=provider,
+            tool=tool,
+            recommendations=[
+                "检查 API Key 是否完整、真实且未过期。",
+                "如果是 MiMo Token Plan，请确认是否使用 tp- 开头的 Key。",
+            ],
+        )
+
+    if isinstance(exc, httpx.TimeoutException) or exc_name in {"APITimeoutError", "ReadTimeout", "ConnectTimeout"}:
+        return _structured_agent_error(
+            code="llm_timeout",
+            message="上游模型响应超时，请稍后重试，或缩小问题范围后再试。",
+            stage=stage,
+            retryable=True,
+            provider=provider,
+            tool=tool,
+            details=str(exc),
+            recommendations=["缩小问题范围后重试。", "如是长任务，可改为先检索再逐步总结。"],
+        )
+
+    if isinstance(exc, httpx.NetworkError) or isinstance(exc, APIConnectionError) or exc_name == "APIConnectionError":
+        return _structured_agent_error(
+            code="llm_connection_error",
+            message="连接上游模型服务失败，请检查网络或稍后重试。",
+            stage=stage,
+            retryable=True,
+            provider=provider,
+            tool=tool,
+            details=str(exc),
+            recommendations=["检查当前网络连接。", "稍后重试，或确认上游服务是否可用。"],
+        )
+
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(exc, APIStatusError) and getattr(exc, "status_code", None) is not None:
+        status_code = int(exc.status_code)
+    if exc_name in {"AuthenticationError"} or status_code == 401:
+        return _structured_agent_error(
+            code="llm_auth_error",
+            message="上游模型认证失败，请检查 API Key 是否有效或 provider 是否匹配。",
+            stage=stage,
+            retryable=False,
+            status_code=int(status_code) if status_code is not None else None,
+            provider=provider,
+            tool=tool,
+            details=str(exc),
+            recommendations=["重新检查 API Key。", "确认当前 provider 和 Key 类型匹配。"],
+        )
+    if exc_name in {"RateLimitError"} or status_code == 429:
+        return _structured_agent_error(
+            code="llm_rate_limited",
+            message="上游模型触发限流，请稍后再试。",
+            stage=stage,
+            retryable=True,
+            status_code=int(status_code) if status_code is not None else None,
+            provider=provider,
+            tool=tool,
+            details=str(exc),
+            recommendations=["稍等一会后重试。", "缩小问题范围，减少连续高频请求。"],
+        )
+    if exc_name in {"BadRequestError", "UnprocessableEntityError"} or status_code in {400, 422}:
+        return _structured_agent_error(
+            code="llm_bad_request",
+            message="提交给上游模型的请求不合法，请调整当前问题或参数后重试。",
+            stage=stage,
+            retryable=False,
+            status_code=int(status_code) if status_code is not None else None,
+            provider=provider,
+            tool=tool,
+            details=str(exc),
+            recommendations=["缩短输入内容。", "避免一次性请求过多文献或过长上下文。"],
+        )
+    if exc_name in {"InternalServerError"} or (status_code is not None and int(status_code) >= 500):
+        return _structured_agent_error(
+            code="llm_upstream_error",
+            message="上游模型服务暂时异常，请稍后重试。",
+            stage=stage,
+            retryable=True,
+            status_code=int(status_code),
+            provider=provider,
+            tool=tool,
+            details=str(exc),
+            recommendations=["稍后重试。", "如果问题持续出现，可先缩小任务范围。"],
+        )
+
+    if stage == "tool_execution":
+        return _structured_agent_error(
+            code="tool_execution_error",
+            message=f"工具 {tool or ''} 执行失败。".strip(),
+            stage=stage,
+            retryable=True,
+            provider=provider,
+            tool=tool,
+            details=str(exc),
+            recommendations=["检查相关输入对象是否存在。", "必要时改为先检索再执行。"],
+        )
+
+    return _structured_agent_error(
+        code="agent_runtime_error",
+        message=str(exc) or "AI 助手执行失败。",
+        stage=stage,
+        retryable=False,
+        provider=provider,
+        tool=tool,
+        details=str(exc),
+        recommendations=["请刷新后重试。", "如果问题持续存在，请反馈当前问题和上下文。"],
+    )
 
 
 async def _get_session(db: AsyncSession, user: User, session_id: str) -> AgentSession | None:
@@ -215,6 +498,17 @@ async def _update_session_state(
     await db.flush()
 
 
+async def _replace_session_state(
+    db: AsyncSession,
+    session: AgentSession,
+    *,
+    state: dict[str, Any],
+) -> None:
+    session.last_state_json = _json_dumps(state)
+    session.updated_at = utcnow_naive()
+    await db.flush()
+
+
 async def _create_proposal(
     db: AsyncSession,
     user: User,
@@ -307,6 +601,7 @@ async def get_agent_preferences(db: AsyncSession, user: User) -> dict[str, Any]:
             if file_id
         ] if isinstance(agent_prefs.get("input_file_ids"), list) else [],
         "inbox_batch": inbox_batch,
+        "inbox_upload_summary": agent_prefs.get("inbox_upload_summary") if isinstance(agent_prefs.get("inbox_upload_summary"), dict) else None,
     }
 
 
@@ -339,6 +634,134 @@ def _normalize_input_folder(raw_path: str) -> str:
     return str(resolved)
 
 
+def _inbox_error_message(code: str) -> str:
+    mapping = {
+        "missing_filename": "文件名缺失",
+        "unsupported_extension": "文件扩展名不受支持",
+        "empty_file": "空文件",
+        "unsupported_for_agent": "AI 助手仅支持 PDF/Markdown",
+        "input_batch_missing": "上传批次不存在",
+        "input_inbox_not_configured": "尚未上传 AI 助手文件夹",
+        "input_folder_missing": "源文件夹不存在",
+        "unsupported_for_reading": "文件类型不支持扫描",
+    }
+    return mapping.get(code, code or "unknown_error")
+
+
+def _summarize_upload_results(batch: UploadBatch, results: list[dict[str, Any]]) -> dict[str, Any]:
+    error_counts: dict[str, int] = {}
+    failed_examples: list[dict[str, str]] = []
+    imported_count = 0
+    deduplicated_count = 0
+    matched_count = 0
+    unmatched_count = 0
+
+    for item in results:
+        if item.get("success"):
+            if item.get("deduplicated"):
+                deduplicated_count += 1
+            else:
+                imported_count += 1
+            if item.get("matched_bib_entry_id"):
+                matched_count += 1
+            else:
+                unmatched_count += 1
+            continue
+
+        error_code = str(item.get("error") or "unknown_error")
+        error_counts[error_code] = int(error_counts.get(error_code) or 0) + 1
+        if len(failed_examples) < 5:
+            failed_examples.append(
+                {
+                    "filename": str(item.get("filename") or ""),
+                    "error": error_code,
+                    "message": _inbox_error_message(error_code),
+                }
+            )
+
+    recommendations: list[str] = []
+    if batch.failed:
+        recommendations.append("先处理失败文件，再让 AI 助手扫描这批文件。")
+    if unmatched_count:
+        recommendations.append("部分文件尚未绑定到文献库，后续扫描后可能需要人工确认匹配关系。")
+    if deduplicated_count:
+        recommendations.append("有重复文件已自动复用既有上传记录，无需重复导入。")
+
+    return {
+        "batch_id": batch.id,
+        "status": batch.status,
+        "total_files": batch.total_files,
+        "succeeded": batch.succeeded,
+        "failed": batch.failed,
+        "imported_count": imported_count,
+        "deduplicated_count": deduplicated_count,
+        "matched_count": matched_count,
+        "unmatched_count": unmatched_count,
+        "error_counts": error_counts,
+        "failed_examples": failed_examples,
+        "recommendations": recommendations,
+        "created_at": _dt(batch.created_at),
+    }
+
+
+def _summarize_scan_result(
+    *,
+    source: str,
+    topic: str,
+    scanned: int,
+    rows: list[dict[str, Any]],
+    skipped: list[dict[str, Any]],
+    input_batch_id: str,
+) -> dict[str, Any]:
+    skipped_reasons: dict[str, int] = {}
+    skipped_examples: list[dict[str, str]] = []
+    for item in skipped:
+        reason = str(item.get("reason") or "unknown_error")
+        skipped_reasons[reason] = int(skipped_reasons.get(reason) or 0) + 1
+        if len(skipped_examples) < 5:
+            skipped_examples.append(
+                {
+                    "filename": str(item.get("filename") or ""),
+                    "reason": reason,
+                    "message": _inbox_error_message(reason),
+                }
+            )
+
+    relevant_count = sum(1 for row in rows if row.get("relevant"))
+    in_library = sum(1 for row in rows if (row.get("library_match") or {}).get("status") == "in_library")
+    possible_match = sum(1 for row in rows if (row.get("library_match") or {}).get("status") == "possible_match")
+    not_in_library = sum(1 for row in rows if (row.get("library_match") or {}).get("status") == "not_in_library")
+    file_exists_no_bib = sum(
+        1 for row in rows if (row.get("library_match") or {}).get("status") == "file_exists_no_bib_entry"
+    )
+    recommendations: list[str] = []
+    if relevant_count == 0 and rows:
+        recommendations.append("当前主题下没有筛出相关文献，可以改成更宽泛的主题再试。")
+    if not_in_library or file_exists_no_bib:
+        recommendations.append("部分文件还未形成稳定题录映射，导入或扫描后可能需要人工确认。")
+    if skipped:
+        recommendations.append("有文件被跳过，建议先检查失败原因再继续扫描或导入。")
+
+    return {
+        "source": source,
+        "topic": topic,
+        "batch_id": input_batch_id or None,
+        "scanned": scanned,
+        "candidate_count": len(rows),
+        "relevant_count": relevant_count,
+        "library_counts": {
+            "in_library": in_library,
+            "possible_match": possible_match,
+            "not_in_library": not_in_library,
+            "file_exists_no_bib_entry": file_exists_no_bib,
+        },
+        "skipped_count": len(skipped),
+        "skipped_reasons": skipped_reasons,
+        "skipped_examples": skipped_examples,
+        "recommendations": recommendations,
+    }
+
+
 @router.get("/settings")
 async def get_agent_settings(
     user: User = Depends(current_user),
@@ -358,6 +781,57 @@ async def update_agent_settings(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return await save_agent_preferences(db, user, {"input_folder_path": input_folder_path})
+
+
+@router.post("/provider-check")
+async def check_agent_provider(
+    req: AgentProviderCheckRequest,
+    user: User = Depends(current_user),
+):
+    del user
+    try:
+        api_key = validate_deepseek_key(req.api_key, source="AI 助手设置")
+        provider_info = describe_llm_provider(api_key, source="AI 助手设置", requested_model=MODEL)
+        probe = probe_llm_provider(
+            api_key,
+            source="AI 助手设置",
+            requested_model=MODEL,
+            timeout=httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0),
+        )
+        return {
+            "ok": True,
+            "provider": probe["provider"],
+            "provider_label": probe["provider_label"],
+            "base_url": probe["base_url"],
+            "model": probe["model"],
+            "key_prefix": probe["key_prefix"],
+            "explicit_provider": probe["explicit_provider"],
+            "latency_ms": probe["latency_ms"],
+            "response_preview": probe.get("response_preview") or "",
+            "checked_at": _dt(utcnow_naive()),
+        }
+    except Exception as exc:
+        payload = classify_agent_exception(exc, stage="provider_probe")
+        raise HTTPException(
+            status_code=int(payload.get("status_code") or (400 if payload.get("retryable") is False else 502)),
+            detail={
+                **payload,
+                **(
+                    provider_info
+                    if "provider_info" in locals() and isinstance(provider_info, dict)
+                    else {}
+                ),
+            },
+        )
+
+
+@router.get("/tool-capabilities")
+async def get_agent_tool_capabilities(
+    user: User = Depends(current_user),
+):
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return {"tools": list_tool_capabilities()}
 
 
 async def _persist_inbox_upload(
@@ -476,6 +950,7 @@ async def upload_agent_inbox_folder(
         else:
             batch.failed += 1
     batch.status = "success" if batch.failed == 0 else ("partial" if batch.succeeded else "failed")
+    upload_summary = _summarize_upload_results(batch, results)
     successful_file_ids = [
         str(result["file_id"])
         for result in results
@@ -488,6 +963,7 @@ async def upload_agent_inbox_folder(
             "input_batch_id": batch.id,
             "input_file_ids": successful_file_ids,
             "input_folder_path": "",
+            "inbox_upload_summary": upload_summary,
         },
     )
     await db.commit()
@@ -497,6 +973,7 @@ async def upload_agent_inbox_folder(
         "succeeded": batch.succeeded,
         "failed": batch.failed,
         "results": results,
+        "summary": upload_summary,
         "settings": saved,
     }
 
@@ -664,9 +1141,17 @@ async def confirm_agent_proposal(
         tool_name=proposal.action_type,
         payload={"proposal_id": proposal.id, "execution_result": result},
     )
-    await _update_session_state(db, session, key="last_execution", value={"proposal_id": proposal.id, "result": result})
+    state = _json_loads(session.last_state_json, {}) or {}
+    state = apply_execution_result_to_state(
+        state,
+        proposal_id=proposal.id,
+        action_type=proposal.action_type,
+        proposal_status=proposal.status,
+        result=result if isinstance(result, dict) else {},
+    )
+    await _replace_session_state(db, session, state=state)
     await db.commit()
-    return {"proposal": await _proposal_payload(proposal), "result": result}
+    return {"proposal": await _proposal_payload(proposal), "result": result, "last_state": summarize_state_for_ui(state)}
 
 
 @router.post("/proposals/{proposal_id}/reject")
@@ -701,8 +1186,13 @@ async def reject_agent_proposal(
         tool_name=proposal.action_type,
         payload={"proposal_id": proposal.id},
     )
+    state = _json_loads(session.last_state_json, {}) or {}
+    pending = state.get("pending_proposal") or {}
+    if pending.get("proposal_id") == proposal.id:
+        state["pending_proposal"] = None
+    await _replace_session_state(db, session, state=state)
     await db.commit()
-    return {"proposal": await _proposal_payload(proposal)}
+    return {"proposal": await _proposal_payload(proposal), "last_state": summarize_state_for_ui(state)}
 
 
 def _entry_summary(entry: BibEntry, file_record: File | None = None) -> dict[str, Any]:
@@ -746,12 +1236,13 @@ async def tool_search_library(
     reading_status: str = "",
     limit: int = 20,
 ) -> dict[str, Any]:
-    limit = max(1, min(int(limit or 20), 50))
+    limit = max(1, int(limit or 20))
+    normalized_query = "" if str(query or "").strip() == "*" else str(query or "").strip()
     stmt = select(BibEntry, File).outerjoin(File, File.id == BibEntry.source_file_id).where(
         BibEntry.owner_user_id == user.id
     )
-    if query.strip():
-        like = f"%{query.strip()}%"
+    if normalized_query:
+        like = f"%{normalized_query}%"
         stmt = stmt.where(
             or_(
                 BibEntry.title.ilike(like),
@@ -763,12 +1254,91 @@ async def tool_search_library(
         )
     if reading_status.strip():
         stmt = stmt.where(BibEntry.reading_status == reading_status.strip())
+    total_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(BibEntry)
+            .where(BibEntry.owner_user_id == user.id)
+            .where(
+                or_(
+                    BibEntry.title.ilike(f"%{normalized_query}%"),
+                    BibEntry.abstract.ilike(f"%{normalized_query}%"),
+                    BibEntry.journal.ilike(f"%{normalized_query}%"),
+                    BibEntry.keywords_json.ilike(f"%{normalized_query}%"),
+                    BibEntry.user_tags_json.ilike(f"%{normalized_query}%"),
+                )
+            )
+            if normalized_query
+            else select(func.count()).select_from(BibEntry).where(BibEntry.owner_user_id == user.id)
+        )
+    ).scalar_one()
+    if reading_status.strip():
+        total_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(BibEntry)
+                .where(
+                    BibEntry.owner_user_id == user.id,
+                    BibEntry.reading_status == reading_status.strip(),
+                )
+                .where(
+                    or_(
+                        BibEntry.title.ilike(f"%{normalized_query}%"),
+                        BibEntry.abstract.ilike(f"%{normalized_query}%"),
+                        BibEntry.journal.ilike(f"%{normalized_query}%"),
+                        BibEntry.keywords_json.ilike(f"%{normalized_query}%"),
+                        BibEntry.user_tags_json.ilike(f"%{normalized_query}%"),
+                    )
+                )
+                if normalized_query
+                else select(func.count())
+                .select_from(BibEntry)
+                .where(
+                    BibEntry.owner_user_id == user.id,
+                    BibEntry.reading_status == reading_status.strip(),
+                )
+            )
+        ).scalar_one()
     rows = (
         await db.execute(stmt.order_by(BibEntry.updated_at.desc(), BibEntry.created_at.desc()).limit(limit))
     ).all()
     return {
         "count": len(rows),
+        "total_count": int(total_count or 0),
+        "returned_count": len(rows),
+        "truncated": bool(total_count and int(total_count) > len(rows)),
         "entries": [_entry_summary(entry, file_record) for entry, file_record in rows],
+    }
+
+
+async def tool_count_library(
+    db: AsyncSession,
+    user: User,
+    *,
+    query: str = "",
+    reading_status: str = "",
+) -> dict[str, Any]:
+    normalized_query = "" if str(query or "").strip() == "*" else str(query or "").strip()
+    stmt = select(func.count()).select_from(BibEntry).where(BibEntry.owner_user_id == user.id)
+    if normalized_query:
+        like = f"%{normalized_query}%"
+        stmt = stmt.where(
+            or_(
+                BibEntry.title.ilike(like),
+                BibEntry.abstract.ilike(like),
+                BibEntry.journal.ilike(like),
+                BibEntry.keywords_json.ilike(like),
+                BibEntry.user_tags_json.ilike(like),
+            )
+        )
+    if reading_status.strip():
+        stmt = stmt.where(BibEntry.reading_status == reading_status.strip())
+    count = (await db.execute(stmt)).scalar_one()
+    return {
+        "count": int(count or 0),
+        "query": normalized_query,
+        "reading_status": reading_status.strip() or "",
+        "note": "这是数据库总数统计，不含标题枚举。若用户要求列明细，再继续分页检索。",
     }
 
 
@@ -1087,11 +1657,11 @@ def _collect_folder_files(input_folder: Path, recursive: bool, max_files: int) -
 def _classify_relevance(api_key: str, topic: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not candidates:
         return []
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com",
+    client = create_openai_client(
+        api_key,
         timeout=httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0),
     )
+    model = model_for_api_key(api_key, MODEL)
     prompt = {
         "topic": topic,
         "candidates": [
@@ -1106,7 +1676,7 @@ def _classify_relevance(api_key: str, topic: str, candidates: list[dict[str, Any
         ],
     }
     response = client.chat.completions.create(
-        model=MODEL,
+        model=model,
         extra_body={"thinking": {"type": "disabled"}},
         messages=[
             {
@@ -1335,6 +1905,15 @@ async def tool_scan_input_folder(
             }
         )
 
+    summary = _summarize_scan_result(
+        source=source_label,
+        topic=topic,
+        scanned=scanned_count,
+        rows=rows,
+        skipped=skipped,
+        input_batch_id=input_batch_id,
+    )
+
     return {
         "input_folder_path": input_folder_path,
         "input_batch_id": input_batch_id,
@@ -1351,6 +1930,7 @@ async def tool_scan_input_folder(
         },
         "papers": rows,
         "skipped": skipped,
+        "summary": summary,
         "note": "这是只读清单；在线版扫描的是已上传到 AI 助手 inbox 的文件夹批次，未启动精读任务。",
     }
 
@@ -1410,148 +1990,20 @@ async def tool_import_folder_and_start_reading(
     }
 
 
-TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_library",
-            "description": "Search the user's bibliography library by title, abstract, journal, keyword, or tag.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "reading_status": {"type": "string", "enum": ["", "none", "has_pdf", "reading", "read"]},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_entry_detail",
-            "description": "Get metadata, source file id, and recent workflow timeline for a bibliography entry.",
-            "parameters": {
-                "type": "object",
-                "properties": {"entry_id": {"type": "string"}},
-                "required": ["entry_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_reading_context",
-            "description": "Fetch structured deep-reading sections for selected entries so the assistant can compare or synthesize them.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "entry_ids": {"type": "array", "items": {"type": "string"}},
-                    "mode": {"type": "string", "enum": ["", "long", "quant", "qual"]},
-                    "max_chars_per_item": {"type": "integer", "minimum": 300, "maximum": 8000},
-                },
-                "required": ["entry_ids"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "start_reading",
-            "description": "Start a long, quantitative 7-step, or qualitative 4-step reading job for one PDF/Markdown file.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "mode": {"type": "string", "enum": ["long", "quant", "qual"]},
-                    "file_id": {"type": "string"},
-                    "entry_id": {"type": "string"},
-                    "analysis_dims": {"type": "array", "items": {"type": "string"}},
-                    "custom_question": {"type": "string"},
-                    "extraction_method": {"type": "string", "enum": ["full", "smart", "first_pages"]},
-                    "conflict_resolution": {"type": "string", "enum": ["check", "overwrite", "new", "incremental", "skip"]},
-                },
-                "required": ["mode"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "start_batch_reading",
-            "description": "Start reading jobs for multiple file ids.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "mode": {"type": "string", "enum": ["long", "quant", "qual"]},
-                    "file_ids": {"type": "array", "items": {"type": "string"}},
-                    "analysis_dims": {"type": "array", "items": {"type": "string"}},
-                    "custom_question": {"type": "string"},
-                    "extraction_method": {"type": "string", "enum": ["full", "smart", "first_pages"]},
-                    "conflict_resolution": {"type": "string", "enum": ["check", "overwrite", "new", "incremental", "skip"]},
-                },
-                "required": ["mode", "file_ids"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "scan_input_folder",
-            "description": (
-                "Read-only scan of the user's uploaded AI assistant inbox batch and compare it with the user's library. "
-                "Use this when the user asks to see, list, inspect, or tabulate papers. "
-                "This never imports files and never starts reading jobs."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "topic": {"type": "string"},
-                    "recursive": {"type": "boolean"},
-                    "max_files": {"type": "integer", "minimum": 1, "maximum": 100},
-                    "confidence_threshold": {"type": "number", "minimum": 0, "maximum": 1},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "import_folder_and_start_reading",
-            "description": (
-                "Scan the user's uploaded AI assistant inbox batch, "
-                "select papers related to a topic, and start batch reading jobs. "
-                "Use only when the user explicitly asks to start/run/batch read/analyze."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "topic": {"type": "string"},
-                    "mode": {"type": "string", "enum": ["quant", "qual", "long"]},
-                    "recursive": {"type": "boolean"},
-                    "max_files": {"type": "integer", "minimum": 1, "maximum": 100},
-                    "confidence_threshold": {"type": "number", "minimum": 0, "maximum": 1},
-                    "conflict_resolution": {"type": "string", "enum": ["check", "overwrite", "new", "incremental", "skip"]},
-                    "analysis_dims": {"type": "array", "items": {"type": "string"}},
-                    "custom_question": {"type": "string"},
-                    "extraction_method": {"type": "string", "enum": ["full", "smart", "first_pages"]},
-                },
-                "required": ["topic", "mode"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_job_status",
-            "description": "Get status and artifact links for a reading or synthesis job.",
-            "parameters": {
-                "type": "object",
-                "properties": {"job_id": {"type": "string"}},
-                "required": ["job_id"],
-            },
-        },
-    },
-]
+def _research_query_from_args(args: dict[str, Any]) -> ResearchQuery:
+    raw_limit = int(args.get("limit_entries") or 0)
+    return ResearchQuery(
+        question=str(args.get("question") or args.get("query") or ""),
+        entry_ids=[str(item) for item in (args.get("entry_ids") or []) if item],
+        keywords=[str(item) for item in (args.get("keywords") or []) if item],
+        include_source_text=bool(args.get("include_source_text", True)),
+        include_user_notes=bool(args.get("include_user_notes", True)),
+        include_ai_notes=bool(args.get("include_ai_notes", True)),
+        limit_entries=0 if raw_limit == 0 else max(1, raw_limit),
+        limit_evidence_per_entry=max(1, int(args.get("limit_evidence_per_entry") or 8)),
+    )
+
+TOOL_SCHEMAS = REGISTERED_TOOL_SCHEMAS
 
 
 async def execute_tool(
@@ -1562,9 +2014,73 @@ async def execute_tool(
     user: User,
     api_key: str,
     session: AgentSession,
+    progress_callback: Any = None,
 ) -> dict[str, Any]:
+    if name == "research_search":
+        return await research_search(db, owner_user_id=user.id, query=_research_query_from_args(args))
+    if name == "get_evidence_pack":
+        return await get_evidence_pack(db, owner_user_id=user.id, query=_research_query_from_args(args))
+    if name == "get_source_windows":
+        return await get_source_windows(
+            db,
+            owner_user_id=user.id,
+            entry_ids=[str(item) for item in (args.get("entry_ids") or []) if item],
+            question=str(args.get("question") or ""),
+            max_windows_per_entry=max(1, min(int(args.get("max_windows_per_entry") or 3), 10)),
+        )
+    if name == "search_cnki":
+        return await tool_search_cnki(
+            db,
+            user,
+            entry_ids=[str(item) for item in (args.get("entry_ids") or []) if item],
+            titles=[str(item) for item in (args.get("titles") or []) if item],
+            max_items=max(1, int(args.get("max_items") or 50)),
+        )
+    if name == "lookup_english_fulltext":
+        return await tool_lookup_english_fulltext(
+            db,
+            user,
+            entry_ids=[str(item) for item in (args.get("entry_ids") or []) if item],
+            max_entries=max(1, int(args.get("max_entries") or 10)),
+        )
     if name == "search_library":
         return await tool_search_library(db, user, **args)
+    if name == "count_library":
+        return await tool_count_library(db, user, **args)
+    if name == "analyze_reading_candidates":
+        return await analyze_reading_candidates(
+            db,
+            owner_user_id=user.id,
+            topic=str(args.get("topic") or ""),
+            reading_status=str(args.get("reading_status") or "none"),
+            query=str(args.get("query") or "*"),
+            batch_size=int(args.get("batch_size") or 100),
+            max_entries=int(args.get("max_entries") or 1200),
+            progress_callback=progress_callback,
+        )
+    if name == "filter_analysis_cache":
+        session_state = _json_loads(session.last_state_json, {}) or {}
+        cached_dataset = session_state.get("analysis_cache") or {}
+        if not isinstance(cached_dataset, dict) or not isinstance(cached_dataset.get("entries"), list):
+            return {
+                "error": "analysis_cache_required",
+                "code": "analysis_cache_required",
+                "message": "当前会话没有可复用的分析缓存，请先完成一次批量分析。",
+                "suggested_tools": ["analyze_reading_candidates"],
+                "recommendations": [
+                    "先调用 analyze_reading_candidates 对目标文献集合做批量分析。",
+                    "如果想放弃上一轮结果，请明确要求重新全量分析。",
+                ],
+            }
+        return filter_analysis_cache(
+            analysis_cache=cached_dataset,
+            topic=str(args.get("topic") or ""),
+            journal_tier_labels=[str(item) for item in (args.get("journal_tier_labels") or []) if str(item).strip()],
+            cluster_labels=[str(item) for item in (args.get("cluster_labels") or []) if str(item).strip()],
+            require_fulltext=args.get("require_fulltext"),
+            reading_status=str(args.get("reading_status") or ""),
+            max_entries=int(args.get("max_entries") or 0),
+        )
     if name == "get_entry_detail":
         return await tool_get_entry_detail(db, user, **args)
     if name == "get_reading_context":
@@ -1605,7 +2121,11 @@ async def execute_tool(
     return {"error": f"unknown_tool:{name}"}
 
 
-def build_messages(req: AgentChatRequest) -> list[dict[str, Any]]:
+def build_messages(
+    req: AgentChatRequest,
+    *,
+    extra_system_contents: list[str] | None = None,
+) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -1633,6 +2153,28 @@ def build_messages(req: AgentChatRequest) -> list[dict[str, Any]]:
             ),
         }
     )
+    messages.append(
+        {
+            "role": "system",
+            "content": (
+                "研究 Agent 证据规则：回答研究性问题前，优先调用 research_search 或 get_evidence_pack 检索本地文献库。"
+                "证据按 P0 原文/题录摘要、P1 用户或人工编辑笔记、P2 AI 笔记、P3 临时联网结果分级；"
+                "P0 与 P1/P2 冲突时以 P0 为准，P1 与 P2 冲突时以 P1 为准，并说明冲突。"
+                "回答要说明检索了什么、主要依据哪些 source_tier、结论、限制。"
+                "如果用户是在问文献数量、总数、多少篇，优先调用 count_library 直接读取数据库计数；"
+                "不要先罗列标题，也不要把 search_library 当前返回页误当成总量。"
+                "如果用户是在要求对大量文献做分类总结、生成表格、推荐优先精读对象，优先调用 analyze_reading_candidates；"
+                "该工具会分批处理文献、写入结构化工作笔记，并输出候选表格。"
+                "search_cnki 和 lookup_english_fulltext 是联网/外部检索工具；只有用户明确要求 CNKI、打开网页、查英文全文、找 PDF 或外部检索时才调用。"
+                "这两个工具返回的是临时 P3 线索和 open_urls，前端会协助批量打开新标签页；不得声称这些结果已经保存进数据库。"
+                "写库、启动任务、应用在线匹配等动作必须走 proposal，不得在普通回答中假装已经执行。"
+                "limit_entries 参数：默认搜索全部文献（limit_entries=0）。如需缩小范围可设 limit_entries>0。"
+            ),
+        }
+    )
+    for content in extra_system_contents or []:
+        if str(content or "").strip():
+            messages.append({"role": "system", "content": str(content)})
     for turn in req.history[-8:]:
         messages.append({"role": turn.role, "content": turn.content})
     messages.append({"role": "user", "content": req.message})
@@ -1648,42 +2190,59 @@ async def agent_chat(
     try:
         api_key = validate_deepseek_key(req.api_key)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=classify_agent_exception(exc, stage="input_validation"))
 
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com",
+    provider = resolve_llm_provider(api_key).provider
+    client = create_openai_client(
+        api_key,
         timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
     )
+    model = model_for_api_key(api_key, MODEL)
 
     async def _stream():
+        session: AgentSession | None = None
+        state: dict[str, Any] = {}
+        error_stage = "session_setup"
+        active_tool: str | None = None
         try:
             session = await _ensure_session(db, user, req)
+            state = _json_loads(session.last_state_json, {}) or {}
+            task_frame = build_task_frame(req.message, state)
+            resolved_context = resolve_context_refs(task_frame, state)
+            state["last_runtime_notice"] = None
+            state["last_stop_summary"] = None
+            state["last_agent_error"] = None
+            state["active_task_frame"] = task_frame
+            state["resolved_context"] = {
+                "status": resolved_context.get("status"),
+                "source": resolved_context.get("source"),
+                "count": resolved_context.get("count", 0),
+                "entries": (resolved_context.get("entries") or [])[:8],
+            }
+            await _replace_session_state(db, session, state=state)
             yield sse_event(
                 "session",
                 {
                     "session_id": session.id,
                     "title": session.title,
-                    "last_state": _json_loads(session.last_state_json, {}) or {},
+                    "last_state": summarize_state_for_ui(state),
                 },
             )
             await _save_agent_message(db, user, session, role="user", event_type="message", content=req.message)
             await db.commit()
 
-            messages = build_messages(req)
-            state = _json_loads(session.last_state_json, {}) or {}
+            runtime_prompts = build_runtime_system_prompts(task_frame, resolved_context, state)
             if state:
-                messages.insert(
-                    1,
-                    {
-                        "role": "system",
-                        "content": "当前持久会话可引用状态：" + json.dumps(state, ensure_ascii=False)[:6000],
-                    },
+                runtime_prompts.append(
+                    "当前持久会话结构化状态摘要：" + json.dumps(summarize_state_for_ui(state), ensure_ascii=False)[:4000]
                 )
+            messages = build_messages(req, extra_system_contents=runtime_prompts)
 
             for _ in range(MAX_TOOL_ROUNDS):
+                error_stage = "llm_completion"
+                active_tool = None
                 response = client.chat.completions.create(
-                    model=MODEL,
+                    model=model,
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=messages,
                     tools=TOOL_SCHEMAS,
@@ -1704,11 +2263,20 @@ async def agent_chat(
 
                 for tool_call in tool_calls:
                     name = tool_call.function.name
+                    active_tool = name
+                    error_stage = "tool_argument_parse"
                     try:
                         args = json.loads(tool_call.function.arguments or "{}")
                     except json.JSONDecodeError:
                         args = {}
-                    yield sse_event("tool_call", {"name": name, "arguments": args})
+                    normalized_args = normalize_tool_args(
+                        name,
+                        args,
+                        task_frame=task_frame,
+                        resolved_context=resolved_context,
+                        state=state,
+                    )
+                    yield sse_event("tool_call", {"name": name, "arguments": normalized_args})
                     await _save_agent_message(
                         db,
                         user,
@@ -1716,9 +2284,72 @@ async def agent_chat(
                         role="assistant",
                         event_type="tool_call",
                         tool_name=name,
-                        payload=args,
+                        payload=normalized_args,
                     )
-                    result = await execute_tool(name, args, db=db, user=user, api_key=api_key, session=session)
+                    policy_result = enforce_tool_policy(
+                        name,
+                        normalized_args,
+                        task_frame=task_frame,
+                        state=state,
+                        resolved_context=resolved_context,
+                    )
+                    if policy_result is not None:
+                        result = policy_result
+                    else:
+                        error_stage = "tool_execution"
+                        if name == "analyze_reading_candidates":
+                            progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+                            async def _on_progress(payload: dict[str, Any]) -> None:
+                                await progress_queue.put(payload)
+
+                            tool_task = asyncio.create_task(
+                                execute_tool(
+                                    name,
+                                    normalized_args,
+                                    db=db,
+                                    user=user,
+                                    api_key=api_key,
+                                    session=session,
+                                    progress_callback=_on_progress,
+                                )
+                            )
+                            while True:
+                                if tool_task.done() and progress_queue.empty():
+                                    break
+                                try:
+                                    payload = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
+                                except asyncio.TimeoutError:
+                                    continue
+                                working_note = payload.get("working_note")
+                                if isinstance(working_note, dict):
+                                    state = append_working_note(state, working_note)
+                                    await _replace_session_state(db, session, state=state)
+                                    await db.commit()
+                                    yield sse_event("session_state", {"last_state": summarize_state_for_ui(state)})
+                                yield sse_event("analysis_progress", payload)
+                            result = await tool_task
+                        else:
+                            result = await execute_tool(
+                                name,
+                                normalized_args,
+                                db=db,
+                                user=user,
+                                api_key=api_key,
+                                session=session,
+                            )
+                    state = update_state_after_tool(
+                        state,
+                        name=name,
+                        args=normalized_args,
+                        result=result,
+                        blocked_by_policy=policy_result is not None,
+                    )
+                    if name == "scan_input_folder":
+                        state["last_scan"] = result
+                    error_stage = "session_persistence"
+                    await _replace_session_state(db, session, state=state)
+                    resolved_context = resolve_context_refs(task_frame, state)
                     await _save_agent_message(
                         db,
                         user,
@@ -1728,11 +2359,12 @@ async def agent_chat(
                         tool_name=name,
                         payload=result,
                     )
-                    if name == "scan_input_folder":
-                        await _update_session_state(db, session, key="last_scan", value=result)
                     if isinstance(result, dict) and result.get("proposal_id"):
                         yield sse_event("proposal", result)
                     await db.commit()
+                    yield sse_event("session_state", {"last_state": summarize_state_for_ui(state)})
+                    if state.get("last_runtime_notice"):
+                        yield sse_event("runtime_notice", state["last_runtime_notice"])
                     yield sse_event("tool_result", {"name": name, "result": result})
                     messages.append(
                         {
@@ -1741,13 +2373,46 @@ async def agent_chat(
                             "content": json.dumps(result, ensure_ascii=False),
                         }
                     )
+                    active_tool = None
+                    error_stage = "llm_completion"
 
+            stop_summary = build_stop_summary(
+                task_frame=task_frame,
+                state=state,
+                reason="max_tool_rounds_reached",
+                max_tool_rounds=MAX_TOOL_ROUNDS,
+            )
+            state["last_stop_summary"] = stop_summary
+            await _replace_session_state(db, session, state=state)
+            await db.commit()
+            yield sse_event("session_state", {"last_state": summarize_state_for_ui(state)})
+            yield sse_event("runtime_notice", stop_summary)
             yield sse_event(
                 "answer",
-                {"content": "工具调用轮次已达上限。我已经把可获得的信息列在上方，请缩小范围后继续。"},
+                {
+                    "content": stop_summary["message"]
+                },
             )
             yield sse_event("done", {})
         except Exception as exc:
-            yield sse_event("error", {"message": str(exc)})
+            payload = classify_agent_exception(exc, stage=error_stage, provider=provider, tool=active_tool)
+            try:
+                if session is not None:
+                    state["last_agent_error"] = payload
+                    await _replace_session_state(db, session, state=state)
+                    await _save_agent_message(
+                        db,
+                        user,
+                        session,
+                        role="assistant",
+                        event_type="error",
+                        content=payload.get("message", ""),
+                        payload=payload,
+                    )
+                    await db.commit()
+                    yield sse_event("session_state", {"last_state": summarize_state_for_ui(state)})
+            except Exception:
+                await db.rollback()
+            yield sse_event("error", payload)
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

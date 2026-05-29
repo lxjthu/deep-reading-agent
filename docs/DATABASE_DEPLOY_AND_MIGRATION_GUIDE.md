@@ -1,7 +1,7 @@
-# 数据库设计、迁移与部署说明
+﻿﻿# 数据库设计、迁移与部署说明
 
 > 适用项目：`deep-reading-agent`  
-> 适用场景：本机持续开发、通过 GitHub 自动部署到服务器、服务器使用 SQLite + Alembic 管理数据库结构
+> 适用场景：本机持续开发、通过 GitHub 手动部署到服务器（SCP + systemctl）、服务器使用 PostgreSQL + Alembic 管理数据库结构
 
 ## 1. 这份文档解决什么问题
 
@@ -23,22 +23,24 @@
 
 1. 在本机修改代码
 2. 提交并推送到 GitHub
-3. 服务器自动拉取最新代码并重启服务
+3. 通过 SCP 上传改动的文件到服务器
+4. 服务器通过 `systemctl restart deepreading-api` 重启服务
 
 但是，**数据库结构变更不等于代码自动部署**。
 
 也就是说：
 
-- GitHub 自动部署会让服务器拿到新的代码
-- 但服务器上的 `db/app.sqlite` 不会因为“代码变了”就自动修改表结构
+- 手动部署会让服务器拿到新的代码
+- 但服务器上的数据库（PostgreSQL）不会因为"代码变了"就自动修改表结构
 - 数据库结构是否改变，取决于你是否执行了 Alembic 迁移
 
 因此，当前项目的完整上线逻辑应该理解为：
 
 1. 推送代码到 GitHub
-2. 服务器自动部署代码
-3. 服务器手动执行数据库迁移
-4. 验证服务是否正常
+2. 通过 SCP 上传改动的文件到服务器
+3. 重启服务（`systemctl restart deepreading-api`）
+4. 服务器手动执行数据库迁移
+5. 验证服务是否正常
 
 ---
 
@@ -146,11 +148,12 @@
 
 文件：
 
-- `db/app.sqlite`
+- 本地开发：`db/app.sqlite`
+- 生产环境：PostgreSQL 数据库（通过 `.env.production` 的 `DATABASE_URL` 连接）
 
 作用：
 
-- 真正在线运行的数据文件
+- 真正在线运行的数据库
 
 特点：
 
@@ -166,7 +169,7 @@
 - `DATABASE_SCHEMA.md` 负责“说明应该怎么设计”
 - `models.py` 负责“告诉代码现在按什么结构运行”
 - `migrations/*.py` 负责“告诉数据库该怎么从旧版升级到新版”
-- `db/app.sqlite` 是“最终被升级并被服务使用的真实数据库”
+- `db/app.sqlite`（本地开发）/ PostgreSQL（生产环境）是“最终被升级并被服务使用的真实数据库”
 
 ---
 
@@ -307,16 +310,13 @@
 
 ---
 
-### 7.3 服务器自动部署阶段
+### 7.3 服务器手动部署阶段
 
-服务器自动部署后会发生：
+当前没有 Webhook 自动部署，通过 SCP 上传改动的文件后重启服务：
 
-- 拉取最新代码
-- 重启服务
-
-但此时数据库一般仍然是旧结构，除非你已经额外做了自动迁移逻辑。
-
-当前项目不建议依赖自动迁移脚本直接改数据库，而是继续手动执行迁移更稳妥。
+```bash
+systemctl restart deepreading-api
+```
 
 ---
 
@@ -325,7 +325,7 @@
 SSH 登录服务器后，执行：
 
 ```bash
-cd /root/.openclaw/workspace/deep-reading-agent/backend
+cd /root/deep-reading-agent/backend
 source ../venv/bin/activate
 python -m alembic upgrade head
 ```
@@ -429,7 +429,7 @@ python -m alembic upgrade head
 负责：
 
 - 承载代码版本
-- 作为服务器自动部署的代码来源
+- 作为手动部署的代码来源（SCP 上传）
 
 ---
 
@@ -437,10 +437,10 @@ python -m alembic upgrade head
 
 负责：
 
-- 拉取代码
-- 重启服务
+- 通过 SCP 接收代码
+- 通过 `systemctl restart deepreading-api` 重启服务
 - 执行数据库迁移
-- 承载真实业务数据
+- 承载真实业务数据（PostgreSQL）
 
 ---
 
@@ -448,7 +448,7 @@ python -m alembic upgrade head
 
 负责：
 
-- 保存线上真实数据
+- 保存线上真实数据（PostgreSQL）
 - 通过 Alembic 升级结构
 - 不直接用本机数据库覆盖
 
@@ -477,12 +477,13 @@ python -m alembic upgrade head
 
 ### 阶段 C：服务器上线
 
-1. 等服务器自动部署完成
+1. 通过 SCP 上传改动的文件到服务器
 2. SSH 登录服务器
-3. 进入项目目录并激活 `venv`
-4. 执行 `python -m alembic upgrade head`
-5. 检查服务是否正常
-6. 检查页面和功能是否正常
+3. 重启服务（`systemctl restart deepreading-api`）
+4. 进入项目目录并激活 `venv`
+5. 执行 `python -m alembic upgrade head`
+6. 检查服务是否正常
+7. 检查页面和功能是否正常
 
 ---
 
@@ -535,7 +536,7 @@ python -m alembic upgrade head
 
 - 本机数据库和服务器数据库分开使用
 - 数据库设计改动必须同步到 `models.py` 和 Alembic 迁移
-- GitHub 自动部署后，不要默认数据库已更新
+- GitHub 自动部署后，不要默认数据库已更新（当前为手动 SCP + systemctl 部署）
 - 服务器继续手动执行 `alembic upgrade head`
 - 不要用本机数据库直接覆盖服务器数据库
 
@@ -594,10 +595,11 @@ python -m alembic upgrade head
 本次 `P0` 如果落地，服务器上线时应遵循下面顺序：
 
 1. 推送包含 `P0` 代码和迁移文件的提交到 GitHub
-2. 等服务器自动部署并重启代码
+2. 通过 SCP 上传改动的文件到服务器
 3. SSH 登录服务器
-4. 激活项目 `venv`
-5. 手动执行 `python -m alembic upgrade head`
+4. 重启服务（`systemctl restart deepreading-api`）
+5. 激活项目 `venv`
+6. 手动执行 `python -m alembic upgrade head`
 6. 使用服务器现有数据库继续运行，不上传本机数据库文件
 7. 用服务器现有 PDF 数据验证参考文献梳理功能
 
@@ -645,7 +647,7 @@ python -m alembic upgrade head
 
 本次上线涉及两个新功能（直接导入题录、批量翻译摘要），过程中遇到多个部署相关问题，记录如下供后续参考。
 
-### 15.1 SQLite Alembic 迁移可能"虚标"
+### 15.1 SQLite Alembic 迁移可能"虚标"（仅适用于本地开发）
 
 **现象**：远程服务器执行 `alembic upgrade head` 输出 `018 (head)` 表示迁移成功，但 `bib_entries` 表中 `abstract_cn` 列实际不存在。
 
@@ -665,7 +667,7 @@ sqlite3 db/app.sqlite "ALTER TABLE bib_entries ADD COLUMN abstract_cn TEXT;"
 
 **教训**：SQLite 迁移后不能只信 `alembic current` 的输出，必须用 `PRAGMA table_info()` 验证。
 
-### 15.2 服务器数据库路径不是 `backend/db/app.sqlite`
+### 15.2 服务器数据库路径不是 `backend/db/app.sqlite`（仅适用于本地开发 SQLite 场景）
 
 **现象**：执行 `cd backend && sqlite3 db/app.sqlite` 报错找不到文件。
 
@@ -674,7 +676,7 @@ sqlite3 db/app.sqlite "ALTER TABLE bib_entries ADD COLUMN abstract_cn TEXT;"
 **正确操作**：
 
 ```bash
-cd /root/.openclaw/workspace/deep-reading-agent
+cd /root/deep-reading-agent
 sqlite3 db/app.sqlite "PRAGMA table_info(bib_entries);"
 ```
 
@@ -687,7 +689,7 @@ sqlite3 db/app.sqlite "PRAGMA table_info(bib_entries);"
 **正确操作**：部署后手动执行前端构建：
 
 ```bash
-cd /root/.openclaw/workspace/deep-reading-agent/frontend
+cd /root/deep-reading-agent/frontend
 npm run build
 ```
 

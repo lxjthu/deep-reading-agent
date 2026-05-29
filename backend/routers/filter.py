@@ -446,6 +446,10 @@ def run_filter_task(
     api_key: Optional[str] = None,
 ):
     """Run filter pipeline in background thread. api_key is REQUIRED."""
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
         async def start_job():
             await sync_job_status(
@@ -457,8 +461,7 @@ def run_filter_task(
                 error_msg=None,
             )
 
-        import asyncio
-        asyncio.run(start_job())
+        loop.run_until_complete(start_job())
 
         api_key = validate_deepseek_key(api_key)
 
@@ -545,7 +548,7 @@ def run_filter_task(
             result = await persist_filter_results(task_id, user, file_record, df, out_path)
             return result
 
-        result = asyncio.run(finalize_success())
+        result = loop.run_until_complete(finalize_success())
         tasks[task_id]["progress"] = 100
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["stage"] = "完成"
@@ -553,8 +556,6 @@ def run_filter_task(
         tasks[task_id]["result"] = result
         
     except Exception as e:
-        import asyncio
-
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["stage"] = f"错误: {str(e)}"
         tasks[task_id]["logs"].append(f"❌ 错误: {str(e)}")
@@ -570,7 +571,12 @@ def run_filter_task(
                 finished_at=utcnow_naive(),
             )
 
-        asyncio.run(finalize_failure())
+        try:
+            loop.run_until_complete(finalize_failure())
+        except Exception:
+            pass
+    finally:
+        loop.close()
 
 
 @router.post("/start")

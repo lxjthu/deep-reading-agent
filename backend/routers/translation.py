@@ -17,14 +17,14 @@ from backend.utils.api_key import validate_deepseek_key
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import AsyncSessionLocal, get_db
 from db.models import Artifact, BibEntry, File, Job, JobBibEntry, User
 from result_storage import build_result_storage_path, get_results_root
-from upload_storage import lookup_path_by_file_id
+from upload_storage import file_record_exists, lookup_path_by_file_id
 from services.queue_manager import task_queue
 from routers.reading import get_or_create_bib_entry
 
@@ -87,6 +87,8 @@ def _run_translation_task(
 ) -> None:
     import asyncio
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
         logger.info("[translation:%s] 开始翻译任务 user=%s file=%s type=%s workers=%s", task_id[:8], user_id, file_id, file_type, max_workers)
         task_queue.mark_running(task_id)
@@ -100,13 +102,13 @@ def _run_translation_task(
                     setattr(job, k, v)
                 await db.commit()
 
-        asyncio.run(_update_job(status="running", progress=5, current_stage="准备文件..."))
+        loop.run_until_complete(_update_job(status="running", progress=5, current_stage="准备文件..."))
 
         file_path = str(upload_storage_resolve(storage_path))
         logger.info("[translation:%s] 解析文件路径: %s -> %s exists=%s", task_id[:8], storage_path, file_path, os.path.exists(file_path))
 
         if file_type == "pdf":
-            asyncio.run(_update_job(current_stage="extracting", progress=5))
+            loop.run_until_complete(_update_job(current_stage="extracting", progress=5))
             logger.info("[translation:%s] 开始 PDF 文本提取...", task_id[:8])
             md_text = extract_paper_text(file_path)
             logger.info("[translation:%s] PDF 提取完成, 文本长度=%d", task_id[:8], len(md_text or ""))
@@ -116,7 +118,7 @@ def _run_translation_task(
             md_text = None
             logger.info("[translation:%s] Markdown 文件，跳过提取", task_id[:8])
 
-        asyncio.run(_update_job(current_stage="generating_glossary", progress=10))
+        loop.run_until_complete(_update_job(current_stage="generating_glossary", progress=10))
         logger.info("[translation:%s] 加载 translation_pipeline...", task_id[:8])
 
         from translation_pipeline import translate_md_file
@@ -128,7 +130,7 @@ def _run_translation_task(
         def progress_cb(stage: str, current: int, total: int):
             logger.info("[translation:%s] 阶段=%s 进度=%d%%", task_id[:8], stage, current)
             try:
-                asyncio.run(_update_job(current_stage=stage, progress=current))
+                loop.run_until_complete(_update_job(current_stage=stage, progress=current))
             except Exception as e:
                 logger.warning("[translation:%s] 进度更新失败: %s", task_id[:8], e)
 
@@ -163,11 +165,11 @@ def _run_translation_task(
         logger.info("[translation:%s] 翻译完成 cn=%s glossary=%s", task_id[:8], cn_path, glossary_path)
 
         if cancel_check():
-            asyncio.run(_update_job(status="canceled", progress=0, current_stage="已取消", finished_at=utcnow_naive()))
+            loop.run_until_complete(_update_job(status="canceled", progress=0, current_stage="已取消", finished_at=utcnow_naive()))
             task_queue.mark_completed(task_id)
             return
 
-        asyncio.run(_update_job(current_stage="saving", progress=95))
+        loop.run_until_complete(_update_job(current_stage="saving", progress=95))
 
         artifact_files = [
             {"artifact_type": "translation_md", "absolute_path": cn_path},
@@ -204,14 +206,14 @@ def _run_translation_task(
                 job.finished_at = utcnow_naive()
                 await db.commit()
 
-        asyncio.run(_finalize())
+        loop.run_until_complete(_finalize())
         task_queue.mark_completed(task_id)
         logger.info("[translation:%s] 任务成功完成", task_id[:8])
 
     except Exception as e:
         logger.error("[translation:%s] 任务失败: %s\n%s", task_id[:8], e, traceback.format_exc())
         try:
-            asyncio.run(_update_job(
+            loop.run_until_complete(_update_job(
                 status="failed",
                 current_stage=f"错误: {str(e)[:200]}",
                 error_msg=str(e),
@@ -222,11 +224,36 @@ def _run_translation_task(
         task_queue.mark_completed(task_id)
     finally:
         _translation_cancel_flags.pop(task_id, None)
+        loop.close()
 
 
 def upload_storage_resolve(storage_path: str) -> Path:
     from upload_storage import resolve_storage_path
     return resolve_storage_path(storage_path)
+
+
+async def clear_stale_bib_file_links(db: AsyncSession, *, user_id: int, file_id: str) -> int:
+    rows = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.owner_user_id == user_id,
+                or_(BibEntry.source_file_id == file_id, BibEntry.markdown_source_file_id == file_id),
+            )
+        )
+    ).scalars().all()
+    repaired = 0
+    for entry in rows:
+        changed = False
+        if entry.source_file_id == file_id:
+            entry.source_file_id = None
+            changed = True
+        if entry.markdown_source_file_id == file_id:
+            entry.markdown_source_file_id = None
+            changed = True
+        if changed:
+            entry.updated_at = utcnow_naive()
+            repaired += 1
+    return repaired
 
 
 @router.get("/translatable")
@@ -248,7 +275,11 @@ async def list_translatable(
     rows = (await db.execute(stmt)).all()
 
     results = []
+    repaired = 0
     for entry, source_file in rows:
+        if not file_record_exists(source_file):
+            repaired += await clear_stale_bib_file_links(db, user_id=user.id, file_id=source_file.id)
+            continue
         results.append({
             "bib_entry_id": entry.id,
             "title": entry.title,
@@ -259,6 +290,8 @@ async def list_translatable(
             "file_name": source_file.original_name,
             "file_type": source_file.file_type,
         })
+    if repaired:
+        await db.commit()
     return {"entries": results}
 
 
@@ -313,6 +346,15 @@ async def start_translation(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="翻译仅支持 PDF 或 Markdown 文件。",
+        )
+    if not file_record_exists(file_record):
+        repaired = await clear_stale_bib_file_links(db, user_id=user.id, file_id=file_record.id)
+        if repaired:
+            await db.commit()
+        logger.warning("[translation] Missing source file: file_id=%s user=%s repaired=%s", file_record.id, user.id, repaired)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="源文件已丢失，请重新上传原文后再发起翻译。",
         )
 
     logger.info("[translation] 收到翻译请求: user=%s file=%s type=%s bib=%s", user.id, file_record.original_name, file_record.file_type, request.bib_entry_id)

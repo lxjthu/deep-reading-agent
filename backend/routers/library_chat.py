@@ -8,7 +8,6 @@ from typing import Literal, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from openai import OpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +15,7 @@ from starlette.responses import StreamingResponse
 
 from auth.dependencies import current_user
 from backend.utils.api_key import validate_deepseek_key
+from backend.utils.llm_provider import create_openai_client, model_for_api_key
 from db import get_db
 from db.models import Annotation, BibEntry, BibReference, ReadingItem, User
 from prompt_service import get_effective_prompt_text
@@ -309,11 +309,11 @@ async def library_chat(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com",
+    client = create_openai_client(
+        api_key,
         timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
     )
+    model = model_for_api_key(api_key, "deepseek-v4-flash")
     query_prompt = await get_effective_prompt_text(
         db,
         user_id=user.id,
@@ -336,7 +336,7 @@ async def library_chat(
     async def _stream():
         try:
             query_response = client.chat.completions.create(
-                model="deepseek-v4-flash",
+                model=model,
                 extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": query_prompt},
@@ -415,7 +415,7 @@ async def library_chat(
                 )
                 explicit_target_ids = _entry_ids_from_question_numbers(req.question, candidate_numbers)
                 target_response = client.chat.completions.create(
-                    model="deepseek-v4-flash",
+                    model=model,
                     extra_body={"thinking": {"type": "disabled"}},
                     messages=[
                         {"role": "system", "content": tag_target_prompt},
@@ -508,7 +508,7 @@ async def library_chat(
                     )
                 ).scalars().all()
             report_stream = client.chat.completions.create(
-                model="deepseek-v4-flash",
+                model=model,
                 extra_body={"thinking": {"type": "disabled"}},
                 messages=[
                     {"role": "system", "content": report_prompt},
@@ -578,18 +578,18 @@ async def save_library_chat_comments(
         prompt_type="library_chat",
         prompt_key="paper_comment_writer",
     )
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com",
+    client = create_openai_client(
+        api_key,
         timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
     )
+    model = model_for_api_key(api_key, "deepseek-v4-flash")
 
     comments: dict[str, str] = {}
     chunk_size = 30
     for start in range(0, len(ordered_rows), chunk_size):
         chunk = ordered_rows[start : start + chunk_size]
         response = client.chat.completions.create(
-            model="deepseek-v4-flash",
+            model=model,
             extra_body={"thinking": {"type": "disabled"}},
             messages=[
                 {"role": "system", "content": comment_prompt},

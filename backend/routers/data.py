@@ -8,18 +8,24 @@ import logging
 import tempfile
 import threading
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from auth.dependencies import current_user
-from db import AsyncSessionLocal, get_db
+from db import DATABASE_URL, get_db
 from db.models import User
-from services.data_portability import export_user_data, import_user_data
+from services.data_portability import (
+    IMPORT_MODE_APPEND,
+    SUPPORTED_IMPORT_MODES,
+    export_user_data,
+    import_user_data,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -36,6 +42,40 @@ _import_tasks: dict[str, dict[str, Any]] = {}
 _user_active_imports: dict[int, str] = {}
 _import_task_lock = threading.Lock()
 _UPLOAD_SESSIONS_ROOT = Path(tempfile.gettempdir()) / "dra_upload_sessions"
+
+
+def _create_import_sessionmaker() -> tuple[Any, async_sessionmaker[AsyncSession]]:
+    """Create an async engine bound to the import worker thread's event loop."""
+    engine_kwargs: dict[str, Any] = {"echo": False, "future": True}
+    if DATABASE_URL.startswith("sqlite"):
+        engine_kwargs["connect_args"] = {"check_same_thread": False}
+    elif DATABASE_URL.startswith("postgresql"):
+        engine_kwargs.update(
+            pool_size=1,
+            max_overflow=0,
+            pool_timeout=30,
+            pool_recycle=1800,
+            pool_pre_ping=True,
+        )
+
+    import_engine = create_async_engine(DATABASE_URL, **engine_kwargs)
+    import_sessionmaker = async_sessionmaker(
+        import_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    return import_engine, import_sessionmaker
+
+
+@asynccontextmanager
+async def _import_session() -> AsyncIterator[AsyncSession]:
+    import_engine, import_sessionmaker = _create_import_sessionmaker()
+    try:
+        async with import_sessionmaker() as session:
+            yield session
+    finally:
+        await import_engine.dispose()
 
 
 def _session_dir(upload_id: str) -> Path:
@@ -104,18 +144,28 @@ def _set_import_task(job_id: str, **updates: Any) -> None:
         task["updated_at"] = _utc_now().isoformat()
 
 
-def _run_import_task(job_id: str, user_id: int, tmp_path: Path) -> None:
+def _validate_import_mode(mode: str | None) -> str:
+    normalized = (mode or IMPORT_MODE_APPEND).strip()
+    if normalized not in SUPPORTED_IMPORT_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的导入模式：{normalized}",
+        )
+    return normalized
+
+
+def _run_import_task(job_id: str, user_id: int, tmp_path: Path, mode: str) -> None:
     def progress(stage: str, value: int) -> None:
         _set_import_task(job_id, current_stage=stage, progress=max(0, min(100, value)))
 
     async def runner() -> None:
         progress("正在准备导入任务...", 1)
-        async with AsyncSessionLocal() as db:
+        async with _import_session() as db:
             user = await db.get(User, user_id)
             if user is None:
                 raise ValueError("导入用户不存在或已被删除。")
 
-            result = await import_user_data(db, user, tmp_path, progress_cb=progress)
+            result = await import_user_data(db, user, tmp_path, progress_cb=progress, mode=mode)
             _record_rate_limit(_import_counts, user_id)
             _set_import_task(
                 job_id,
@@ -124,9 +174,12 @@ def _run_import_task(job_id: str, user_id: int, tmp_path: Path) -> None:
                 current_stage="导入完成。",
                 result={
                     "success": True,
+                    "mode": result["mode"],
                     "message": "导入成功。",
                     "cleared": result["cleared"],
                     "imported": result["imported"],
+                    "table_stats": result["table_stats"],
+                    "compat": result["compat"],
                     "files_restored": result["files_restored"],
                     "files_missing": result["files_missing"],
                 },
@@ -207,14 +260,16 @@ def _ensure_import_allowed(user: User, filename: str | None, file_size: int | No
     _check_active_import(user.id)
 
 
-def _start_import_from_path(user: User, filename: str, tmp_path: Path) -> dict[str, Any]:
+def _start_import_from_path(user: User, filename: str, tmp_path: Path, mode: str) -> dict[str, Any]:
     job_id = str(uuid.uuid4())
     now = _utc_now().isoformat()
+    import_mode = _validate_import_mode(mode)
     with _import_task_lock:
         _import_tasks[job_id] = {
             "job_id": job_id,
             "user_id": user.id,
             "filename": filename,
+            "mode": import_mode,
             "status": "pending",
             "progress": 0,
             "current_stage": "等待后台导入任务启动...",
@@ -226,20 +281,31 @@ def _start_import_from_path(user: User, filename: str, tmp_path: Path) -> dict[s
         }
         _user_active_imports[user.id] = job_id
 
-    thread = threading.Thread(target=_run_import_task, args=(job_id, user.id, tmp_path), daemon=True)
+    thread = threading.Thread(
+        target=_run_import_task,
+        args=(job_id, user.id, tmp_path, import_mode),
+        daemon=True,
+    )
     thread.start()
 
-    return {"job_id": job_id, "status": "pending", "message": "导入任务已开始。"}
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "mode": import_mode,
+        "message": "导入任务已开始。",
+    }
 
 
 async def _start_import_data(
     file: UploadFile = File(...),
+    mode: str = Form(IMPORT_MODE_APPEND),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Start an async user data import from a .dra zip package.
 
     WARNING: This will CLEAR all existing user data before importing.
     """
+    import_mode = _validate_import_mode(mode)
     _ensure_import_allowed(user, file.filename)
 
     contents = await file.read()
@@ -263,7 +329,7 @@ async def _start_import_data(
             detail=f"导入任务创建失败：{exc}",
         ) from exc
 
-    return _start_import_from_path(user, file.filename, tmp_path)
+    return _start_import_from_path(user, file.filename, tmp_path, import_mode)
 
 
 @router.post("/import/chunk/init")
@@ -271,8 +337,10 @@ async def import_chunk_init(
     filename: str = Form(...),
     total_size: int = Form(...),
     total_chunks: int = Form(...),
+    mode: str = Form(IMPORT_MODE_APPEND),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
+    import_mode = _validate_import_mode(mode)
     _ensure_import_allowed(user, filename, total_size)
     if total_chunks <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分片数量无效。")
@@ -285,6 +353,7 @@ async def import_chunk_init(
         "upload_id": upload_id,
         "user_id": user.id,
         "filename": filename,
+        "mode": import_mode,
         "total_size": total_size,
         "total_chunks": total_chunks,
         "upload_dir": str(upload_dir),
@@ -293,7 +362,7 @@ async def import_chunk_init(
         "updated_at": now,
     }
     _save_session_meta(upload_id, meta)
-    return {"upload_id": upload_id}
+    return {"upload_id": upload_id, "mode": import_mode}
 
 
 @router.post("/import/chunk")
@@ -340,6 +409,7 @@ async def import_chunk_complete(
     if meta is None or meta.get("user_id") != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分片上传会话不存在。")
     filename = str(meta["filename"])
+    mode = _validate_import_mode(str(meta.get("mode") or IMPORT_MODE_APPEND))
     total_size = int(meta["total_size"])
     total_chunks = int(meta["total_chunks"])
     received = set(meta["received"])
@@ -369,23 +439,25 @@ async def import_chunk_complete(
     finally:
         shutil.rmtree(upload_dir, ignore_errors=True)
 
-    return _start_import_from_path(user, filename, tmp_path)
+    return _start_import_from_path(user, filename, tmp_path, mode)
 
 
 @router.post("/import")
 async def import_data(
     file: UploadFile = File(...),
+    mode: str = Form(IMPORT_MODE_APPEND),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    return await _start_import_data(file=file, user=user)
+    return await _start_import_data(file=file, mode=mode, user=user)
 
 
 @router.post("/import/start")
 async def import_data_start(
     file: UploadFile = File(...),
+    mode: str = Form(IMPORT_MODE_APPEND),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    return await _start_import_data(file=file, user=user)
+    return await _start_import_data(file=file, mode=mode, user=user)
 
 
 @router.get("/import/{job_id}/status")
@@ -399,6 +471,7 @@ async def import_data_status(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="导入任务不存在。")
         return {
             "job_id": task["job_id"],
+            "mode": task.get("mode"),
             "status": task["status"],
             "progress": task["progress"],
             "current_stage": task["current_stage"],

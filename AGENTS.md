@@ -2,6 +2,20 @@
 
 Deep Reading Agent — 多用户学术论文在线精读工作台。用户上传 PDF/Markdown，系统调用 DeepSeek 完成文献筛选、精读（七步/四步/长文本）、对比综述、参考文献提取，结果存入文献库。
 
+## ⚠️ 当前分支与线上环境
+
+**当前分支**：`codex/deepreading-empty-postgres-deploy`
+**线上地址**：http://8.162.14.154:18080/
+
+本分支直接对接线上生产环境，**不是** `online` 分支，**不走** GitHub Webhook 自动部署。部署方式为手动 SCP + systemctl restart。
+
+> 部署操作手册：[`docs/MANUAL_DEPLOY_AFTER_CODE_CHANGES.md`](docs/MANUAL_DEPLOY_AFTER_CODE_CHANGES.md)
+> 部署架构说明：[`docs/DEPLOYMENT_ARCHITECTURE.md`](docs/DEPLOYMENT_ARCHITECTURE.md)
+> 近期复盘：[`docs/JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md`](docs/JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md)  
+> 说明：本复盘专门记录“新增 prompt type + 线上 PostgreSQL 迁移 + 前端静态资源覆盖”这一类改动的真实踩坑，涉及 Alembic 误跑 SQLite、生产 CHECK 约束未升级、后端注册文件未同步、前端 `dist` 缓存/覆盖不一致等问题。
+
+**每次改完代码需要部署时，必须按照上述文档操作，不要 push 到 `online` 分支触发 webhook。**
+
 ## 快速命令
 
 ```powershell
@@ -25,9 +39,11 @@ cd frontend && npm run build
 - **SSH**：`ssh root@8.162.14.154`
 - **项目路径**：`/root/deep-reading-agent`
 - **后端 venv**：`/root/deep-reading-agent/venv`
-- **日志**：`/tmp/fastapi.log`
-- **重启**：`pkill -f 'uvicorn main:app.*18000'; sleep 2; cd /root/deep-reading-agent && source venv/bin/activate && nohup uvicorn main:app --host 127.0.0.1 --port 18000 --workers 1 --timeout-keep-alive 30 > /tmp/fastapi.log 2>&1 &`
-- **部署**：SCP 上传改动的文件 → 重启 uvicorn（无 Webhook，手动部署）
+- **数据库**：PostgreSQL（`deepreading` 库），通过 `.env.production` 配置，systemd 自动加载
+- **日志**：`/var/log/deepreading/api.log`、`/var/log/deepreading/api-error.log`
+- **重启**：`systemctl restart deepreading-api`（**必须用 systemctl，不要手动 nohup uvicorn，否则丢失 PostgreSQL 配置**）
+- **健康检查**：`/root/deep-reading-agent/health_check.py`（cron 每 5 分钟）
+- **部署**：SCP 上传改动的文件 → `systemctl restart deepreading-api`（无 Webhook，手动部署）
 
 ## 架构
 
@@ -153,11 +169,14 @@ python -m unittest backend.tests.test_queue_manager  # 后端单测
 
 | 文档 | 内容 |
 |------|------|
+| `docs/RESEARCH_AGENT_UPGRADE_PLAN.md` | Research Agent 升级设计方案（全 6 Phase） |
+| `docs/RESEARCH_AGENT_IMPLEMENTATION.md` | Research Agent 已实现功能 + 函数级代码索引 |
 | `docs/TECHNICAL_OVERVIEW.md` | 系统功能、代码结构、数据模型、修改记录（最全面） |
 | `docs/STATE_AND_API_MAP.md` | 前端状态↔API↔数据库全链路映射 |
 | `docs/FUNCTION_INDEX.md` | 按文件列关键函数索引 + 常见问题速查 |
 | `docs/DATABASE_SCHEMA.md` | 数据库 ER 图、表结构、字段定义 |
 | `docs/DEPLOYMENT_ARCHITECTURE.md` | 本地→GitHub→服务器部署链路 |
+| `docs/JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md` | 顶刊名录改动引发的数据库迁移与部署经验教训；重点覆盖 Alembic 误跑 SQLite、生产 PostgreSQL 约束未升级、后端 prompt slot 未同步、前端 `dist` 覆盖与缓存排查 |
 | `docs/OPS_HEALTHCHECK_GUIDE.md` | 服务器健康检查与自动恢复 |
 | `docs/PENDING_PLANS.md` | 未实施的方案与待办 |
 | `docs/TRANSLATION_INTEGRATION_PLAN.md` | 全文翻译功能集成规划 |

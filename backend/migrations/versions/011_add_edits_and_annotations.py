@@ -18,19 +18,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _table_exists(table_name: str) -> bool:
-    conn = op.get_bind()
-    result = conn.execute(sa.text(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=:name"
-    ), {"name": table_name})
-    return result.fetchone() is not None
+    return sa.inspect(op.get_bind()).has_table(table_name)
 
 
 def _index_exists(index_name: str) -> bool:
-    conn = op.get_bind()
-    result = conn.execute(sa.text(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name=:name"
-    ), {"name": index_name})
-    return result.fetchone() is not None
+    inspector = sa.inspect(op.get_bind())
+    return any(
+        index["name"] == index_name
+        for table_name in inspector.get_table_names()
+        for index in inspector.get_indexes(table_name)
+    )
 
 
 def upgrade() -> None:
@@ -78,27 +75,45 @@ def upgrade() -> None:
         if not _index_exists("idx_annotations_bib"):
             op.create_index("idx_annotations_bib", "annotations", ["bib_entry_id"])
 
-    try:
-        op.drop_constraint("ck_prompt_templates_type", "prompt_templates", type_="check")
-    except Exception:
-        pass
-    op.create_check_constraint(
-        "ck_prompt_templates_type",
-        "prompt_templates",
-        "prompt_type IN ('quant','qual','long','filter','compare')",
-    )
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        with op.batch_alter_table("prompt_templates", recreate="always") as batch_op:
+            batch_op.drop_constraint("ck_prompt_templates_type", type_="check")
+            batch_op.create_check_constraint(
+                "ck_prompt_templates_type",
+                "prompt_type IN ('quant','qual','long','filter','compare')",
+            )
+    else:
+        try:
+            op.drop_constraint("ck_prompt_templates_type", "prompt_templates", type_="check")
+        except Exception:
+            pass
+        op.create_check_constraint(
+            "ck_prompt_templates_type",
+            "prompt_templates",
+            "prompt_type IN ('quant','qual','long','filter','compare')",
+        )
 
 
 def downgrade() -> None:
-    try:
-        op.drop_constraint("ck_prompt_templates_type", "prompt_templates", type_="check")
-    except Exception:
-        pass
-    op.create_check_constraint(
-        "ck_prompt_templates_type",
-        "prompt_templates",
-        "prompt_type IN ('quant','qual','long','filter')",
-    )
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        with op.batch_alter_table("prompt_templates", recreate="always") as batch_op:
+            batch_op.drop_constraint("ck_prompt_templates_type", type_="check")
+            batch_op.create_check_constraint(
+                "ck_prompt_templates_type",
+                "prompt_type IN ('quant','qual','long','filter')",
+            )
+    else:
+        try:
+            op.drop_constraint("ck_prompt_templates_type", "prompt_templates", type_="check")
+        except Exception:
+            pass
+        op.create_check_constraint(
+            "ck_prompt_templates_type",
+            "prompt_templates",
+            "prompt_type IN ('quant','qual','long','filter')",
+        )
     if _index_exists("idx_annotations_bib"):
         op.drop_index("idx_annotations_bib", "annotations")
     if _index_exists("idx_annotations_source"):
