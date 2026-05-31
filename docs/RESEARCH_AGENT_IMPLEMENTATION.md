@@ -1,6 +1,6 @@
 # Research Agent 技术实现文档
 
-> 最后更新：2026-05-28
+> 最后更新：2026-05-31（Sprint 1 完成）
 > 对应分支：`codex/deepreading-empty-postgres-deploy`
 > 线上地址：http://8.162.14.154:18080/
 > 设计方案：[`RESEARCH_AGENT_UPGRADE_PLAN.md`](RESEARCH_AGENT_UPGRADE_PLAN.md)
@@ -23,6 +23,7 @@
 | `backend/services/research_retrieval.py` | 分层检索引擎：查询解析、多表搜索、证据收集、评分排序、分页全量 | 725 |
 | `backend/services/agent_external_retrieval.py` | 外部检索工具：CNKI URL 生成、英文全文候选查找（只读不写库） | 156 |
 | `backend/services/research_agent_runtime.py` | Runtime 规划层：TaskFrame、Continuation Resolver、预算治理、工作记忆摘要 | 1200+ |
+| `backend/services/agent_errors.py` | 错误枚举体系：AgentErrorCode(17) + RuntimeNoticeCode(13) + payload 工厂 | 99 |
 | `backend/services/reading_candidate_analysis.py` | 大集合批量分析、期刊层级排序、结构化工作笔记、analysis_cache 子集过滤 | 790 |
 | `backend/services/journal_quality_kb.py` | 顶刊名录知识库与期刊质量打分 | 150+ |
 | `backend/routers/agent.py` | Agent 路由：会话管理、消息持久化、工具分发、runtime 接线、SSE 流式对话 | 2300+ |
@@ -466,3 +467,57 @@ Agent 读取以下表（全部按 `owner_user_id` 过滤）：
   - 覆盖 `max_entries` 截断
 - `backend/tests/test_agent_tool_registry.py`
   - 校验 `filter_analysis_cache` 已进入工具 schema
+
+---
+
+## 12. Sprint 1 实施记录（2026-05-31）
+
+### 12.1 错误枚举体系
+
+- 新建 `backend/services/agent_errors.py`：
+  - `AgentErrorCode`：17 种错误码（LLM 6 种 + 工具/运行时 4 种 + 业务 7 种）
+  - `ErrorStage`：7 个阶段枚举
+  - `RuntimeNoticeCode`：13 种 runtime 通知子码
+  - `RUNTIME_NOTICE_TO_ERROR_CATEGORY`：子码 → 父类别映射表
+  - `make_agent_error_payload()`：统一 payload 工厂函数
+- 改造 `routers/agent.py`：
+  - `_structured_agent_error` 委托给 `make_agent_error_payload`
+  - `classify_agent_exception` 全部 14 处硬编码替换为 `AgentErrorCode` 枚举
+  - `filter_analysis_cache` 内部错误替换为 `RuntimeNoticeCode` 枚举
+- 改造 `research_agent_runtime.py`：
+  - `enforce_tool_policy` 全部 10 处硬编码替换为 `RuntimeNoticeCode` 枚举
+  - 枚举 `.value` 与原字符串完全一致，零破坏性变更
+
+### 12.2 前端错误差异化展示
+
+- `getAgentErrorStyle()`：按错误类型返回图标 + 差异化颜色
+  - 红：auth/key 错误 → 🔑
+  - 橙：connection/timeout/tool → 🔌⏱️🔧
+  - 黄：rate_limit/budget → 🚦🔋
+  - 蓝：consent → 🔐
+- `AgentErrorCard` 增强：图标 + 颜色差异化 + 新错误码标题
+- `AgentRuntimeNoticeCard` 改为 `<details>` 可折叠（warning 默认折叠，error 默认展开）
+
+### 12.3 Tool Trace 摘要增强
+
+- `AgentToolTraceCard` 新增统计行：N 次命中 / M 次空结果 / K 次被策略拦截
+- `getRuntimeNoticeTitle` 补充 4 个 runtime notice code 的中文标题
+
+### 12.4 AI 助手 MD 渲染修复与增强
+
+- 修复：`AgentEventBody` 中 answer 类型检查提前到 JSON 解析之前，避免被 `tryParseJson` 兜底拦截
+- 样式增强（`index.css` `.agent-md-content`）：
+  - h1：深绿色 + 底部渐变线
+  - h2：深绿色 + 左侧竖线
+  - strong：紫红色 `#9f1239`
+  - em：紫色 `#7c3aed`
+  - code：暖黄底 + 琥珀色字
+  - table：绿色渐变表头 + 斑马纹 + hover 高亮 + 圆角
+  - blockquote：渐变绿底 + 斜体
+  - a：虚线下划线 + hover 变实线
+
+### 12.5 验证结果
+
+- 后端编译通过，39 项单测全绿
+- 前端 TypeScript 编译 + Vite 构建通过
+- 已部署到 http://8.162.14.154:18080/ 并验证首页 200、runtime 200

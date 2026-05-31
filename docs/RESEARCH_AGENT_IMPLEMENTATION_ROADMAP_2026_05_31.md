@@ -21,7 +21,7 @@
 
 ## 2. 当前完成度快照（2026-05-31）
 
-### 已完成
+### 已完成（Sprint 1 之前）
 
 | 编号 | 任务 | 关键代码位置 |
 |------|------|-------------|
@@ -33,11 +33,24 @@
 | P1.7 | Budget Policy（部分） | `research_agent_runtime.py:851` `enforce_tool_policy()` — 重复空查熔断 + search_library 限额 |
 | P1.8 | Tool Adapter（部分） | `research_agent_runtime.py:771` `normalize_tool_args()` |
 
+### 已完成（Sprint 1 — 2026-05-31）
+
+| 编号 | 任务 | 关键代码位置 | commit |
+|------|------|-------------|--------|
+| S1.1 | 错误枚举补全 + SSE error 事件规范化 | `services/agent_errors.py`（新建）+ `routers/agent.py` + `research_agent_runtime.py` | `b450513e` |
+| S1.2 | 前端按错误类型展示差异化提示 | `App.tsx` `getAgentErrorStyle()` + `AgentErrorCard` 增强 | `e51b5fe0` |
+| S1.3 | Provider 测试连接后端接口 | 已有 `POST /api/agent/provider-check` | — |
+| S1.4 | Provider 测试连接前端 UI | 已有测试连接按钮 + 结果展示 | — |
+| S1.5 | Tool Trace 前端摘要增强 | `App.tsx` `AgentToolTraceCard` 统计行 + `getRuntimeNoticeTitle` 补充 | `ee40ce2d` |
+| — | Runtime Notice 可折叠 + md 渲染修复 | `App.tsx` `AgentRuntimeNoticeCard` 改 `<details>` + `AgentEventBody` answer 优先 | `e19dc638` |
+| — | AI 助手 md 渲染样式增强 | `index.css` `.agent-md-content` 全面美化（绿系标题/紫红加粗/渐变表格/斑马纹） | `1fd431a2` |
+
 ### 已有但非任务清单中的能力
 
 | 能力 | 位置 |
 |------|------|
-| 结构化错误分类（7 种 LLM 错误 + 工具/运行时错误） | `agent.py:288-405` `classify_agent_exception()` |
+| 结构化错误枚举 + runtime notice 枚举 + payload 工厂 | `services/agent_errors.py`（Sprint 1 新建） |
+| 结构化错误分类（17 种错误码 + 13 种 notice 码） | `agent.py` `classify_agent_exception()` |
 | Analysis Cache + 子集过滤 | `reading_candidate_analysis.py` + `research_agent_runtime.py:705-747` |
 | 期刊质量知识库 | `journal_quality_kb.py` |
 | 前端工作记忆/工具轨迹/工作笔记展示 | `App.tsx` AI 助手面板 |
@@ -60,9 +73,10 @@
 
 验收标准：
 
-- 用户能区分 key 无效 / provider 挂了 / 上传失败 / runtime bug / 超时 / 限流
-- 保存 API Key 时有"测试连接"按钮，返回具体成功/失败原因
-- 工具轨迹区域展示"搜了什么、命中几篇、为什么停"
+- ✅ 用户能区分 key 无效 / provider 挂了 / 上传失败 / runtime bug / 超时 / 限流（17 种 AgentErrorCode + 差异化图标/颜色）
+- ✅ 保存 API Key 时有"测试连接"按钮，返回具体成功/失败原因
+- ✅ 工具轨迹区域展示"搜了什么、命中几篇、为什么停"（统计行 + 可折叠 runtime notice）
+- ✅ AI 助手回答有 md 渲染（绿系标题、紫红加粗、渐变表格、斑马纹等）
 
 ---
 
