@@ -53,7 +53,7 @@
 | 编号 | 任务 | 状态 |
 |------|------|------|
 | S1.1 | 错误枚举补全 + SSE error 事件规范化 | ✅ 已完成 |
-| S1.2 | 前端按错误类型展示差异化提示 | ⬜ 待实施 |
+| S1.2 | 前端按错误类型展示差异化提示 | ✅ 已完成 |
 | S1.3 | Provider 测试连接后端接口 | ⬜ 待实施 |
 | S1.4 | Provider 测试连接前端 UI | ⬜ 待实施 |
 | S1.5 | Tool Trace 前端摘要增强 | ⬜ 待实施 |
@@ -323,7 +323,7 @@ python -m unittest backend.tests.test_research_agent_runtime backend.tests.test_
 
 **实施步骤**：
 
-- [ ] **Step 1：在 AI 助手错误处理区域增加 code → 提示映射**
+- [x] **Step 1：在 AI 助手错误处理区域增加 code → 提示映射**
 
 在 `App.tsx` 中找到处理 SSE `error` 事件的逻辑，增加一个 `getErrorMessage(errorPayload)` 辅助函数：
 
@@ -414,17 +414,17 @@ function getAgentErrorDisplay(payload: Record<string, any>): {
 }
 ```
 
-- [ ] **Step 2：在错误展示区域使用映射函数**
+- [x] **Step 2：在错误展示区域使用映射函数**
 
 找到当前展示 AI 助手错误消息的位置，替换为使用 `getAgentErrorDisplay` 的结构化展示。
 
-- [ ] **Step 3：前端构建验证**
+- [x] **Step 3：前端构建验证**
 
 ```powershell
 cd frontend && npm run build
 ```
 
-- [ ] **Step 4：commit**
+- [x] **Step 4：commit**
 
 ---
 

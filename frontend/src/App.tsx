@@ -3992,7 +3992,42 @@ function getAgentErrorTitle(error: AgentStructuredError, fallback = '错误'): s
   if (error.code === 'resource_not_found') return '对象不存在'
   if (error.code === 'permission_denied') return '权限不足'
   if (error.code === 'http_error') return '请求失败'
+  if (error.code === 'agent_runtime_error') return '运行时异常'
+  if (error.code === 'consent_required') return '需要授权'
+  if (error.code === 'budget_exhausted') return '工具调用预算耗尽'
+  if (error.code === 'context_resolution_failed') return '上下文解析失败'
+  if (error.code === 'upload_error') return '上传失败'
+  if (error.code === 'db_error') return '数据库错误'
   return fallback
+}
+
+function getAgentErrorStyle(error: AgentStructuredError): { icon: string; borderClass: string; bgClass: string; textClass: string } {
+  const code = error.code || ''
+  if (code === 'invalid_api_key' || code === 'llm_auth_error') {
+    return { icon: '🔑', borderClass: 'border-red-300', bgClass: 'bg-red-50/60', textClass: 'text-red-700' }
+  }
+  if (code === 'llm_connection_error') {
+    return { icon: '🔌', borderClass: 'border-orange-200', bgClass: 'bg-orange-50/60', textClass: 'text-orange-700' }
+  }
+  if (code === 'llm_timeout') {
+    return { icon: '⏱️', borderClass: 'border-orange-200', bgClass: 'bg-orange-50/60', textClass: 'text-orange-700' }
+  }
+  if (code === 'llm_rate_limited') {
+    return { icon: '🚦', borderClass: 'border-yellow-200', bgClass: 'bg-yellow-50/60', textClass: 'text-yellow-700' }
+  }
+  if (code === 'llm_upstream_error') {
+    return { icon: '⚠️', borderClass: 'border-red-200', bgClass: 'bg-red-50/60', textClass: 'text-red-700' }
+  }
+  if (code === 'tool_execution_error') {
+    return { icon: '🔧', borderClass: 'border-orange-200', bgClass: 'bg-orange-50/60', textClass: 'text-orange-700' }
+  }
+  if (code === 'consent_required') {
+    return { icon: '🔐', borderClass: 'border-blue-200', bgClass: 'bg-blue-50/60', textClass: 'text-blue-700' }
+  }
+  if (code === 'budget_exhausted') {
+    return { icon: '🔋', borderClass: 'border-yellow-200', bgClass: 'bg-yellow-50/60', textClass: 'text-yellow-700' }
+  }
+  return { icon: '❌', borderClass: 'border-red-200', bgClass: 'bg-red-50/60', textClass: 'text-red-700' }
 }
 
 function getAgentErrorMessage(error: AgentStructuredError | null | undefined, fallback = 'AI 助手执行失败。'): string {
@@ -4394,16 +4429,20 @@ function AgentInboxSummaryCard({ summary }: { summary: AgentInboxUploadSummary }
 
 function AgentErrorCard({ error }: { error: AgentStructuredError }) {
   const retryable = Boolean(error.retryable)
+  const style = getAgentErrorStyle(error)
   const badgeClass = retryable
     ? 'border-amber-200 bg-white text-amber-700'
     : 'border-red-200 bg-white text-red-700'
 
   return (
-    <div className="space-y-3 rounded-lg border border-red-200 bg-red-50/60 p-3">
+    <div className={`space-y-3 rounded-lg border p-3 ${style.borderClass} ${style.bgClass}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold text-gray-900">{getAgentErrorTitle(error)}</div>
-          <div className="mt-1 text-sm text-gray-700">{getAgentErrorMessage(error)}</div>
+        <div className="flex items-start gap-2">
+          <span className="text-lg leading-none mt-0.5">{style.icon}</span>
+          <div>
+            <div className="text-sm font-semibold text-gray-900">{getAgentErrorTitle(error)}</div>
+            <div className="mt-1 text-sm text-gray-700">{getAgentErrorMessage(error)}</div>
+          </div>
         </div>
         {error.code && (
           <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
