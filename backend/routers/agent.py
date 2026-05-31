@@ -4,12 +4,15 @@ from __future__ import annotations
 import asyncio
 import json
 import hashlib
+import logging
 import shutil
 import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Optional
+
+logger = logging.getLogger(__name__)
 
 import httpx
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, UploadFile
@@ -54,6 +57,7 @@ try:
         research_search,
     )
     from backend.utils.api_key import validate_deepseek_key
+    from backend.services.agent_errors import AgentErrorCode, RuntimeNoticeCode, make_agent_error_payload
     from backend.utils.llm_provider import (
         create_openai_client,
         describe_llm_provider,
@@ -92,6 +96,7 @@ except ModuleNotFoundError:  # Support the backend/ working directory used by lo
         probe_llm_provider,
         resolve_llm_provider,
     )
+    from services.agent_errors import AgentErrorCode, RuntimeNoticeCode, make_agent_error_payload
 from db import get_db
 from db.models import (
     AgentActionProposal,
@@ -195,7 +200,7 @@ def _as_error_message(detail: Any) -> str:
 
 def _structured_agent_error(
     *,
-    code: str,
+    code: AgentErrorCode,
     message: str,
     stage: str,
     retryable: bool,
@@ -205,24 +210,17 @@ def _structured_agent_error(
     details: Any = None,
     recommendations: list[str] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "code": code,
-        "message": message,
-        "stage": stage,
-        "retryable": retryable,
-        "severity": "error",
-    }
-    if status_code is not None:
-        payload["status_code"] = status_code
-    if provider:
-        payload["provider"] = provider
-    if tool:
-        payload["tool"] = tool
-    if details not in (None, "", {}):
-        payload["details"] = details
-    if recommendations:
-        payload["recommendations"] = recommendations
-    return payload
+    return make_agent_error_payload(
+        code=code,
+        message=message,
+        stage=stage,
+        retryable=retryable,
+        status_code=status_code,
+        provider=provider,
+        tool=tool,
+        details=details,
+        recommendations=recommendations,
+    )
 
 
 def classify_agent_exception(
@@ -239,7 +237,7 @@ def classify_agent_exception(
         message = _as_error_message(exc.detail) or f"HTTP {status_code}"
         if status_code == 400 and "key" in message.lower():
             return _structured_agent_error(
-                code="invalid_api_key",
+                code=AgentErrorCode.INVALID_API_KEY,
                 message=message,
                 stage=stage,
                 retryable=False,
@@ -254,7 +252,7 @@ def classify_agent_exception(
             )
         if status_code in {401, 403}:
             return _structured_agent_error(
-                code="permission_denied",
+                code=AgentErrorCode.PERMISSION_DENIED,
                 message=message,
                 stage=stage,
                 retryable=False,
@@ -266,7 +264,7 @@ def classify_agent_exception(
             )
         if status_code == 404:
             return _structured_agent_error(
-                code="resource_not_found",
+                code=AgentErrorCode.RESOURCE_NOT_FOUND,
                 message=message,
                 stage=stage,
                 retryable=False,
@@ -277,7 +275,7 @@ def classify_agent_exception(
                 recommendations=["确认引用的 session、proposal、job 或文献对象仍然存在。"],
             )
         return _structured_agent_error(
-            code="http_error",
+            code=AgentErrorCode.HTTP_ERROR,
             message=message,
             stage=stage,
             retryable=status_code >= 500,
@@ -290,7 +288,7 @@ def classify_agent_exception(
 
     if isinstance(exc, ValueError) and "key" in str(exc).lower():
         return _structured_agent_error(
-            code="invalid_api_key",
+            code=AgentErrorCode.INVALID_API_KEY,
             message=str(exc),
             stage=stage,
             retryable=False,
@@ -304,7 +302,7 @@ def classify_agent_exception(
 
     if isinstance(exc, httpx.TimeoutException) or exc_name in {"APITimeoutError", "ReadTimeout", "ConnectTimeout"}:
         return _structured_agent_error(
-            code="llm_timeout",
+            code=AgentErrorCode.LLM_TIMEOUT,
             message="上游模型响应超时，请稍后重试，或缩小问题范围后再试。",
             stage=stage,
             retryable=True,
@@ -316,7 +314,7 @@ def classify_agent_exception(
 
     if isinstance(exc, httpx.NetworkError) or isinstance(exc, APIConnectionError) or exc_name == "APIConnectionError":
         return _structured_agent_error(
-            code="llm_connection_error",
+            code=AgentErrorCode.LLM_CONNECTION_ERROR,
             message="连接上游模型服务失败，请检查网络或稍后重试。",
             stage=stage,
             retryable=True,
@@ -331,7 +329,7 @@ def classify_agent_exception(
         status_code = int(exc.status_code)
     if exc_name in {"AuthenticationError"} or status_code == 401:
         return _structured_agent_error(
-            code="llm_auth_error",
+            code=AgentErrorCode.LLM_AUTH_ERROR,
             message="上游模型认证失败，请检查 API Key 是否有效或 provider 是否匹配。",
             stage=stage,
             retryable=False,
@@ -343,7 +341,7 @@ def classify_agent_exception(
         )
     if exc_name in {"RateLimitError"} or status_code == 429:
         return _structured_agent_error(
-            code="llm_rate_limited",
+            code=AgentErrorCode.LLM_RATE_LIMITED,
             message="上游模型触发限流，请稍后再试。",
             stage=stage,
             retryable=True,
@@ -355,7 +353,7 @@ def classify_agent_exception(
         )
     if exc_name in {"BadRequestError", "UnprocessableEntityError"} or status_code in {400, 422}:
         return _structured_agent_error(
-            code="llm_bad_request",
+            code=AgentErrorCode.LLM_BAD_REQUEST,
             message="提交给上游模型的请求不合法，请调整当前问题或参数后重试。",
             stage=stage,
             retryable=False,
@@ -367,7 +365,7 @@ def classify_agent_exception(
         )
     if exc_name in {"InternalServerError"} or (status_code is not None and int(status_code) >= 500):
         return _structured_agent_error(
-            code="llm_upstream_error",
+            code=AgentErrorCode.LLM_UPSTREAM_ERROR,
             message="上游模型服务暂时异常，请稍后重试。",
             stage=stage,
             retryable=True,
@@ -380,7 +378,7 @@ def classify_agent_exception(
 
     if stage == "tool_execution":
         return _structured_agent_error(
-            code="tool_execution_error",
+            code=AgentErrorCode.TOOL_EXECUTION_ERROR,
             message=f"工具 {tool or ''} 执行失败。".strip(),
             stage=stage,
             retryable=True,
@@ -391,7 +389,7 @@ def classify_agent_exception(
         )
 
     return _structured_agent_error(
-        code="agent_runtime_error",
+        code=AgentErrorCode.AGENT_RUNTIME_ERROR,
         message=str(exc) or "AI 助手执行失败。",
         stage=stage,
         retryable=False,
@@ -840,16 +838,30 @@ async def _persist_inbox_upload(
     upload: UploadFile,
     batch_id: str,
 ) -> dict[str, Any]:
+    """Persist an uploaded file to the inbox with structured logging.
+
+    Returns a dict with success status, file_id, and any matched bib entry.
+    """
     original_name = (upload.filename or "").strip().replace("\\", "/")
     if not original_name:
+        logger.warning("[inbox_upload] missing_filename: user_id=%s, batch_id=%s", user.id, batch_id)
         return {"success": False, "filename": "", "error": "missing_filename"}
+
     file_ext = Path(original_name).suffix.lower()
     if file_ext not in AGENT_INBOX_EXTENSIONS:
+        logger.warning(
+            "[inbox_upload] unsupported_extension: user_id=%s, batch_id=%s, filename=%s, ext=%s",
+            user.id, batch_id, original_name, file_ext
+        )
         return {"success": False, "filename": original_name, "error": "unsupported_extension"}
+
+    logger.info("[inbox_upload] started: user_id=%s, batch_id=%s, filename=%s", user.id, batch_id, original_name)
 
     user_dir = get_user_upload_dir(user.id)
     temp_path = user_dir / f".{uuid.uuid4()}.agent-uploading"
     final_path: Path | None = None
+    file_id: str | None = None
+
     try:
         hasher = hashlib.md5()
         size_bytes = 0
@@ -864,19 +876,44 @@ async def _persist_inbox_upload(
                 hasher.update(chunk)
                 buffer.write(chunk)
                 size_bytes += len(chunk)
+
+        logger.debug(
+            "[inbox_upload] file_read: user_id=%s, batch_id=%s, filename=%s, size_bytes=%d",
+            user.id, batch_id, original_name, size_bytes
+        )
+
         if size_bytes <= 0:
+            logger.warning(
+                "[inbox_upload] empty_file: user_id=%s, batch_id=%s, filename=%s",
+                user.id, batch_id, original_name
+            )
             return {"success": False, "filename": original_name, "error": "empty_file"}
+
         file_type = detect_file_type(original_name, sample)
         if file_type not in {"pdf", "markdown"}:
+            logger.warning(
+                "[inbox_upload] unsupported_type: user_id=%s, batch_id=%s, filename=%s, detected_type=%s",
+                user.id, batch_id, original_name, file_type
+            )
             return {"success": False, "filename": original_name, "error": "unsupported_for_agent"}
+
         md5_hash = hasher.hexdigest()
+        logger.debug(
+            "[inbox_upload] hash_computed: user_id=%s, batch_id=%s, filename=%s, md5=%s",
+            user.id, batch_id, original_name, md5_hash
+        )
 
         existing = (
             await db.execute(select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash))
         ).scalar_one_or_none()
+
         if existing is not None:
             matched_bib = await bind_uploaded_file_to_existing_bib(db, user, existing)
             await db.flush()
+            logger.info(
+                "[inbox_upload] deduplicated: user_id=%s, batch_id=%s, filename=%s, existing_file_id=%s, matched_bib=%s",
+                user.id, batch_id, original_name, existing.id, matched_bib.id if matched_bib else None
+            )
             return {
                 "success": True,
                 "deduplicated": True,
@@ -888,6 +925,11 @@ async def _persist_inbox_upload(
         file_id = str(uuid.uuid4())
         final_path, storage_path = build_storage_path(user.id, file_id, file_ext)
         shutil.move(str(temp_path), str(final_path))
+        logger.debug(
+            "[inbox_upload] file_moved: user_id=%s, batch_id=%s, filename=%s, file_id=%s, storage_path=%s",
+            user.id, batch_id, original_name, file_id, storage_path
+        )
+
         record = File(
             id=file_id,
             owner_user_id=user.id,
@@ -902,6 +944,10 @@ async def _persist_inbox_upload(
         db.add(record)
         matched_bib = await bind_uploaded_file_to_existing_bib(db, user, record)
         await db.flush()
+        logger.info(
+            "[inbox_upload] success: user_id=%s, batch_id=%s, filename=%s, file_id=%s, matched_bib=%s",
+            user.id, batch_id, original_name, file_id, matched_bib.id if matched_bib else None
+        )
         return {
             "success": True,
             "deduplicated": False,
@@ -909,6 +955,12 @@ async def _persist_inbox_upload(
             "filename": record.original_name,
             "matched_bib_entry_id": matched_bib.id if matched_bib else None,
         }
+    except Exception as exc:
+        logger.exception(
+            "[inbox_upload] exception: user_id=%s, batch_id=%s, filename=%s, file_id=%s, exc_type=%s, exc_msg=%s",
+            user.id, batch_id, original_name, file_id, type(exc).__name__, str(exc)[:200]
+        )
+        raise
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -2063,8 +2115,8 @@ async def execute_tool(
         cached_dataset = session_state.get("analysis_cache") or {}
         if not isinstance(cached_dataset, dict) or not isinstance(cached_dataset.get("entries"), list):
             return {
-                "error": "analysis_cache_required",
-                "code": "analysis_cache_required",
+                "error": RuntimeNoticeCode.CONTEXT_REQUIRED.value,
+                "code": RuntimeNoticeCode.ANALYSIS_CACHE_REQUIRED.value,
                 "message": "当前会话没有可复用的分析缓存，请先完成一次批量分析。",
                 "suggested_tools": ["analyze_reading_candidates"],
                 "recommendations": [

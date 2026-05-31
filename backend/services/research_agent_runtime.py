@@ -7,6 +7,8 @@ import uuid
 from copy import deepcopy
 from typing import Any
 
+from backend.services.agent_errors import RuntimeNoticeCode
+
 
 CONTINUATION_PATTERNS = (
     "上一轮",
@@ -868,8 +870,8 @@ def enforce_tool_policy(
         and name in ENTRY_ID_TOOLS.union({"get_entry_detail"})
     ):
         return {
-            "error": "context_required",
-            "code": "continuation_context_required",
+            "error": RuntimeNoticeCode.CONSENT_REQUIRED.value,
+            "code": RuntimeNoticeCode.CONTINUATION_CONTEXT_REQUIRED.value,
             "message": "你在承接上一轮对象，但当前会话没有可解析的结果集。请先澄清要继续分析哪组文献，或先重新检索并形成结果集。",
             "tool": name,
             "arguments": args,
@@ -881,8 +883,8 @@ def enforce_tool_policy(
 
     if name in EXTERNAL_TOOLS and not task_frame.get("user_requested_external"):
         return {
-            "error": "consent_required",
-            "code": "external_consent_required",
+            "error": RuntimeNoticeCode.CONSENT_REQUIRED.value,
+            "code": RuntimeNoticeCode.EXTERNAL_CONSENT_REQUIRED.value,
             "message": "本轮用户未明确要求联网检索；请先询问是否允许进行外部检索。",
             "tool": name,
             "recommendations": ["先确认用户是否允许联网检索或查找全文。"],
@@ -894,8 +896,8 @@ def enforce_tool_policy(
         and _resolved_entry_count(resolved_context) > 1
     ):
         return {
-            "error": "inefficient_tool_path",
-            "code": "prefer_result_set_tools",
+            "error": RuntimeNoticeCode.INEFFICIENT_TOOL_PATH.value,
+            "code": RuntimeNoticeCode.PREFER_RESULT_SET_TOOLS.value,
             "message": "当前是承接上一轮多篇文献的继续分析场景。请优先使用 get_evidence_pack、research_search 或 get_reading_context 处理整组文献，除非用户明确要求查看单篇详情。",
             "tool": name,
             "arguments": args,
@@ -909,8 +911,8 @@ def enforce_tool_policy(
         and _resolved_entry_count(resolved_context) > 1
     ):
         return {
-            "error": "inefficient_tool_path",
-            "code": "prefer_contextual_result_set",
+            "error": RuntimeNoticeCode.INEFFICIENT_TOOL_PATH.value,
+            "code": RuntimeNoticeCode.PREFER_CONTEXTUAL_RESULT_SET.value,
             "message": "当前已经有上一轮结果集，继续分析时不应回退到重新搜全库。请直接在这组文献上调用 get_evidence_pack、research_search、get_reading_context 或 get_source_windows。",
             "tool": name,
             "arguments": args,
@@ -920,8 +922,8 @@ def enforce_tool_policy(
 
     if name == "filter_analysis_cache" and not _analysis_cache_refs(state):
         return {
-            "error": "context_required",
-            "code": "analysis_cache_required",
+            "error": RuntimeNoticeCode.CONTEXT_REQUIRED.value,
+            "code": RuntimeNoticeCode.ANALYSIS_CACHE_REQUIRED.value,
             "message": "当前会话还没有可复用的 analysis_cache。请先执行一次 analyze_reading_candidates 形成论文级标注缓存，再继续做子集筛选。",
             "tool": name,
             "arguments": args,
@@ -934,8 +936,8 @@ def enforce_tool_policy(
 
     if task_frame.get("intent") == "analyze_cached_collection" and name != "filter_analysis_cache":
         return {
-            "error": "inefficient_tool_path",
-            "code": "prefer_analysis_cache_filter",
+            "error": RuntimeNoticeCode.INEFFICIENT_TOOL_PATH.value,
+            "code": RuntimeNoticeCode.PREFER_ANALYSIS_CACHE_FILTER.value,
             "message": "当前会话已有持久化分析缓存，且用户未要求重新全量分析。请优先使用 filter_analysis_cache 在上一轮已标注的论文集合上继续筛选，而不是重新扫全库。",
             "tool": name,
             "arguments": args,
@@ -948,8 +950,8 @@ def enforce_tool_policy(
 
     if task_frame.get("intent") == "analyze_collection" and name in {"search_library", "research_search", "get_evidence_pack"}:
         return {
-            "error": "inefficient_tool_path",
-            "code": "prefer_batch_analysis_tool",
+            "error": RuntimeNoticeCode.INEFFICIENT_TOOL_PATH.value,
+            "code": RuntimeNoticeCode.PREFER_BATCH_ANALYSIS_TOOL.value,
             "message": "当前是大集合分类/优先级分析场景。请优先使用 analyze_reading_candidates 做分批分析、结构化工作笔记和候选排序，不要先走全量枚举检索。",
             "tool": name,
             "arguments": args,
@@ -966,8 +968,8 @@ def enforce_tool_policy(
     repeated_empty = [item for item in recent_calls[-2:] if item.get("key") == key and item.get("empty")]
     if len(repeated_empty) >= 2:
         return {
-            "error": "budget_exhausted",
-            "code": "duplicate_tool_call_blocked",
+            "error": RuntimeNoticeCode.BUDGET_EXHAUSTED.value,
+            "code": RuntimeNoticeCode.DUPLICATE_TOOL_CALL_BLOCKED.value,
             "message": "相同工具和参数已经连续空结果，已阻止继续空转。请改用上一轮结果集、缩小范围，或先澄清目标对象。",
             "tool": name,
             "arguments": args,
@@ -982,8 +984,8 @@ def enforce_tool_policy(
         total_count = int((runtime.get("tool_counts") or {}).get("search_library") or 0)
         if empty_count >= 3 or total_count >= 5:
             return {
-                "error": "budget_exhausted",
-                "code": "search_library_budget_exhausted",
+                "error": RuntimeNoticeCode.BUDGET_EXHAUSTED.value,
+                "code": RuntimeNoticeCode.SEARCH_LIBRARY_BUDGET_EXHAUSTED.value,
                 "message": "search_library 已多次未有效收敛。请优先复用上一轮结果集、改用 research_search，或要求用户缩小范围。",
                 "tool": name,
                 "recommended_query_mode": "research_search",
