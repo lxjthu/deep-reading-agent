@@ -32,24 +32,60 @@ body {
   --color-gray-900: #111827;
 }
 
-.agent-md-content h1 { font-size: 18px; font-weight: 700; margin: 14px 0 8px; color: #1f2937; }
-.agent-md-content h2 { font-size: 16px; font-weight: 700; margin: 12px 0 6px; color: #1f2937; }
-.agent-md-content h3 { font-size: 15px; font-weight: 600; margin: 10px 0 5px; color: #1f2937; }
-.agent-md-content h4 { font-size: 14px; font-weight: 600; margin: 8px 0 4px; color: #374151; }
-.agent-md-content p { margin: 6px 0; line-height: 1.75; color: #374151; }
-.agent-md-content ul, .agent-md-content ol { margin: 6px 0; padding-left: 20px; }
-.agent-md-content li { margin: 3px 0; line-height: 1.7; }
-.agent-md-content blockquote { border-left: 3px solid #059669; padding: 6px 12px; margin: 8px 0; background: #ecfdf5; border-radius: 0 6px 6px 0; color: #374151; }
-.agent-md-content code { font-size: 12px; background: #f3f4f6; padding: 1px 5px; border-radius: 4px; color: #dc2626; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.agent-md-content pre { background: #1f2937; color: #e5e7eb; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 8px 0; font-size: 12px; line-height: 1.55; }
+.agent-md-content h1 {
+  font-size: 18px; font-weight: 700; margin: 16px 0 8px; padding-bottom: 6px;
+  color: #166534; border-bottom: 2px solid #bbf7d0;
+}
+.agent-md-content h2 {
+  font-size: 16px; font-weight: 700; margin: 14px 0 6px; padding-left: 8px;
+  color: #166534; border-left: 3px solid #166534;
+}
+.agent-md-content h3 {
+  font-size: 15px; font-weight: 600; margin: 12px 0 5px;
+  color: #15803d;
+}
+.agent-md-content h4 {
+  font-size: 14px; font-weight: 600; margin: 10px 0 4px;
+  color: #166534;
+}
+.agent-md-content p { margin: 6px 0; line-height: 1.8; color: #374151; }
+.agent-md-content ul, .agent-md-content ol { margin: 6px 0; padding-left: 22px; }
+.agent-md-content li { margin: 3px 0; line-height: 1.75; }
+.agent-md-content li::marker { color: #166534; }
+.agent-md-content blockquote {
+  border-left: 3px solid #059669; padding: 8px 14px; margin: 10px 0;
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+  border-radius: 0 8px 8px 0; color: #374151; font-style: italic;
+}
+.agent-md-content code {
+  font-size: 12px; background: #fef3c7; padding: 1px 6px; border-radius: 4px;
+  color: #92400e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.agent-md-content pre {
+  background: #1e293b; color: #e2e8f0; padding: 14px; border-radius: 8px;
+  overflow-x: auto; margin: 10px 0; font-size: 12px; line-height: 1.6;
+  border: 1px solid #334155;
+}
 .agent-md-content pre code { background: none; color: inherit; padding: 0; border-radius: 0; }
-.agent-md-content .agent-md-table-wrap { overflow-x: auto; margin: 8px 0; }
-.agent-md-content table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.agent-md-content th, .agent-md-content td { padding: 6px 10px; border: 1px solid #e5e7eb; text-align: left; }
-.agent-md-content th { background: #f3f4f6; font-weight: 600; color: #1f2937; white-space: nowrap; }
-.agent-md-content td { color: #4b5563; }
-.agent-md-content a { color: #059669; text-decoration: none; }
-.agent-md-content a:hover { text-decoration: underline; }
-.agent-md-content strong { color: #1f2937; font-weight: 600; }
-.agent-md-content hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }
-.agent-md-content img { max-width: 100%; border-radius: 6px; margin: 8px 0; }
+.agent-md-content .agent-md-table-wrap { overflow-x: auto; margin: 10px 0; }
+.agent-md-content table {
+  width: 100%; border-collapse: collapse; font-size: 12.5px;
+  border-radius: 6px; overflow: hidden; border: 1px solid #d1fae5;
+}
+.agent-md-content th {
+  padding: 8px 12px; text-align: left; font-weight: 600; white-space: nowrap;
+  background: linear-gradient(180deg, #d1fae5 0%, #a7f3d0 100%); color: #064e3b;
+  border-bottom: 2px solid #6ee7b7;
+}
+.agent-md-content td {
+  padding: 7px 12px; color: #374151;
+  border-bottom: 1px solid #e5e7eb;
+}
+.agent-md-content tr:nth-child(even) td { background: #f0fdf4; }
+.agent-md-content tr:hover td { background: #ecfdf5; }
+.agent-md-content a { color: #059669; text-decoration: none; border-bottom: 1px dashed #059669; }
+.agent-md-content a:hover { color: #047857; border-bottom-style: solid; }
+.agent-md-content strong { color: #9f1239; font-weight: 600; }
+.agent-md-content em { color: #7c3aed; font-style: italic; }
+.agent-md-content hr { border: none; border-top: 2px solid #d1fae5; margin: 14px 0; }
+.agent-md-content img { max-width: 100%; border-radius: 6px; margin: 10px 0; border: 1px solid #e5e7eb; }
