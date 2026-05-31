@@ -61,6 +61,8 @@ function markdownHtml(raw: string): string {
   return html
 }
 
+const CITATION_PREVIEW_LIMIT = 8
+
 export default function MarkdownReader({ apiKey }: { apiKey: string }) {
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -73,6 +75,8 @@ export default function MarkdownReader({ apiKey }: { apiKey: string }) {
   const [prompt, setPrompt] = useState('')
   const [generating, setGenerating] = useState(false)
   const [message, setMessage] = useState('')
+  const [expandedOutgoing, setExpandedOutgoing] = useState(false)
+  const [expandedIncoming, setExpandedIncoming] = useState(false)
   const view = (searchParams.get('view') || 'original') as 'original' | 'translated'
   const entryId = useMemo(() => {
     const match = location.pathname.match(/\/workspace\/cards\/reader\/([^/?#]+)/)
@@ -195,27 +199,45 @@ export default function MarkdownReader({ apiKey }: { apiKey: string }) {
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-gray-900">引用关系</h2>
           <div className="mt-4">
-            <div className="text-xs font-semibold text-gray-500">引用了</div>
+            <div className="text-xs font-semibold text-gray-500">引用了 ({data.citations.outgoing.length})</div>
             <div className="mt-2 space-y-2">
               {data.citations.outgoing.length === 0 ? (
                 <p className="text-xs text-gray-400">暂无参考文献梳理结果。</p>
-              ) : data.citations.outgoing.slice(0, 8).map((ref) => (
+              ) : (expandedOutgoing ? data.citations.outgoing : data.citations.outgoing.slice(0, CITATION_PREVIEW_LIMIT)).map((ref) => (
                 <div key={ref.id} className="rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
                   [{ref.order}] {ref.title || ref.raw_text}
                 </div>
               ))}
+              {data.citations.outgoing.length > CITATION_PREVIEW_LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setExpandedOutgoing(!expandedOutgoing)}
+                  className="text-xs text-cyan-700 hover:text-cyan-800"
+                >
+                  {expandedOutgoing ? '收起' : `展开全部 (${data.citations.outgoing.length} 条)`}
+                </button>
+              )}
             </div>
           </div>
           <div className="mt-5">
-            <div className="text-xs font-semibold text-gray-500">被引用</div>
+            <div className="text-xs font-semibold text-gray-500">被引用 ({data.citations.incoming.length})</div>
             <div className="mt-2 space-y-2">
               {data.citations.incoming.length === 0 ? (
                 <p className="text-xs text-gray-400">暂无库内反向引用。</p>
-              ) : data.citations.incoming.slice(0, 8).map((ref) => (
+              ) : (expandedIncoming ? data.citations.incoming : data.citations.incoming.slice(0, CITATION_PREVIEW_LIMIT)).map((ref) => (
                 <div key={ref.reference_id} className="rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
                   {ref.source_title}
                 </div>
               ))}
+              {data.citations.incoming.length > CITATION_PREVIEW_LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setExpandedIncoming(!expandedIncoming)}
+                  className="text-xs text-cyan-700 hover:text-cyan-800"
+                >
+                  {expandedIncoming ? '收起' : `展开全部 (${data.citations.incoming.length} 条)`}
+                </button>
+              )}
             </div>
           </div>
         </section>

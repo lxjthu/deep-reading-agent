@@ -25,6 +25,7 @@ type LibraryEntrySummary = {
   tags: string[]
   note: string | null
   filter_score: number | null
+  has_translation: boolean
 }
 
 type LibraryEntryPageResponse = {
@@ -1574,6 +1575,15 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                               #{tag}
                             </span>
                           ))}
+                          {entry.has_translation && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/workspace/cards/reader/${entry.id}?view=translated`) }}
+                              className="rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] font-medium text-cyan-700 hover:bg-cyan-100 transition-colors"
+                            >
+                              查看翻译
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="text-right text-xs text-gray-400">

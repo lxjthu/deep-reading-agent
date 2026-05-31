@@ -3,8 +3,8 @@
 > 类型：运维清单  
 > 状态：可执行  
 > 适用环境：`8.162.14.154:18080` / `codex/deepreading-empty-postgres-deploy`  
-> 最后更新：2026-05-29  
-> 关联文档：`MANUAL_DEPLOY_AFTER_CODE_CHANGES.md`、`NEW_SERVER_SQL_MAINTENANCE.md`、`JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md`
+> 最后更新：2026-05-31  
+> 关联文档：`MANUAL_DEPLOY_AFTER_CODE_CHANGES.md`、`NEW_SERVER_SQL_MAINTENANCE.md`、`JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md`、`RESEARCH_AGENT_IMPLEMENTATION_ROADMAP_2026_05_31.md`
 
 ---
 
@@ -453,4 +453,44 @@ curl -sS -o /tmp/runtime.out -w "%{http_code}\n" http://127.0.0.1:18080/api/depl
 - 手动上传与重启 Runbook
 - 新服务器 SQL / systemd / 路径约定
 - Alembic 跑错 SQLite、前端静态资源未覆盖、后端注册文件未同步等真实踩坑
+
+---
+
+## 17. Research Agent 改动专项验证
+
+如果本次上线涉及 Research Agent（AI 助手）相关改动，需额外验证以下项：
+
+### 17.1 Runtime 与状态机
+
+- [ ] 如改了 `research_agent_runtime.py`，已确认 `build_task_frame`、`resolve_context_refs`、`enforce_tool_policy`、`normalize_tool_args`、`update_state_after_tool` 均可正常 import
+- [ ] 已跑 `python -m unittest backend.tests.test_research_agent_runtime` 通过
+- [ ] 已确认状态迁移不会导致死循环（有 budget_guard 安全阀）
+
+### 17.2 工具注册表
+
+- [ ] 如改了 `agent_tool_registry.py`，已确认 `TOOL_SCHEMAS` 可正常生成
+- [ ] 已跑 `python -m unittest backend.tests.test_agent_tool_registry` 通过
+- [ ] 已确认新增工具的 handler 在 `execute_tool` 中有对应分发
+
+### 17.3 分层检索
+
+- [ ] 如改了 `research_retrieval.py`，已跑 `python -m unittest backend.tests.test_research_retrieval` 通过
+- [ ] 已确认 P0 > P1 > P2 排序未被破坏
+
+### 17.4 前端 AI 助手
+
+- [ ] 如改了前端 AI 助手相关组件，已确认 SSE 事件流正常（session / tool_call / tool_result / proposal / answer / error / done）
+- [ ] 已确认工作记忆面板正常展示 result_set / evidence_pack / tool_trace / budget_snapshot
+- [ ] 已确认 proposal 确认/拒绝按钮正常工作
+
+### 17.5 线上冒烟测试
+
+上线后，在浏览器中执行以下 AI 助手冒烟测试：
+
+- [ ] 发送"库里有多少论文" → 应调用 count_library 并返回数量
+- [ ] 发送"帮我找关于 XX 的文献" → 应调用 search_library/research_search 并返回结果
+- [ ] 发送"继续分析刚才这些" → 应复用上一轮结果集，不应重新搜全库
+- [ ] 发送"去知网搜一下" → 应请求联网授权，不应直接执行
+- [ ] proposal 确认 → 应正常执行并返回 job_id
+- [ ] proposal 拒绝 → 应正常取消
 

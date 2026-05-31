@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select, func, desc, asc
+from sqlalchemy import literal, or_, select, func, desc, asc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +59,7 @@ class LibraryEntrySummary(BaseModel):
     tags: list[str]
     note: Optional[str]
     filter_score: Optional[float] = None
+    has_translation: bool = False
 
 
 class LibraryEntryPageResponse(BaseModel):
@@ -267,6 +268,7 @@ def build_entry_summary(
     source_file: File | None,
     filter_score: Optional[float] = None,
     markdown_file: File | None = None,
+    has_translation: bool = False,
 ) -> LibraryEntrySummary:
     effective_markdown_file = markdown_file or (source_file if source_file and source_file.file_type == "markdown" else None)
     return LibraryEntrySummary(
@@ -289,6 +291,7 @@ def build_entry_summary(
         tags=_json_list(entry.user_tags_json),
         note=entry.user_note,
         filter_score=filter_score,
+        has_translation=has_translation,
     )
 
 
@@ -621,10 +624,19 @@ def _build_entries_stmt(
         .subquery()
     )
 
+    translation_subq = (
+        select(JobBibEntry.bib_entry_id, literal("1").label("has_translation"))
+        .join(Artifact, Artifact.job_id == JobBibEntry.job_id)
+        .where(Artifact.artifact_type == "translation_md")
+        .group_by(JobBibEntry.bib_entry_id)
+        .subquery()
+    )
+
     stmt = (
-        select(BibEntry, File, score_subq.c.max_score)
+        select(BibEntry, File, score_subq.c.max_score, translation_subq.c.has_translation)
         .outerjoin(File, File.id == BibEntry.source_file_id)
         .outerjoin(score_subq, score_subq.c.bib_entry_id == BibEntry.id)
+        .outerjoin(translation_subq, translation_subq.c.bib_entry_id == BibEntry.id)
         .where(BibEntry.owner_user_id == user.id)
     )
     if search.strip():
@@ -693,10 +705,10 @@ async def _list_entries(
     rows = (await db.execute(stmt)).all()
     summaries: list[LibraryEntrySummary] = []
     changed = False
-    for entry, source_file, max_score in rows:
+    for entry, source_file, max_score, has_translation in rows:
         source_file, markdown_file, repaired = sanitize_entry_source_files(entry, source_file, None)
         changed = changed or repaired
-        summaries.append(build_entry_summary(entry, source_file, max_score, markdown_file))
+        summaries.append(build_entry_summary(entry, source_file, max_score, markdown_file, bool(has_translation)))
     if changed:
         await db.commit()
     return summaries
@@ -735,10 +747,10 @@ async def _list_entries_page(
     rows = (await db.execute(paged_stmt)).all()
     items: list[LibraryEntrySummary] = []
     changed = False
-    for entry, source_file, max_score in rows:
+    for entry, source_file, max_score, has_translation in rows:
         source_file, markdown_file, repaired = sanitize_entry_source_files(entry, source_file, None)
         changed = changed or repaired
-        items.append(build_entry_summary(entry, source_file, max_score, markdown_file))
+        items.append(build_entry_summary(entry, source_file, max_score, markdown_file, bool(has_translation)))
     if changed:
         await db.commit()
     return LibraryEntryPageResponse(
@@ -1104,7 +1116,6 @@ async def get_entry_reader(
             select(BibReference)
             .where(BibReference.owner_user_id == user.id, BibReference.source_bib_entry_id == entry.id)
             .order_by(BibReference.reference_order.asc())
-            .limit(20)
         )
     ).scalars().all()
     incoming_refs = (
@@ -1116,7 +1127,6 @@ async def get_entry_reader(
                 BibReference.matched_bib_entry_id == entry.id,
             )
             .order_by(BibReference.updated_at.desc())
-            .limit(20)
         )
     ).all()
 

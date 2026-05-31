@@ -105,6 +105,29 @@ cd /root/deep-reading-agent
 tar -xzf /tmp/deploy-changes.tgz
 ```
 
+### ⚠️ 关键：同步 routers/ 到项目根目录
+
+`backend/main.py` 中有 `sys.path.insert(0, project_root)`，导致 Python 优先从项目根目录 `/root/deep-reading-agent/routers/` 导入模块，而不是 `backend/routers/`。
+
+**受影响的文件**（根目录存在旧副本）：`filter.py`、`reading.py`、`references.py`、`translation.py`
+
+**部署时必须同步**：
+
+```bash
+# 如果改动了 backend/routers/ 下的任何文件，必须同时复制到根目录
+cp backend/routers/translation.py routers/translation.py
+cp backend/routers/filter.py     routers/filter.py
+cp backend/routers/reading.py    routers/reading.py
+cp backend/routers/references.py routers/references.py
+
+# 清除 pyc 缓存，避免加载旧编译结果
+rm -f routers/__pycache__/*.pyc backend/routers/__pycache__/*.pyc
+```
+
+> **历史事故（2026-05-31）**：连续多次部署 `backend/routers/translation.py` 的改动均不生效，排查发现
+> 运行时加载的是根目录 `routers/translation.py` 的旧副本。根因是 `main.py` 的 `sys.path.insert(0, ...)`
+> 使项目根目录优先于 `backend/` 目录。详见对话记录。
+
 ## 5. 服务器验证与迁移
 
 先做语法编译检查：

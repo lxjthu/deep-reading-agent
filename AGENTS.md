@@ -45,6 +45,10 @@ cd frontend && npm run build
 - **健康检查**：`/root/deep-reading-agent/health_check.py`（cron 每 5 分钟）
 - **部署**：SCP 上传改动的文件 → `systemctl restart deepreading-api`（无 Webhook，手动部署）
 
+> **⚠️ 双 routers/ 目录陷阱**：`backend/main.py` 的 `sys.path.insert(0, project_root)` 使 Python 优先从
+> `/root/deep-reading-agent/routers/` 导入。受影响文件：`filter.py`、`reading.py`、`references.py`、`translation.py`。
+> **部署这些文件时必须同步到根目录 `routers/`**，否则改动不生效。详见 `docs/MANUAL_DEPLOY_AFTER_CODE_CHANGES.md`。
+
 ## 架构
 
 ```

@@ -52,7 +52,7 @@
 | [DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md](DATABASE_DEPLOY_AND_MIGRATION_GUIDE.md) | 部署 | 数据库部署与迁移指南（当前以 SQLite 本地开发为主描述，生产已迁移至 PostgreSQL） | 服务器数据库迁移 |
 | [OPS_HEALTHCHECK_GUIDE.md](OPS_HEALTHCHECK_GUIDE.md) | 运维 | 服务器健康检查与自动恢复 | 线上故障排查 |
 | [TROUBLESHOOTING_SERVER_ERRORS.md](TROUBLESHOOTING_SERVER_ERRORS.md) | 排错 | 服务器报错排查记录（含修复方案） | **线上报错排查首选**：500错误、401错误、SQL错误等 |
-| [JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md](JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md) | 复盘/经验教训 | AI 助手顶刊名录改动引发的迁移与部署踩坑总结 | 新增 prompt type、CHECK 约束、前端 `dist` 覆盖、Alembic/SQLite/PostgreSQL 环境错配排查 |
+| [JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md](JOURNAL_KB_MIGRATION_DEPLOY_LESSONS_2026-05-29.md) | 复盘/经验教训 | AI 助手顶刊名录改动引发的迁移与部署踩坑总结 + 双 routers/ 目录陷阱 | 新增 prompt type、CHECK 约束、前端 `dist` 覆盖、Alembic/SQLite/PostgreSQL 环境错配排查、`sys.path[0]` 导致旧模块被加载 |
 | [PACKAGING_DOWNLOAD_FILTER_REPORT_BUG.md](PACKAGING_DOWNLOAD_FILTER_REPORT_BUG.md) | 排错/修复 | 打包版产物下载、参考文献引用详情、模板市场 AI 生成等问题记录 | 排查 Windows 打包版和模板市场生成链路问题 |
 | [TWO_COLUMN_PDF_FIX.md](TWO_COLUMN_PDF_FIX.md) | 修复 | 双栏 PDF 参考文献提取修复（列感知文本提取） | 双栏论文参考文献提取不全 |
 | [MIGRATION_PLAN_10PLUS_USERS.md](MIGRATION_PLAN_10PLUS_USERS.md) | 方案 | 10+ 并发用户迁移方案（含 SQLite → PostgreSQL 迁移 Runbook） | 并发扩容规划、后端数据库迁移 |

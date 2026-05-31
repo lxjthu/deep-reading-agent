@@ -17,7 +17,7 @@ from backend.utils.api_key import validate_deepseek_key
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
@@ -274,6 +274,43 @@ async def list_translatable(
     )
     rows = (await db.execute(stmt)).all()
 
+    translated_entry_ids: set[str] = set()
+    entry_artifacts: dict[str, list[dict]] = {}
+    if rows:
+        entry_ids = [entry.id for entry, _ in rows]
+        trans_rows = (
+            await db.execute(
+                select(JobBibEntry.bib_entry_id)
+                .join(Artifact, Artifact.job_id == JobBibEntry.job_id)
+                .where(
+                    JobBibEntry.bib_entry_id.in_(entry_ids),
+                    Artifact.artifact_type == "translation_md",
+                )
+                .group_by(JobBibEntry.bib_entry_id)
+            )
+        ).scalars().all()
+        translated_entry_ids = set(trans_rows)
+
+        if translated_entry_ids:
+            all_jbe = (
+                await db.execute(
+                    select(JobBibEntry, Artifact)
+                    .join(Artifact, Artifact.job_id == JobBibEntry.job_id)
+                    .where(
+                        JobBibEntry.bib_entry_id.in_(translated_entry_ids),
+                    )
+                    .order_by(Artifact.sort_order, Artifact.id)
+                )
+            ).all()
+            for jbe, art in all_jbe:
+                entry_artifacts.setdefault(jbe.bib_entry_id, []).append({
+                    "id": art.id,
+                    "artifact_type": art.artifact_type,
+                    "filename": art.filename,
+                    "storage_path": art.storage_path,
+                    "size_bytes": art.size_bytes,
+                })
+
     results = []
     repaired = 0
     for entry, source_file in rows:
@@ -289,6 +326,8 @@ async def list_translatable(
             "file_id": source_file.id,
             "file_name": source_file.original_name,
             "file_type": source_file.file_type,
+            "has_translation": entry.id in translated_entry_ids,
+            "artifacts": entry_artifacts.get(entry.id, []),
         })
     if repaired:
         await db.commit()
@@ -410,6 +449,49 @@ async def start_translation(
     return {"job_id": task_id, "status": "pending"}
 
 
+@router.get("/artifacts/{bib_entry_id}")
+async def get_translation_artifacts(
+    bib_entry_id: str,
+    user: User = Depends(current_user),
+):
+    async with AsyncSessionLocal() as db:
+        job_row = (
+            await db.execute(
+                select(Job)
+                .join(JobBibEntry, JobBibEntry.job_id == Job.id)
+                .where(
+                    JobBibEntry.bib_entry_id == bib_entry_id,
+                    Job.owner_user_id == user.id,
+                    Job.job_type == "translation",
+                    Job.status == "success",
+                )
+                .order_by(Job.finished_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if job_row is None:
+            return {"artifacts": []}
+        artifacts = (
+            await db.execute(
+                select(Artifact)
+                .where(Artifact.job_id == job_row.id)
+                .order_by(Artifact.sort_order, Artifact.id)
+            )
+        ).scalars().all()
+        return {
+            "artifacts": [
+                {
+                    "id": art.id,
+                    "artifact_type": art.artifact_type,
+                    "filename": art.filename,
+                    "storage_path": art.storage_path,
+                    "size_bytes": art.size_bytes,
+                }
+                for art in artifacts
+            ],
+        }
+
+
 @router.get("/{job_id}/status")
 async def get_translation_status(
     job_id: str,
@@ -504,3 +586,32 @@ async def cancel_translation(
     await db.commit()
 
     return {"success": True}
+
+
+@router.delete("/artifacts")
+async def delete_translation_artifacts(
+    artifact_ids: list[int],
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    deleted = 0
+    for aid in artifact_ids:
+        art = (
+            await db.execute(
+                select(Artifact).where(Artifact.id == aid, Artifact.owner_user_id == user.id)
+            )
+        ).scalar_one_or_none()
+        if art is None:
+            continue
+        try:
+            from result_storage import resolve_result_path
+            fp = resolve_result_path(art.storage_path)
+            if fp.exists() and fp.is_file():
+                fp.unlink()
+        except Exception:
+            pass
+        await db.delete(art)
+        deleted += 1
+    if deleted:
+        await db.commit()
+    return {"deleted": deleted}

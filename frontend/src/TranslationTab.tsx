@@ -12,6 +12,8 @@ interface TranslatableEntry {
   file_id: string
   file_name: string
   file_type: string
+  has_translation: boolean
+  artifacts: ArtifactInfo[]
 }
 
 interface ArtifactInfo {
@@ -43,7 +45,8 @@ function getStageLabel(stage: string): string {
 export default function TranslationTab({ apiKey }: { apiKey: string }) {
   const navigate = useNavigate()
   const [entries, setEntries] = useState<TranslatableEntry[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [viewingEntry, setViewingEntry] = useState<TranslatableEntry | null>(null)
   const [loading, setLoading] = useState(true)
   const [maxWorkers, setMaxWorkers] = useState(5)
   const [jobId, setJobId] = useState<string | null>(null)
@@ -52,6 +55,7 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
   const [currentStage, setCurrentStage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([])
+  const [selectedArtifactIds, setSelectedArtifactIds] = useState<Set<number>>(new Set())
   const [uploading, setUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
   const pollRef = useRef<number | null>(null)
@@ -69,7 +73,9 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
       const res = await apiFetch('/api/translation/translatable')
       if (res.ok) {
         const data = await res.json()
-        setEntries(data.entries || [])
+        const list: TranslatableEntry[] = data.entries || []
+        setEntries(list)
+        setSelectedIds(new Set(list.filter(e => !e.has_translation).map(e => e.bib_entry_id)))
       }
     } catch { /* ignore */ }
     setLoading(false)
@@ -80,7 +86,48 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
     return () => { stopPolling() }
   }, [])
 
-  const selected = entries.find(e => e.bib_entry_id === selectedId)
+  const toggleEntry = (bibId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(bibId)) next.delete(bibId)
+      else next.add(bibId)
+      return next
+    })
+  }
+
+  const handleViewTranslation = (entry: TranslatableEntry) => {
+    setViewingEntry(entry)
+    setArtifacts(entry.artifacts)
+    setSelectedArtifactIds(new Set())
+  }
+
+  const toggleArtifact = (id: number) => {
+    setSelectedArtifactIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleDeleteArtifacts = async () => {
+    if (selectedArtifactIds.size === 0) return
+    if (!window.confirm(`确认删除 ${selectedArtifactIds.size} 个翻译结果？`)) return
+    try {
+      const res = await apiFetch('/api/translation/artifacts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Array.from(selectedArtifactIds)),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setArtifacts(prev => prev.filter(a => !selectedArtifactIds.has(a.id)))
+        setSelectedArtifactIds(new Set())
+        loadEntries()
+        alert(`已删除 ${data.deleted} 个翻译结果`)
+      }
+    } catch { /* ignore */ }
+  }
 
   const handleSourceUpload = async (file: File | null) => {
     if (!file) return
@@ -113,7 +160,6 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
       }
       const bound = await bindRes.json()
       await loadEntries()
-      setSelectedId(bound.bib_entry_id)
       setUploadMessage(`已上传并匹配到文献库：${bound.title}`)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '上传文献失败'
@@ -123,8 +169,9 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
     }
   }
 
-  const handleStart = async () => {
-    if (!selected) {
+  const handleStart = async (entryOverride?: TranslatableEntry) => {
+    const target = entryOverride || viewingEntry
+    if (!target) {
       window.alert('请先选择一篇文献')
       return
     }
@@ -133,6 +180,7 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
       return
     }
 
+    setViewingEntry(target)
     setProgress(0)
     setCurrentStage('提交翻译任务...')
     setJobStatus('')
@@ -144,8 +192,8 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          file_id: selected.file_id,
-          bib_entry_id: selected.bib_entry_id,
+          file_id: target.file_id,
+          bib_entry_id: target.bib_entry_id,
           api_key: apiKey,
           max_workers: maxWorkers,
         }),
@@ -164,6 +212,15 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
       setErrorMsg(msg)
       setCurrentStage('错误')
     }
+  }
+
+  const handleBatchStart = () => {
+    const target = entries.find(e => selectedIds.has(e.bib_entry_id) && !e.has_translation)
+    if (!target) {
+      window.alert('没有需要翻译的文献（所有勾选的文献已有翻译）')
+      return
+    }
+    handleStart(target)
   }
 
   const startPolling = (jid: string) => {
@@ -194,6 +251,7 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
       if (!res.ok) return
       const data = await res.json()
       setArtifacts(data.artifacts || [])
+      loadEntries()
     } catch { /* ignore */ }
   }
 
@@ -221,6 +279,7 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
   }
 
   const isRunning = jobStatus === 'pending' || jobStatus === 'running'
+  const selectedCount = selectedIds.size
 
   return (
     <div className="space-y-6">
@@ -253,7 +312,7 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
           )}
         </div>
 
-        <div className="flex gap-2 mb-3">
+        <div className="flex gap-2 mb-3 items-center">
           <span className="rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-medium text-emerald-800">
             英文原文 ({entries.length})
           </span>
@@ -274,39 +333,59 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
           </div>
         ) : (
           <div className="border border-gray-100 rounded-lg max-h-80 overflow-y-auto divide-y divide-gray-50">
-            {entries.map(entry => (
-              <label
-                key={entry.bib_entry_id}
-                className={`flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors ${
-                  selectedId === entry.bib_entry_id ? 'bg-emerald-50' : ''
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="translation-entry"
-                  value={entry.bib_entry_id}
-                  checked={selectedId === entry.bib_entry_id}
-                  onChange={() => setSelectedId(entry.bib_entry_id)}
-                  disabled={isRunning}
-                  className="mt-1 accent-emerald-600"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-800 leading-snug">{entry.title}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {entry.authors.length > 0 && <span>{entry.authors.slice(0, 3).join(', ')}{entry.authors.length > 3 ? ' et al.' : ''}</span>}
-                    {entry.year && <span className="ml-2">({entry.year})</span>}
-                    {entry.journal && <span className="ml-2">{entry.journal}</span>}
-                  </p>
-                  <p className="text-xs text-gray-300 mt-0.5">
-                    {entry.file_type === 'pdf' ? '📄' : '📝'} {entry.file_name}
-                  </p>
+            {entries.map(entry => {
+              const checked = selectedIds.has(entry.bib_entry_id)
+              return (
+                <div
+                  key={entry.bib_entry_id}
+                  className={`flex items-start gap-3 px-4 py-3 transition-colors ${
+                    checked ? 'bg-emerald-50' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleEntry(entry.bib_entry_id)}
+                    disabled={isRunning}
+                    className="mt-1 accent-emerald-600"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-gray-800 leading-snug flex-1 min-w-0">{entry.title}</p>
+                      <button
+                        type="button"
+                        disabled={!entry.has_translation}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (entry.has_translation && entry.artifacts.length > 0) {
+                            handleViewTranslation(entry)
+                          }
+                        }}
+                        className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                          entry.has_translation
+                            ? 'bg-cyan-600 text-white hover:bg-cyan-700'
+                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        {entry.has_translation ? '查看译文' : '未翻译'}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {entry.authors.length > 0 && <span>{entry.authors.slice(0, 3).join(', ')}{entry.authors.length > 3 ? ' et al.' : ''}</span>}
+                      {entry.year && <span className="ml-2">({entry.year})</span>}
+                      {entry.journal && <span className="ml-2">{entry.journal}</span>}
+                    </p>
+                    <p className="text-xs text-gray-300 mt-0.5">
+                      {entry.file_type === 'pdf' ? '📄' : '📝'} {entry.file_name}
+                    </p>
+                  </div>
                 </div>
-              </label>
-            ))}
+              )
+            })}
           </div>
         )}
 
-        {selected && (
+        {selectedCount > 0 && (
           <div className="mt-4 flex items-end gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">并发数</label>
@@ -322,11 +401,11 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
               </select>
             </div>
             <button
-              onClick={handleStart}
+              onClick={handleBatchStart}
               disabled={isRunning || !apiKey}
               className="rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300 transition-colors"
             >
-              {isRunning ? '翻译进行中...' : '翻译选中文献'}
+              {isRunning ? '翻译进行中...' : `翻译勾选文献 (${selectedCount})`}
             </button>
             {!apiKey && (
               <p className="text-xs text-red-500">请先设置 API Key</p>
@@ -338,7 +417,7 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
       {(isRunning || (jobId && jobStatus)) && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">
-            {selected ? selected.title : '翻译进度'}
+            {viewingEntry ? viewingEntry.title : '翻译进度'}
           </h3>
 
           <div className="mb-2">
@@ -379,21 +458,39 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
 
       {artifacts.length > 0 && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">翻译结果</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700">翻译结果</h3>
+            {selectedArtifactIds.size > 0 && (
+              <button
+                onClick={handleDeleteArtifacts}
+                className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
+              >
+                删除选中 ({selectedArtifactIds.size})
+              </button>
+            )}
+          </div>
           <div className="space-y-3">
             {artifacts.map((art) => (
               <div
                 key={art.id}
-                className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-3"
+                className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
+                  selectedArtifactIds.has(art.id) ? 'border-red-200 bg-red-50/50' : 'border-gray-100 bg-gray-50'
+                }`}
               >
-                <div className="min-w-0">
+                <input
+                  type="checkbox"
+                  checked={selectedArtifactIds.has(art.id)}
+                  onChange={() => toggleArtifact(art.id)}
+                  className="accent-red-500"
+                />
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-800 truncate">{art.filename}</p>
                   <p className="text-xs text-gray-400">
                     {art.artifact_type === 'translation_md' ? '中文重述' : '术语词典'}
                     {art.size_bytes ? ` · ${(art.size_bytes / 1024).toFixed(1)} KB` : ''}
                   </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 shrink-0">
                   <button
                     onClick={() => handlePreview(art)}
                     className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 transition-colors"
@@ -406,9 +503,9 @@ export default function TranslationTab({ apiKey }: { apiKey: string }) {
                   >
                     下载
                   </button>
-                  {art.artifact_type === 'translation_md' && selected && (
+                  {art.artifact_type === 'translation_md' && viewingEntry && (
                     <button
-                      onClick={() => navigate(`/workspace/cards/reader/${selected.bib_entry_id}?view=translated`)}
+                      onClick={() => navigate(`/workspace/cards/reader/${viewingEntry.bib_entry_id}?view=translated`)}
                       className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-700 transition-colors"
                     >
                       阅读译文并制卡

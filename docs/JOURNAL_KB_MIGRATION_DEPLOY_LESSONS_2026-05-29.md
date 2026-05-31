@@ -181,3 +181,53 @@
 - 手动部署后页面与接口不一致
 
 优先回看本文，再执行实际修复。
+
+---
+
+## 2026-05-31：双 routers/ 目录导致部署改动不生效
+
+### 现象
+
+连续多次部署 `backend/routers/translation.py` 的改动（新增 `has_translation` 查询、嵌入 `artifacts`），线上始终返回旧数据。用 `compileall` 检查无语法错误，服务重启正常，但 API 响应不变。
+
+### 排查过程
+
+1. 在代码中加入 `logger.warning(...)` 调试日志 → 部署后日志**不出现**
+2. 用 `python -c "from routers.translation import router; ..."` 在服务器上测试 → 路由存在但代码是旧版
+3. 发现服务器上存在**两个** `routers/` 目录：
+   - `/root/deep-reading-agent/routers/`（项目根，旧副本）
+   - `/root/deep-reading-agent/backend/routers/`（一直在更新的）
+4. 检查 `backend/main.py`：
+   ```python
+   sys.path.insert(0, str(Path(__file__).parent.parent))
+   ```
+   项目根目录被插入 `sys.path[0]`，优先级高于 `backend/` 目录。
+
+### 根因
+
+`main.py` 将项目根目录 `/root/deep-reading-agent` 插入 `sys.path[0]`，使 Python 的模块搜索顺序变为：
+
+1. `/root/deep-reading-agent`（项目根）
+2. `/root/deep-reading-agent/backend`（uvicorn 工作目录）
+
+`from routers import translation` 时，Python 先找到根目录的 `routers/translation.py`（旧副本），直接使用，不再查找 `backend/routers/translation.py`。
+
+**受影响文件**（根目录存在旧副本）：`filter.py`、`reading.py`、`references.py`、`translation.py`
+
+其他 router（如 `admin.py`、`upload.py`）只存在于 `backend/routers/`，不受影响。
+
+### 修复
+
+部署时必须同步到根目录：
+
+```bash
+cp backend/routers/translation.py routers/translation.py
+rm -f routers/__pycache__/*.pyc backend/routers/__pycache__/*.pyc
+```
+
+### 教训
+
+- `sys.path.insert` 可以静默改变模块加载顺序，导致看似正确的部署实际运行旧代码
+- **调试日志不出现**是判断「代码未被加载」的关键信号（不是代码有 bug，是代码没被执行）
+- `.pyc` 缓存可能掩盖 `.py` 文件的更新，部署时应清除 `__pycache__/`
+- 部署 checklist 应包含「检查是否有同名模块在其他路径下」
