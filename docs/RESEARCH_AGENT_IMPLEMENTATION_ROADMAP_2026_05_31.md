@@ -56,7 +56,7 @@
 | S1.2 | 前端按错误类型展示差异化提示 | ✅ 已完成 |
 | S1.3 | Provider 测试连接后端接口 | ✅ 已有（POST /api/agent/provider-check） |
 | S1.4 | Provider 测试连接前端 UI | ✅ 已有（测试连接按钮 + 结果展示） |
-| S1.5 | Tool Trace 前端摘要增强 | ⬜ 待实施 |
+| S1.5 | Tool Trace 前端摘要增强 | ✅ 已完成 |
 
 验收标准：
 
@@ -542,7 +542,7 @@ cd frontend && npm run build
 
 **实施步骤**：
 
-- [ ] **Step 1：增强 tool trace 渲染**
+- [x] **Step 1：增强 tool trace 渲染**
 
 当前前端已展示 `recent_tool_trace`。增强为：
 - 每条 trace 显示：工具名 + 查询摘要 + 命中数 + 是否空结果
@@ -550,20 +550,20 @@ cd frontend && npm run build
 - 被策略拦截的条目用橙色标记
 - 最后增加一行总结："共 N 次工具调用，M 次命中，K 次被策略拦截"
 
-- [ ] **Step 2：增加 Budget Stop Summary 展示**
+- [x] **Step 2：增加 Budget Stop Summary 展示**
 
 当 `last_stop_summary` 不为空时，在工作记忆区域展示：
 - 为什么停止（预算耗尽 / 轮次上限）
 - 当前结果集大小
 - 建议下一步
 
-- [ ] **Step 3：前端构建验证**
+- [x] **Step 3：前端构建验证**
 
 ```powershell
 cd frontend && npm run build
 ```
 
-- [ ] **Step 4：commit**
+- [x] **Step 4：commit**
 
 ---
 

@@ -4056,11 +4056,14 @@ function stringifyUnknownError(value: unknown, fallback = 'AI 助手请求失败
 }
 
 function getRuntimeNoticeTitle(notice: AgentRuntimeNotice, fallback = '运行时提示'): string {
-  if (notice.code === 'max_tool_rounds_reached') return '已触发停止摘要'
+  if (notice.code === 'max_tool_rounds_reached') return '工具调用轮次已用完'
   if (notice.code === 'continuation_context_required') return '需要先确认上一轮对象'
   if (notice.code === 'prefer_result_set_tools' || notice.code === 'prefer_contextual_result_set') return '已阻止低效工具路径'
   if (notice.code === 'external_consent_required') return '需要联网授权'
   if (notice.code === 'duplicate_tool_call_blocked' || notice.code === 'search_library_budget_exhausted') return '已阻止预算空转'
+  if (notice.code === 'analysis_cache_required') return '需要先执行批量分析'
+  if (notice.code === 'prefer_analysis_cache_filter') return '建议使用缓存筛选'
+  if (notice.code === 'prefer_batch_analysis_tool') return '建议使用批量分析工具'
   return fallback
 }
 
@@ -4722,6 +4725,10 @@ function AgentToolTraceCard({ traces }: { traces: AgentToolTraceEntry[] }) {
     return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   }
 
+  const hitCount = traces.filter(t => t.status !== 'blocked' && t.status !== 'empty' && t.status !== 'error').length
+  const blockedCount = traces.filter(t => t.status === 'blocked').length
+  const emptyCount = traces.filter(t => t.status === 'empty').length
+
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -4732,6 +4739,11 @@ function AgentToolTraceCard({ traces }: { traces: AgentToolTraceEntry[] }) {
         <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-700">
           {traces.length} 步
         </span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">{hitCount} 次命中</span>
+        <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 font-medium text-gray-600">{emptyCount} 次空结果</span>
+        <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-700">{blockedCount} 次被策略拦截</span>
       </div>
       <div className="mt-3 space-y-2">
         {traces.map((trace, index) => (
