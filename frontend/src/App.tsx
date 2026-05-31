@@ -4310,55 +4310,68 @@ function AgentRuntimeNoticeCard({ notice }: { notice: AgentRuntimeNotice }) {
         ? 'border-sky-200 bg-white text-sky-700'
         : 'border-amber-200 bg-white text-amber-700'
 
+  const hasDetails = (notice.blocked_tool || notice.tool || notice.result_set_count !== undefined)
+    || (Array.isArray(notice.suggested_tools) && notice.suggested_tools.length > 0)
+    || (Array.isArray(notice.recommendations) && notice.recommendations.length > 0)
+
   return (
-    <div className={`space-y-3 rounded-lg border p-3 ${wrapperClass}`}>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold text-gray-900">{getRuntimeNoticeTitle(notice)}</div>
-          <div className="mt-1 text-sm text-gray-700">{notice.message || '暂无详细说明'}</div>
-        </div>
-        {notice.code && (
-          <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
-            {notice.code}
-          </span>
-        )}
-      </div>
-      {(notice.blocked_tool || notice.tool || notice.result_set_count !== undefined) && (
-        <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-          {notice.blocked_tool && (
-            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">blocked: {notice.blocked_tool}</span>
-          )}
-          {notice.tool && notice.tool !== notice.blocked_tool && (
-            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">tool: {notice.tool}</span>
-          )}
-          {typeof notice.result_set_count === 'number' && (
-            <span className="rounded-full border border-gray-200 bg-white px-2 py-1">result_set: {notice.result_set_count}</span>
-          )}
-        </div>
-      )}
-      {Array.isArray(notice.suggested_tools) && notice.suggested_tools.length > 0 && (
-        <div>
-          <div className="mb-1 text-xs font-semibold text-gray-500">建议工具</div>
-          <div className="flex flex-wrap gap-2">
-            {notice.suggested_tools.map((tool) => (
-              <span key={tool} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
-                {tool}
+    <details className={`rounded-lg border p-3 ${wrapperClass}`} open={severity === 'error'}>
+      <summary className="cursor-pointer select-none">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">{getRuntimeNoticeTitle(notice)}</div>
+            <div className="mt-1 text-sm text-gray-700">{notice.message || '暂无详细说明'}</div>
+          </div>
+          <div className="flex items-center gap-2">
+            {notice.code && (
+              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
+                {notice.code}
               </span>
-            ))}
+            )}
+            {hasDetails && <span className="text-xs text-gray-400">点击展开</span>}
           </div>
         </div>
-      )}
-      {Array.isArray(notice.recommendations) && notice.recommendations.length > 0 && (
-        <div>
-          <div className="mb-1 text-xs font-semibold text-gray-500">下一步建议</div>
-          <div className="space-y-1 text-sm text-gray-700">
-            {notice.recommendations.map((item, index) => (
-              <div key={`${item}-${index}`}>{index + 1}. {item}</div>
-            ))}
-          </div>
+      </summary>
+      {hasDetails && (
+        <div className="mt-2 space-y-2">
+          {(notice.blocked_tool || notice.tool || notice.result_set_count !== undefined) && (
+            <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+              {notice.blocked_tool && (
+                <span className="rounded-full border border-gray-200 bg-white px-2 py-1">blocked: {notice.blocked_tool}</span>
+              )}
+              {notice.tool && notice.tool !== notice.blocked_tool && (
+                <span className="rounded-full border border-gray-200 bg-white px-2 py-1">tool: {notice.tool}</span>
+              )}
+              {typeof notice.result_set_count === 'number' && (
+                <span className="rounded-full border border-gray-200 bg-white px-2 py-1">result_set: {notice.result_set_count}</span>
+              )}
+            </div>
+          )}
+          {Array.isArray(notice.suggested_tools) && notice.suggested_tools.length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-semibold text-gray-500">建议工具</div>
+              <div className="flex flex-wrap gap-2">
+                {notice.suggested_tools.map((tool) => (
+                  <span key={tool} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
+                    {tool}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {Array.isArray(notice.recommendations) && notice.recommendations.length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-semibold text-gray-500">下一步建议</div>
+              <div className="space-y-1 text-sm text-gray-700">
+                {notice.recommendations.map((item, index) => (
+                  <div key={`${item}-${index}`}>{index + 1}. {item}</div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </details>
   )
 }
 
@@ -4495,6 +4508,9 @@ function AgentErrorCard({ error }: { error: AgentStructuredError }) {
 }
 
 function AgentEventBody({ event }: { event: AgentChatEvent }) {
+  if (event.type === 'answer' && event.title === 'AI 助手' && event.body.trim()) {
+    return <AgentMdContent raw={event.body} />
+  }
   const parsed = event.payload ?? tryParseJson(event.body)
   if (isAgentStructuredError(parsed) && event.type === 'error') {
     return <AgentErrorCard error={parsed} />
@@ -4618,9 +4634,6 @@ function AgentEventBody({ event }: { event: AgentChatEvent }) {
         <JsonHtmlView value={parsed} />
       </div>
     )
-  }
-  if (event.type === 'answer' && event.title === 'AI 助手' && event.body.trim()) {
-    return <AgentMdContent raw={event.body} />
   }
   return <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{event.body}</pre>
 }
