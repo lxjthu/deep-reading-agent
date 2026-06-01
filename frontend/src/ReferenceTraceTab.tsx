@@ -456,7 +456,14 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                 ) : references.length === 0 ? (
                   <div className="px-5 py-12 text-center text-sm text-gray-400">暂无梳理结果，先执行一次任务。</div>
                 ) : (
-                  <table className="min-w-full text-sm">
+                  <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+                    <colgroup>
+                      <col style={{ width: '50px' }} />
+                      <col />
+                      <col style={{ width: '140px' }} />
+                      <col style={{ width: '60px' }} />
+                      <col style={{ width: '130px' }} />
+                    </colgroup>
                     <thead className="sticky top-0 bg-white">
                       <tr className="border-b border-gray-100 text-left text-xs text-gray-500">
                         <th className="px-4 py-3">序号</th>
@@ -544,12 +551,12 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                                   onClick={() => { setSelectedReferenceId(item.id); clearUrlParams() }}
                                   className="text-left hover:text-emerald-700"
                                 >
-                                  <div className="font-medium text-gray-900">{item.title || '未识别标题'}</div>
-                                  <div className="mt-1 line-clamp-2 text-xs text-gray-500">{item.raw_text}</div>
+                                  <div className="break-words font-medium text-gray-900">{item.title || '未识别标题'}</div>
+                                  <div className="mt-1 line-clamp-2 break-all text-xs text-gray-500">{item.raw_text}</div>
                                 </button>
                               </td>
                               <td className="px-4 py-3 align-top">
-                                <div className="text-xs text-gray-700">{item.matched_bib_title || '未匹配'}</div>
+                                <div className="break-words text-xs text-gray-700">{item.matched_bib_title || '未匹配'}</div>
                                 {item.match_method && <div className="mt-1 text-xs text-gray-400">{item.match_method}</div>}
                               </td>
                               <td className="px-4 py-3 align-top text-gray-700">{item.citation_count}</td>
@@ -598,14 +605,14 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                     <div className="rounded-lg bg-gray-50 px-3 py-4 text-sm text-gray-400">暂无正文命中。</div>
                   ) : (
                     citations.map((item) => (
-                      <div key={item.id} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                      <div key={item.id} className="overflow-hidden rounded-xl border border-gray-100 bg-gray-50 p-3">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <span>{item.page_label || '未知页'} / {item.paragraph_label || '未知段落'}</span>
                           <span>{item.confidence ? `${Math.round(item.confidence * 100)}%` : '-'}</span>
                         </div>
-                        <div className="mt-2 text-sm leading-6 text-gray-900">{item.excerpt || item.quote_text}</div>
+                        <div className="mt-2 break-words text-sm leading-6 text-gray-900">{item.excerpt || item.quote_text}</div>
                         {item.excerpt && item.quote_text && item.excerpt !== item.quote_text && (
-                          <div className="mt-2 text-xs leading-5 text-gray-500">命中标记：{item.quote_text}</div>
+                          <div className="mt-2 break-words text-xs leading-5 text-gray-500">命中标记：{item.quote_text}</div>
                         )}
                       </div>
                     ))
