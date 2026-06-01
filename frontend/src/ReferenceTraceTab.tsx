@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { downloadWithAuth } from './lib/download'
 
 type TraceEntryOption = {
@@ -97,6 +98,10 @@ function artifactLabel(type: string) {
 }
 
 export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
+  const [urlParams, setUrlParams] = useSearchParams()
+  const urlSourceEntryId = urlParams.get('sourceEntryId')
+  const urlRefId = urlParams.get('refId')
+  const pendingRefIdRef = useRef<string | null>(urlRefId)
   const [entries, setEntries] = useState<TraceEntryOption[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [summary, setSummary] = useState<TraceSummary | null>(null)
@@ -113,6 +118,16 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+
+  const clearUrlParams = useCallback(() => {
+    if (urlParams.has('sourceEntryId') || urlParams.has('refId')) {
+      const next = new URLSearchParams(urlParams)
+      next.delete('sourceEntryId')
+      next.delete('refId')
+      setUrlParams(next)
+    }
+    pendingRefIdRef.current = null
+  }, [urlParams, setUrlParams])
 
   const selectedEntry = useMemo(
     () => entries.find((item) => item.id === selectedId) || null,
@@ -147,7 +162,7 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
     }
   }
 
-  async function loadDetail(entryId: string) {
+  async function loadDetail(entryId: string, pendingRefId?: string | null) {
     setLoadingDetail(true)
     setSelectedReferenceId(null)
     setCitations([])
@@ -163,7 +178,9 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
       ])
       setSummary(summaryData)
       setReferences(refsData)
-      if (refsData.length > 0) {
+      if (pendingRefId && refsData.some((r) => r.id === pendingRefId)) {
+        setSelectedReferenceId(pendingRefId)
+      } else if (refsData.length > 0) {
         setSelectedReferenceId(refsData[0].id)
       }
       if (summaryData.latest_task) {
@@ -192,7 +209,7 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
   }
 
   useEffect(() => {
-    void loadEntries()
+    void loadEntries(urlSourceEntryId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -202,7 +219,7 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
       setReferences([])
       return
     }
-    void loadDetail(selectedId)
+    void loadDetail(selectedId, pendingRefIdRef.current)
   }, [selectedId])
 
   useEffect(() => {
@@ -212,6 +229,16 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
     }
     void loadCitations(selectedReferenceId)
   }, [selectedReferenceId])
+
+  useEffect(() => {
+    const refId = pendingRefIdRef.current
+    if (!refId || !selectedReferenceId || selectedReferenceId !== refId) return
+    const el = document.getElementById(`ref-row-${refId}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    pendingRefIdRef.current = null
+  }, [selectedReferenceId, references])
 
   async function startTrace() {
     if (!selectedId) return
@@ -359,7 +386,7 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setSelectedId(item.id)}
+                    onClick={() => { setSelectedId(item.id); clearUrlParams() }}
                     className={`w-full px-5 py-4 text-left hover:bg-emerald-50/50 ${
                       item.id === selectedId ? 'bg-emerald-50' : 'bg-white'
                     }`}
@@ -441,7 +468,7 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                     </thead>
                     <tbody>
                       {references.map((item) => (
-                        <tr key={item.id} className={`border-b border-gray-100 ${item.id === selectedReferenceId ? 'bg-emerald-50/50' : ''}`}>
+                        <tr key={item.id} id={`ref-row-${item.id}`} className={`border-b border-gray-100 ${item.id === selectedReferenceId ? 'bg-emerald-50/50' : ''}`}>
                           {editingId === item.id ? (
                             <>
                               <td className="px-4 py-3 align-top text-gray-500">{item.reference_order}</td>
@@ -514,7 +541,7 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                               <td className="px-4 py-3 align-top">
                                 <button
                                   type="button"
-                                  onClick={() => setSelectedReferenceId(item.id)}
+                                  onClick={() => { setSelectedReferenceId(item.id); clearUrlParams() }}
                                   className="text-left hover:text-emerald-700"
                                 >
                                   <div className="font-medium text-gray-900">{item.title || '未识别标题'}</div>

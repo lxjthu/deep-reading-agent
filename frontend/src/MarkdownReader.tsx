@@ -36,7 +36,7 @@ type ReaderData = {
   source_translation_artifact_id: number | null
   cards: ReaderCard[]
   citations: {
-    outgoing: Array<{ id: string; order: number; title: string | null; raw_text: string }>
+    outgoing: Array<{ id: string; order: number; title: string | null; raw_text: string; matched_bib_entry_id: string | null }>
     incoming: Array<{ reference_id: string; source_bib_entry_id: string; source_title: string; raw_text: string }>
   }
 }
@@ -204,7 +204,14 @@ export default function MarkdownReader({ apiKey }: { apiKey: string }) {
               {data.citations.outgoing.length === 0 ? (
                 <p className="text-xs text-gray-400">暂无参考文献梳理结果。</p>
               ) : (expandedOutgoing ? data.citations.outgoing : data.citations.outgoing.slice(0, CITATION_PREVIEW_LIMIT)).map((ref) => (
-                <div key={ref.id} className="rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
+                <div
+                  key={ref.id}
+                  className="cursor-pointer rounded-lg bg-gray-50 p-2 text-xs text-gray-600 transition-colors hover:bg-blue-50 hover:text-blue-800"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/workspace?tab=references&sourceEntryId=${encodeURIComponent(entryId)}&refId=${encodeURIComponent(ref.id)}`)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/workspace?tab=references&sourceEntryId=${encodeURIComponent(entryId)}&refId=${encodeURIComponent(ref.id)}`) }}
+                >
                   [{ref.order}] {ref.title || ref.raw_text}
                 </div>
               ))}
@@ -225,7 +232,14 @@ export default function MarkdownReader({ apiKey }: { apiKey: string }) {
               {data.citations.incoming.length === 0 ? (
                 <p className="text-xs text-gray-400">暂无库内反向引用。</p>
               ) : (expandedIncoming ? data.citations.incoming : data.citations.incoming.slice(0, CITATION_PREVIEW_LIMIT)).map((ref) => (
-                <div key={ref.reference_id} className="rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
+                <div
+                  key={ref.reference_id}
+                  className="cursor-pointer rounded-lg bg-gray-50 p-2 text-xs text-gray-600 transition-colors hover:bg-blue-50 hover:text-blue-800"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/workspace?tab=references&sourceEntryId=${encodeURIComponent(ref.source_bib_entry_id)}&refId=${encodeURIComponent(ref.reference_id)}`)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/workspace?tab=references&sourceEntryId=${encodeURIComponent(ref.source_bib_entry_id)}&refId=${encodeURIComponent(ref.reference_id)}`) }}
+                >
                   {ref.source_title}
                 </div>
               ))}
