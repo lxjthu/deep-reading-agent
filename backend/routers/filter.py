@@ -245,6 +245,26 @@ async def reverse_match_to_existing_files(
         break
 
 
+_LANGUAGE_MAP = {
+    "english": "en", "chinese": "zh", "中文": "zh",
+    "japanese": "other", "korean": "other", "french": "other",
+    "german": "other", "spanish": "other", "russian": "other",
+    "portuguese": "other", "italian": "other", "dutch": "other",
+    "arabic": "other", "turkish": "other", "polish": "other",
+}
+
+
+def _normalize_language(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    text = str(raw).strip().lower()
+    if not text:
+        return None
+    if text in ("en", "zh", "other"):
+        return text
+    return _LANGUAGE_MAP.get(text)
+
+
 async def _upsert_bib_entry(
     db,
     owner_user_id: int,
@@ -265,6 +285,7 @@ async def _upsert_bib_entry(
     volume = clean_nullable_text(row.get("Volume"))
     issue = clean_nullable_text(row.get("Issue"))
     pages = clean_nullable_text(row.get("Pages"))
+    language = _normalize_language(row.get("Language"))
     metadata_completeness = compute_metadata_completeness(
         title, authors, year, doi, journal, abstract
     )
@@ -298,6 +319,7 @@ async def _upsert_bib_entry(
             volume=volume,
             issue=issue,
             pages=pages,
+            language=language,
             source_db=source_db,
             source_filter_job_id=source_filter_job_id,
             source_file_id=None,
@@ -328,6 +350,8 @@ async def _upsert_bib_entry(
         bib_entry.issue = issue
     if not bib_entry.pages and pages:
         bib_entry.pages = pages
+    if language and not bib_entry.language:
+        bib_entry.language = language
     bib_entry.metadata_completeness = metadata_completeness
     if source_filter_job_id and not bib_entry.source_filter_job_id:
         bib_entry.source_filter_job_id = source_filter_job_id
