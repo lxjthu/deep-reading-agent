@@ -719,6 +719,12 @@
   - 通过子查询关联 `bib_filter_links` 获取最高筛选评分 `filter_score`
 - `get_entry_detail(...)`
   - 单篇详情，聚合筛选评估、AI 点评和任务时间线
+- `upload_entry_markdown(...)`
+  - 挂载主 Markdown 原文，写入 `BibEntry.markdown_source_file_id`
+  - 当 `owner_user_id + md5` 命中旧 `File` 但物理文件已不存在时，会复用原 `File.id` 重新落盘，避免刷新后被误清空
+- `upload_attachment(...)` / `list_attachments(...)` / `update_attachment(...)` / `delete_attachment(...)`
+  - 管理 `bib_attachments`，支持一篇文献挂载多个 Markdown 附件
+  - `GET /entries/{entry_id}/reader?view=attachment:{file_id}` 可读取指定附件并进入制卡流程
 - `list_tags(...)` / `batch_update_tags(...)`
   - 返回当前用户标签候选、批量加删文献标签
 - `update_entry(...)`
@@ -728,7 +734,9 @@
 - `match_online(...)`
   - 对单篇文献执行在线元数据匹配（Crossref + OpenAlex）
 - `apply_match(...)`
-  - 应用候选匹配：重新执行在线搜索，调用 `apply_high_confidence_match` 只补空字段，更新 dedup_key 和 metadata_completeness
+  - 应用候选匹配：直接使用前端传入的候选数据，只补空字段，更新 `dedup_key` 和 `metadata_completeness`
+  - 当候选 DOI/`dedup_key` 命中同用户已有文献时，会将重复 `BibEntry` 合并到当前条目
+  - 合并前必须迁移所有指向 loser 的关联：`BibFilterLink`、`JobBibEntry`、`ReadingItem`、`BibAttachment`、`BibReference.source_bib_entry_id`、`BibReference.matched_bib_entry_id`、`BibReferenceCitation.source_bib_entry_id`、`Annotation.bib_entry_id`、`CardNote.source_bib_entry_id`、`UserFeedback.related_bib_entry_id`，再删除 loser，避免 PostgreSQL FK 500
 
 列表响应 `LibraryEntrySummary` 包含字段：
 
@@ -1536,6 +1544,7 @@ export_20260506_username.dra
 - **Edit 替换路由函数时连带删掉相邻路由**：用编辑工具替换 `apply_match` 函数体时，`oldString` 匹配范围包含了紧邻的 `match_online` 路由定义（从 `class ApplyMatchRequest` 到文件末尾），导致 `match_online` 被 `apply_match` 的新实现完全覆盖，运行时 404。**教训：编辑 FastAPI router 文件时，替换完务必验证所有路由注册是否完整**，例如：`python -c "from routers.xxx import router; [print(r.path) for r in router.routes]"`
 - **apply_match 不应重新搜索**：最初 `apply_match` 重新执行在线搜索重建候选列表，但前端展示的列表包含本地匹配结果（source=local），两份列表不一致导致索引越界（400 候选索引无效）。**教训：`apply_match` 应直接接收前端传来的完整候选数据，而非重新搜索**
 
+
 ### 8.10 用户数据导入导出
 
 改动目标：
@@ -1963,6 +1972,29 @@ v2 页面核心架构（与 v1 对比）：
 - complete 时按 chunk_index 顺序拼接，校验总字节数 == total_size
 - 原有 `POST /import/start` 单文件端点保留，可继续使用
 - 详见 [CHUNKED_DATA_IMPORT_IMPL.md](file:///d:/code/deepagent/deep-reading-agent-online/deep-reading-agent/docs/CHUNKED_DATA_IMPORT_IMPL.md)
+
+### 8.22 文献库 Markdown 附件与 apply_match 去重合并修复（2026-06-02）
+
+改动目标：
+
+- 一篇 `BibEntry` 支持多个 Markdown 附件，主 Markdown 仍保留在 `markdown_source_file_id`，附加 Markdown 通过 `bib_attachments` 关联。
+- Reader 的 `view` 支持 `attachment:{file_id}`，附件内容可像原文/译文一样进入划线制卡流程；`CardNote.source_version` 扩展为 `attachment`。
+- `.dra` 数据导出/导入纳入 `bib_attachments`，`CURRENT_SCHEMA_VERSION` 升级为 `025`。
+- 修复 `apply_match` 应用在线候选时的 PostgreSQL 500：候选 DOI 可能生成已存在的 `dedup_key`，必须先合并重复文献，并迁移所有相关外键后再删除 loser。
+
+落点文件：
+
+- `backend/db/models.py`：新增 `BibAttachment`，扩展 `CardNote.source_version` CHECK。
+- `backend/migrations/versions/025_add_bib_attachments.py`：新增附件表与 CHECK 迁移。
+- `backend/routers/library.py`：附件 CRUD、reader attachment view、主 Markdown 旧 md5 记录重新落盘、`apply_match` 重复文献合并。
+- `backend/routers/cards.py`：允许 attachment 版本制卡。
+- `backend/services/data_portability.py`：导出/导入 `bib_attachments` 并 remap `bib_entry_id`、`file_id`。
+- `frontend/src/LibraryTab.tsx`、`frontend/src/MarkdownReader.tsx`、`frontend/src/CardLibrary.tsx`：附件上传/删除/阅读入口与 attachment 标签展示。
+
+部署经验：
+
+- `library.py` 在线上实际加载路径是 `/root/deep-reading-agent/backend/routers/library.py`；服务器存在根目录 `routers/`，但本轮确认没有 `routers/library.py`，不属于双 router 副本问题。
+- 修改 `apply_match` 所在 FastAPI router 后，必须验证 `match-online` 和 `apply-match` 路由同时存在，避免编辑范围误删相邻路由。
 
 ## 9. 改代码时的推荐查找路径
 

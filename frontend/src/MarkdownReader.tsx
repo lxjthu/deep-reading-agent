@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch } from './lib/api-fetch'
 
 type ReaderVersion = {
-  version: 'original' | 'translated'
+  version: string
   label: string
   available: boolean
 }
@@ -14,7 +14,7 @@ type ReaderCard = {
   title: string
   summary: string | null
   tags: string[]
-  source_version: 'original' | 'translated'
+  source_version: 'original' | 'translated' | 'attachment'
   created_at: string | null
 }
 
@@ -29,7 +29,7 @@ type ReaderData = {
     abstract: string | null
     keywords: string[]
   }
-  current_version: 'original' | 'translated'
+  current_version: string
   versions: ReaderVersion[]
   markdown: string
   source_markdown_file_id: string | null
@@ -77,7 +77,7 @@ export default function MarkdownReader({ apiKey }: { apiKey: string }) {
   const [message, setMessage] = useState('')
   const [expandedOutgoing, setExpandedOutgoing] = useState(false)
   const [expandedIncoming, setExpandedIncoming] = useState(false)
-  const view = (searchParams.get('view') || 'original') as 'original' | 'translated'
+  const view = searchParams.get('view') || 'original'
   const entryId = useMemo(() => {
     const match = location.pathname.match(/\/workspace\/cards\/reader\/([^/?#]+)/)
     return match ? decodeURIComponent(match[1]) : ''
@@ -147,7 +147,7 @@ export default function MarkdownReader({ apiKey }: { apiKey: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source_bib_entry_id: data.entry.id,
-          source_version: data.current_version,
+          source_version: data.current_version.startsWith('attachment:') ? 'attachment' : data.current_version,
           source_markdown_file_id: data.source_markdown_file_id,
           source_translation_artifact_id: data.source_translation_artifact_id,
           selected_text: selection.text,
@@ -352,7 +352,7 @@ export default function MarkdownReader({ apiKey }: { apiKey: string }) {
                 {card.summary && <p className="mt-1 text-xs leading-5 text-gray-600">{card.summary}</p>}
                 <div className="mt-2 flex flex-wrap gap-1">
                   <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-700">
-                    {card.source_version === 'translated' ? '译文' : '原文'}
+                    {card.source_version === 'translated' ? '译文' : card.source_version === 'attachment' ? '附件' : '原文'}
                   </span>
                   {card.tags.slice(0, 4).map((tag) => (
                     <span key={tag} className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-500">

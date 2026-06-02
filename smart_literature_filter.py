@@ -3,11 +3,13 @@ import pandas as pd
 import argparse
 import logging
 import json
+import time
 import concurrent.futures
 from tqdm import tqdm
 from dotenv import load_dotenv
 from backend.utils.api_key import validate_deepseek_key
 from backend.utils.llm_provider import create_openai_client, model_for_api_key
+from services.deepseek_limiter import deepseek_semaphore
 import re
 
 # Import the new parser factory
@@ -53,46 +55,47 @@ class AIEvaluator:
 
         self.client = create_openai_client(self.api_key)
 
-    def evaluate_paper(self, paper_row, prompt_template, topic):
-        """Evaluates a single paper using LLM."""
-        try:
-            user_content = PromptManager.format_prompt(prompt_template, paper_row, topic)
-            
-            # DEBUG LOG
-            # logger.info(f"--- Prompt Preview ---\n{user_content[:200]}...\n--------------------")
-            
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful research assistant. Output strictly in JSON."},
-                    {"role": "user", "content": user_content}
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-                extra_body={"thinking": {"type": "disabled"}}
-            )
-            
-            content = response.choices[0].message.content
-            # DEBUG LOG
-            # logger.info(f"--- Raw Response ---\n{content}\n--------------------")
-            
-            # Simple JSON repair if needed
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError:
-                # Fallback: try to find JSON block
-                match = re.search(r'\{[\s\S]*\}', content)
-                if match:
-                    try:
-                        return json.loads(match.group(0))
-                    except:
-                        pass
-                return {"error": "JSON Parse Error", "raw_output": content}
-                
-        except Exception as e:
-            raise e
+    def evaluate_paper(self, paper_row, prompt_template, topic, max_retries=5):
+        """Evaluates a single paper using LLM with rate limiting and retry."""
+        user_content = PromptManager.format_prompt(prompt_template, paper_row, topic)
 
-    def evaluate_batch(self, df, prompt_template, topic, max_workers=5):
+        for attempt in range(max_retries):
+            try:
+                with deepseek_semaphore:
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "You are a helpful research assistant. Output strictly in JSON."},
+                            {"role": "user", "content": user_content}
+                        ],
+                        temperature=0.1,
+                        response_format={"type": "json_object"},
+                        extra_body={"thinking": {"type": "disabled"}}
+                    )
+
+                content = response.choices[0].message.content
+
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    match = re.search(r'\{[\s\S]*\}', content)
+                    if match:
+                        try:
+                            return json.loads(match.group(0))
+                        except:
+                            pass
+                    return {"error": "JSON Parse Error", "raw_output": content}
+
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(f"Rate limited (429), retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                    time.sleep(wait)
+                    continue
+                raise e
+
+    def evaluate_batch(self, df, prompt_template, topic, max_workers=3):
         """Evaluates a batch of papers concurrently. Raises on first error."""
         results = []
         

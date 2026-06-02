@@ -27,6 +27,7 @@ from db.models import (
     AgentActionProposal,
     AgentMessage,
     AgentSession,
+    BibAttachment,
     BibEntry,
     BibFilterLink,
     BibReference,
@@ -50,7 +51,7 @@ from upload_storage import build_storage_path, get_upload_root, resolve_storage_
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "024"
+CURRENT_SCHEMA_VERSION = "025"
 IMPORT_MODE_APPEND = "merge_append"
 IMPORT_MODE_REPLACE = "merge_replace"
 SUPPORTED_IMPORT_MODES = {IMPORT_MODE_APPEND, IMPORT_MODE_REPLACE}
@@ -76,6 +77,7 @@ EXPORT_TABLE_ORDER = [
     RefFormatPreset,
     Job,  # Moved before BibEntry to satisfy FK constraint
     BibEntry,
+    BibAttachment,
     BibFilterLink,
     JobBibEntry,
     ReadingItem,
@@ -104,6 +106,7 @@ IMPORT_CLEAR_ORDER = [
     AgentSession,
     JobBibEntry,
     BibFilterLink,
+    BibAttachment,
     Job,
     BibEntry,
     RefFormatPreset,
@@ -501,6 +504,10 @@ FK_REMAP_FIELDS: dict[str, dict[str, str]] = {
         "source_job_id": "jobs",
     },
     "annotations": {"bib_entry_id": "bib_entries"},
+    "bib_attachments": {
+        "bib_entry_id": "bib_entries",
+        "file_id": "files",
+    },
 }
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -36,7 +37,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from db import Base, SYNC_DATABASE_URL, engine as async_engine  # noqa: E402
-from db.models import Artifact, BibEntry, File, Job, JobBibEntry, User  # noqa: E402
+from db.models import Artifact, BibEntry, BibReference, File, Job, JobBibEntry, User  # noqa: E402
 from routers import auth as auth_router  # noqa: E402
 from routers import library as library_router  # noqa: E402
 from upload_storage import build_storage_path  # noqa: E402
@@ -267,6 +268,120 @@ class LibraryRouterTests(unittest.TestCase):
         self.assertEqual(body["filter_evaluations"][0]["reason"], "high relevance")
         self.assertEqual(body["filter_evaluations"][0]["abstract_translation"], "这是摘要翻译")
 
+    def test_apply_online_match_merges_existing_duplicate_dedup_key(self) -> None:
+        alice_id = self.register("alice")
+        headers = self.login_headers("alice")
+        current_id = str(uuid.uuid4())
+        duplicate_id = str(uuid.uuid4())
+        file_id = str(uuid.uuid4())
+
+        with Session(self.sync_engine) as session:
+            session.add(
+                File(
+                    id=file_id,
+                    owner_user_id=alice_id,
+                    original_name="current.pdf",
+                    file_type="pdf",
+                    storage_path=f"{alice_id}/{file_id}/current.pdf",
+                    size_bytes=42,
+                    md5="md5-current",
+                    batch_id=None,
+                )
+            )
+            session.add(
+                BibEntry(
+                    id=current_id,
+                    owner_user_id=alice_id,
+                    title="Current Upload",
+                    authors_json="[]",
+                    year=None,
+                    doi=None,
+                    journal=None,
+                    abstract=None,
+                    keywords_json="[]",
+                    source_db="pdf_extracted",
+                    source_filter_job_id=None,
+                    source_file_id=file_id,
+                    user_tags_json="[]",
+                    is_pinned=0,
+                    reading_status="has_pdf",
+                    metadata_completeness="minimal",
+                    dedup_key="title:current upload",
+                )
+            )
+            session.add(
+                BibEntry(
+                    id=duplicate_id,
+                    owner_user_id=alice_id,
+                    title="Existing Metadata",
+                    authors_json=json.dumps(["Abdelaziz Lawani"], ensure_ascii=False),
+                    year=2025,
+                    doi="10.1002/agr.70025",
+                    journal="Agribusiness",
+                    abstract="Existing abstract",
+                    keywords_json="[]",
+                    source_db="other",
+                    source_filter_job_id=None,
+                    source_file_id=None,
+                    user_tags_json="[]",
+                    is_pinned=0,
+                    reading_status="none",
+                    metadata_completeness="partial",
+                    dedup_key="doi:10.1002/agr.70025",
+                )
+            )
+            session.add(
+                BibReference(
+                    id=str(uuid.uuid4()),
+                    owner_user_id=alice_id,
+                    source_bib_entry_id=current_id,
+                    source_job_id=None,
+                    reference_order=1,
+                    raw_text="Lawani A. Existing Metadata.",
+                    authors_json=json.dumps(["Abdelaziz Lawani"], ensure_ascii=False),
+                    year=2025,
+                    title="Existing Metadata",
+                    journal="Agribusiness",
+                    doi="10.1002/agr.70025",
+                    dedup_key="doi:10.1002/agr.70025",
+                    matched_bib_entry_id=duplicate_id,
+                    match_method="doi",
+                    match_score=1.0,
+                )
+            )
+            session.commit()
+
+        response = self.client.post(
+            f"/api/library/entries/{current_id}/apply-match",
+            headers=headers,
+            json={
+                "candidate": {
+                    "title": "Existing Metadata",
+                    "authors": ["Abdelaziz Lawani"],
+                    "year": 2025,
+                    "journal": "Agribusiness",
+                    "doi": "10.1002/agr.70025",
+                    "volume": None,
+                    "issue": None,
+                    "pages": None,
+                    "source": "crossref",
+                    "score": 0.95,
+                }
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        with Session(self.sync_engine) as session:
+            entries = session.execute(select(BibEntry).where(BibEntry.owner_user_id == alice_id)).scalars().all()
+            self.assertEqual(len(entries), 1)
+            merged = entries[0]
+            self.assertEqual(merged.id, current_id)
+            self.assertEqual(merged.dedup_key, "doi:10.1002/agr.70025")
+            self.assertEqual(merged.source_file_id, file_id)
+            ref = session.execute(select(BibReference).where(BibReference.owner_user_id == alice_id)).scalar_one()
+            self.assertEqual(ref.source_bib_entry_id, current_id)
+            self.assertEqual(ref.matched_bib_entry_id, current_id)
+
     def test_library_detail_clears_missing_source_file_reference(self) -> None:
         alice_id = self.register("alice")
         bib_id, _job_id = self.create_entry_with_timeline(alice_id)
@@ -287,6 +402,43 @@ class LibraryRouterTests(unittest.TestCase):
         with Session(self.sync_engine) as session:
             entry = session.execute(select(BibEntry).where(BibEntry.id == bib_id)).scalar_one()
             self.assertIsNone(entry.source_file_id)
+
+    def test_markdown_upload_recreates_missing_deduped_file(self) -> None:
+        alice_id = self.register("alice")
+        bib_id, _job_id = self.create_entry_with_timeline(alice_id)
+        content = b"# Original Markdown\n\nBody"
+        md5_hash = hashlib.md5(content).hexdigest()
+        stale_file_id = str(uuid.uuid4())
+        _stale_path, stale_storage_path = build_storage_path(alice_id, stale_file_id, ".md")
+        with Session(self.sync_engine) as session:
+            session.add(
+                File(
+                    id=stale_file_id,
+                    owner_user_id=alice_id,
+                    original_name="old.md",
+                    file_type="markdown",
+                    storage_path=stale_storage_path,
+                    size_bytes=len(content),
+                    md5=md5_hash,
+                    batch_id=None,
+                )
+            )
+            session.commit()
+
+        response = self.client.post(
+            f"/api/library/entries/{bib_id}/markdown",
+            headers=self.login_headers("alice"),
+            files={"file": ("paper.md", content, "text/markdown")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["markdown_source_file_id"], stale_file_id)
+
+        page = self.client.get("/api/library/entries/page", headers=self.login_headers("alice"))
+        self.assertEqual(page.status_code, 200, page.text)
+
+        detail = self.client.get(f"/api/library/entries/{bib_id}", headers=self.login_headers("alice"))
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(detail.json()["markdown_source_file_id"], stale_file_id)
 
     def test_library_update_allows_editing_metadata_fields(self) -> None:
         alice_id = self.register("alice")

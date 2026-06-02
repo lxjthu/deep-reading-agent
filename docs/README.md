@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-05-29
+> 最后更新：2026-06-01
 
 ---
 
@@ -68,6 +68,8 @@
 | [API_KEY_FLOW_FIX.md](API_KEY_FLOW_FIX.md) | 修复 | API Key 传递链路修复 | 理解 API Key 如何从前端传到后端 |
 | [FIX_LIBRARY_CHAT_SAVE_500.md](FIX_LIBRARY_CHAT_SAVE_500.md) | 修复 | 文献助手保存历史记录远端 500 错误（SQLite CHECK 约束 migration 静默失败） | SQLite migration CHECK 约束修改不生效的排查参考 |
 | [FIX_PG_FLUSH_ORDER_500.md](FIX_PG_FLUSH_ORDER_500.md) | 修复 | PostgreSQL 下文献助手保存历史 500 错误（SQLAlchemy flush 顺序导致 FK 违反） | PostgreSQL 同 session 多表 INSERT 顺序问题排查 |
+| [MARKDOWN_MOUNT_REFRESH_FIX_2026-06-01.md](MARKDOWN_MOUNT_REFRESH_FIX_2026-06-01.md) | 修复/复盘 | Markdown 原文挂载后被列表刷新误清空的根因与修复 | 文献库 Markdown 原文挂载、列表刷新、`sanitize_entry_source_files`、`files`/md5 去重问题排查 |
+| [2026-06-01-bib-attachments-design.md](2026-06-01-bib-attachments-design.md) | 设计/实现 | 文献库多 Markdown 附件、reader attachment view 与制卡联动 | 维护文献库附件、MarkdownReader 多版本阅读、`bib_attachments` 迁移时 |
 
 ---
 

@@ -529,6 +529,35 @@ Index("idx_bib_expires", BibEntry.expires_at)
 Index("idx_bib_markdown_source", BibEntry.markdown_source_file_id)
 
 
+class BibAttachment(Base):
+    __tablename__ = "bib_attachments"
+    __table_args__ = (
+        UniqueConstraint("bib_entry_id", "file_id", name="uq_bib_att_entry_file"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    bib_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("bib_entries.id", ondelete="CASCADE"), nullable=False
+    )
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), nullable=False
+    )
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+Index("idx_bib_att_entry", BibAttachment.bib_entry_id)
+Index("idx_bib_att_owner", BibAttachment.owner_user_id)
+Index("idx_bib_att_expires", BibAttachment.expires_at)
+
+
 # --------------------------------------------------------------------------
 # Reference format presets
 # --------------------------------------------------------------------------
@@ -817,7 +846,7 @@ class CardNote(Base):
     __tablename__ = "card_notes"
     __table_args__ = (
         CheckConstraint(
-            "source_version IN ('original','translated')",
+            "source_version IN ('original','translated','attachment')",
             name="ck_card_notes_source_version",
         ),
     )

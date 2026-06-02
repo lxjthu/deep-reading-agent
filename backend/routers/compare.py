@@ -1942,7 +1942,7 @@ async def save_reading_item_edit(
     ).scalar_one_or_none()
     if existing:
         existing.edited_content = content
-        existing.updated_at = datetime.now(UTC)
+        existing.updated_at = utcnow_naive()
     else:
         db.add(ReadingItemEdit(
             reading_item_id=item_id,
@@ -2047,7 +2047,7 @@ async def update_annotation(
         ann.note = body["note"]
     if "color" in body:
         ann.color = body["color"]
-    ann.updated_at = datetime.now(UTC)
+    ann.updated_at = utcnow_naive()
     await db.commit()
     return {"ok": True}
 

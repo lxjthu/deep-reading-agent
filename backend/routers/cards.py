@@ -17,7 +17,7 @@ from backend.utils.api_key import validate_deepseek_key
 from backend.utils.llm_provider import create_openai_client, model_for_api_key
 from cleanup import compute_expires_at_for_role, utcnow_naive
 from db import get_db
-from db.models import Artifact, BibEntry, CardNote, File, User
+from db.models import Artifact, BibAttachment, BibEntry, CardNote, File, User
 from prompt_service import get_effective_prompt_text
 from services.card_notes import (
     build_card_markdown,
@@ -37,7 +37,7 @@ router = APIRouter()
 
 class CardFromSelectionRequest(BaseModel):
     source_bib_entry_id: str
-    source_version: str = Field(pattern="^(original|translated)$")
+    source_version: str = Field(pattern="^(original|translated|attachment)$")
     source_markdown_file_id: Optional[str] = None
     source_translation_artifact_id: Optional[int] = None
     selected_text: str = Field(min_length=1, max_length=20000)
@@ -223,6 +223,24 @@ async def create_card_from_selection(
         if source_file is None or source_file.owner_user_id != user.id or source_file.file_type != "markdown":
             raise HTTPException(status_code=400, detail="当前文献没有可用于制卡的 Markdown 原文。")
         translation_artifact_id = None
+    elif request.source_version == "attachment":
+        if not markdown_file_id:
+            raise HTTPException(status_code=400, detail="附件制卡需要指定 source_markdown_file_id。")
+        att_link = (
+            await db.execute(
+                select(BibAttachment).where(
+                    BibAttachment.bib_entry_id == entry.id,
+                    BibAttachment.file_id == markdown_file_id,
+                    BibAttachment.owner_user_id == user.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if att_link is None:
+            raise HTTPException(status_code=400, detail="指定的附件不属于当前文献。")
+        source_file = await db.get(File, markdown_file_id)
+        if source_file is None or source_file.file_type != "markdown":
+            raise HTTPException(status_code=400, detail="附件文件不可用。")
+        translation_artifact_id = None
     else:
         artifact = await db.get(Artifact, translation_artifact_id) if translation_artifact_id else None
         if artifact is None or artifact.owner_user_id != user.id or artifact.artifact_type != "translation_md":
@@ -324,6 +342,11 @@ async def export_cards(
             content = ""
             if version == "original":
                 file_id = cards[0].source_markdown_file_id or entry.markdown_source_file_id or entry.source_file_id
+                source_file = await db.get(File, file_id) if file_id else None
+                if source_file and source_file.file_type == "markdown":
+                    content = read_markdown_file(source_file.storage_path)
+            elif version == "attachment":
+                file_id = cards[0].source_markdown_file_id
                 source_file = await db.get(File, file_id) if file_id else None
                 if source_file and source_file.file_type == "markdown":
                     content = read_markdown_file(source_file.storage_path)

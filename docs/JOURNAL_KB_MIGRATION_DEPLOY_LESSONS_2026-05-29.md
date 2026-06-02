@@ -231,3 +231,50 @@ rm -f routers/__pycache__/*.pyc backend/routers/__pycache__/*.pyc
 - **调试日志不出现**是判断「代码未被加载」的关键信号（不是代码有 bug，是代码没被执行）
 - `.pyc` 缓存可能掩盖 `.py` 文件的更新，部署时应清除 `__pycache__/`
 - 部署 checklist 应包含「检查是否有同名模块在其他路径下」
+
+---
+
+## 2026-06-01：PostgreSQL 时区类型不匹配导致文献库挂载 Markdown 500
+
+### 现象
+
+文献库页面点击"挂载 Markdown"上传文件后，接口返回 `500 Internal Server Error`。
+
+日志报错：
+```
+sqlalchemy.exc.DBAPIError: can't subtract offset-naive and offset-aware datetimes
+```
+
+### 排查过程
+
+1. 查看服务器错误日志 `/var/log/deepreading/api-error.log`
+2. 定位到 `backend/routers/library.py` 第 974 行 `await db.commit()`
+3. 分析 SQL 参数：`updated_at` 字段传入了 `datetime.datetime(2026, 6, 1, 7, 31, 19, tzinfo=datetime.timezone.utc)`
+4. PostgreSQL 的 `TIMESTAMP WITHOUT TIME ZONE` 列不接受带时区的 datetime
+
+### 根因
+
+`upload_entry_markdown` 函数使用了 `datetime.now(UTC)` 创建带时区的 datetime，但数据库字段定义为 `TIMESTAMP WITHOUT TIME ZONE`。
+
+项目中其他地方都使用 `utcnow_naive()` 函数（返回不带时区的 datetime），唯独此处遗漏。
+
+```python
+# 错误写法（带时区）
+entry.updated_at = datetime.now(UTC)
+
+# 正确写法（不带时区）
+entry.updated_at = utcnow_naive()
+```
+
+### 修复
+
+1. `backend/routers/library.py` 第 973 行：`datetime.now(UTC)` → `utcnow_naive()`
+2. `backend/routers/library.py` 第 1190 行：同样修复（AI 评论更新）
+3. `backend/routers/compare.py` 第 1945、2050 行：同样修复（阅读笔记编辑、批注更新）
+
+### 教训
+
+- PostgreSQL 的 `TIMESTAMP WITHOUT TIME ZONE` 和 `TIMESTAMP WITH TIME ZONE` 是不同类型，不能混用
+- 项目中应统一使用 `utcnow_naive()` 函数，避免直接使用 `datetime.now(UTC)`
+- 本地 SQLite 对时区不敏感，无法发现此类问题；只有在 PostgreSQL 生产环境才会暴露
+- 建议：代码审查时检查所有 `datetime.now(UTC)` 的使用场景，确认是否需要 `.replace(tzinfo=None)`

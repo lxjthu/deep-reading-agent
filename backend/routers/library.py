@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import hashlib
@@ -19,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import get_db
-from db.models import Annotation, Artifact, BibEntry, BibFilterLink, BibReference, CardNote, File, Job, JobBibEntry, ReadingItem, User
+from db.models import Annotation, Artifact, BibAttachment, BibEntry, BibFilterLink, BibReference, BibReferenceCitation, CardNote, File, Job, JobBibEntry, ReadingItem, User, UserFeedback
 from db.utils import title_match_score, normalize_doi, compute_metadata_match_score
 from result_storage import resolve_result_path
 from services.crossref_source import CrossrefSource
@@ -37,6 +38,7 @@ from services.card_notes import json_list, read_artifact_markdown, read_markdown
 from services.fulltext_lookup import download_pdf_candidate, lookup_fulltext
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class LibraryEntrySummary(BaseModel):
@@ -112,6 +114,22 @@ class LibraryEntryDetail(LibraryEntrySummary):
     timeline: list[LibraryTimelineItem]
     filter_evaluations: list[LibraryFilterEvaluation]
     ai_comments: list[LibraryAiComment]
+    attachments: list[AttachmentSummary] = Field(default_factory=list)
+
+
+class AttachmentSummary(BaseModel):
+    id: str
+    file_id: str
+    label: str
+    sort_order: int
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+    created_at: Optional[str] = None
+
+
+class AttachmentUpdateRequest(BaseModel):
+    label: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    sort_order: Optional[int] = None
 
 
 class LibraryEntryUpdateRequest(BaseModel):
@@ -706,7 +724,8 @@ async def _list_entries(
     summaries: list[LibraryEntrySummary] = []
     changed = False
     for entry, source_file, max_score, has_translation in rows:
-        source_file, markdown_file, repaired = sanitize_entry_source_files(entry, source_file, None)
+        markdown_file = await db.get(File, entry.markdown_source_file_id) if entry.markdown_source_file_id else None
+        source_file, markdown_file, repaired = sanitize_entry_source_files(entry, source_file, markdown_file)
         changed = changed or repaired
         summaries.append(build_entry_summary(entry, source_file, max_score, markdown_file, bool(has_translation)))
     if changed:
@@ -748,7 +767,8 @@ async def _list_entries_page(
     items: list[LibraryEntrySummary] = []
     changed = False
     for entry, source_file, max_score, has_translation in rows:
-        source_file, markdown_file, repaired = sanitize_entry_source_files(entry, source_file, None)
+        markdown_file = await db.get(File, entry.markdown_source_file_id) if entry.markdown_source_file_id else None
+        source_file, markdown_file, repaired = sanitize_entry_source_files(entry, source_file, markdown_file)
         changed = changed or repaired
         items.append(build_entry_summary(entry, source_file, max_score, markdown_file, bool(has_translation)))
     if changed:
@@ -860,6 +880,28 @@ async def get_entry_detail(
     ]
 
     summary = build_entry_summary(entry, source_file, markdown_file=markdown_file)
+
+    attachment_rows = (
+        await db.execute(
+            select(BibAttachment, File)
+            .join(File, File.id == BibAttachment.file_id)
+            .where(BibAttachment.bib_entry_id == entry.id, BibAttachment.owner_user_id == user.id)
+            .order_by(BibAttachment.sort_order.asc(), BibAttachment.created_at.asc())
+        )
+    ).all()
+    attachments = [
+        AttachmentSummary(
+            id=att.id,
+            file_id=att.file_id,
+            label=att.label,
+            sort_order=att.sort_order,
+            file_name=f.original_name,
+            file_size=f.size_bytes,
+            created_at=_dt(att.created_at),
+        )
+        for att, f in attachment_rows
+    ]
+
     return LibraryEntryDetail(
         **summary.model_dump(),
         abstract=entry.abstract,
@@ -868,6 +910,7 @@ async def get_entry_detail(
         timeline=list(grouped.values()),
         filter_evaluations=filter_evaluations,
         ai_comments=ai_comments,
+        attachments=attachments,
     )
 
 
@@ -933,7 +976,15 @@ async def upload_entry_markdown(
         record = (
             await db.execute(select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash))
         ).scalar_one_or_none()
-        if record is None:
+        if record is not None and not file_record_exists(record):
+            final_path, storage_path = build_storage_path(user.id, record.id, file_ext)
+            shutil.move(str(temp_path), str(final_path))
+            record.original_name = original_name
+            record.file_type = "markdown"
+            record.storage_path = storage_path
+            record.size_bytes = size_bytes
+            record.expires_at = compute_expires_at(user)
+        elif record is None:
             file_id = str(uuid.uuid4())
             final_path, storage_path = build_storage_path(user.id, file_id, file_ext)
             shutil.move(str(temp_path), str(final_path))
@@ -968,7 +1019,7 @@ async def upload_entry_markdown(
             entry.source_file_id = record.id
         if entry.reading_status == "none":
             entry.reading_status = "has_pdf"
-        entry.updated_at = datetime.now(UTC)
+        entry.updated_at = utcnow_naive()
         await db.commit()
         return await get_entry_detail(entry_id, user=user, db=db)
     except HTTPException:
@@ -977,6 +1028,196 @@ async def upload_entry_markdown(
         raise
     finally:
         await file.close()
+
+
+@router.post("/entries/{entry_id}/attachments", response_model=list[AttachmentSummary])
+async def upload_attachment(
+    entry_id: str,
+    file: UploadFile = FastAPIFile(...),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[AttachmentSummary]:
+    entry = await get_owned_entry(db, user, entry_id)
+    original_name = (file.filename or "").strip()
+    if not original_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少文件名。")
+    file_ext = Path(original_name).suffix.lower()
+    if file_ext not in {".md", ".markdown"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="附件仅支持 Markdown 文件。")
+
+    user_dir = get_user_upload_dir(user.id)
+    temp_path = user_dir / f".{uuid.uuid4()}.uploading"
+    final_path = None
+    try:
+        md5_hash, size_bytes, sample = await persist_upload_to_temp(file, temp_path)
+        if detect_file_type(original_name, sample) != "markdown":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请上传 Markdown 文件。")
+
+        record = (
+            await db.execute(select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash))
+        ).scalar_one_or_none()
+        if record is None:
+            file_id = str(uuid.uuid4())
+            final_path, storage_path = build_storage_path(user.id, file_id, file_ext)
+            shutil.move(str(temp_path), str(final_path))
+            record = File(
+                id=file_id,
+                owner_user_id=user.id,
+                original_name=original_name,
+                file_type="markdown",
+                storage_path=storage_path,
+                size_bytes=size_bytes,
+                md5=md5_hash,
+                expires_at=compute_expires_at(user),
+            )
+            db.add(record)
+            try:
+                await db.flush()
+            except IntegrityError:
+                await db.rollback()
+                if final_path and final_path.exists():
+                    final_path.unlink()
+                record = (
+                    await db.execute(select(File).where(File.owner_user_id == user.id, File.md5 == md5_hash))
+                ).scalar_one_or_none()
+                if record is None:
+                    raise
+        else:
+            if temp_path.exists():
+                temp_path.unlink()
+
+        existing_link = (
+            await db.execute(
+                select(BibAttachment).where(
+                    BibAttachment.bib_entry_id == entry.id,
+                    BibAttachment.file_id == record.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_link is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该文件已作为附件挂载。")
+
+        max_order = (
+            await db.execute(
+                select(func.coalesce(func.max(BibAttachment.sort_order), -1))
+                .where(BibAttachment.bib_entry_id == entry.id)
+            )
+        ).scalar_one()
+
+        att = BibAttachment(
+            id=str(uuid.uuid4()),
+            bib_entry_id=entry.id,
+            file_id=record.id,
+            label=Path(original_name).stem,
+            sort_order=max_order + 1,
+            owner_user_id=user.id,
+            expires_at=compute_expires_at(user),
+        )
+        db.add(att)
+        await db.commit()
+    except HTTPException:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
+    finally:
+        await file.close()
+
+    return (await _list_attachments_inner(db, user, entry))
+
+
+async def _list_attachments_inner(db: AsyncSession, user: User, entry: BibEntry) -> list[AttachmentSummary]:
+    rows = (
+        await db.execute(
+            select(BibAttachment, File)
+            .join(File, File.id == BibAttachment.file_id)
+            .where(BibAttachment.bib_entry_id == entry.id, BibAttachment.owner_user_id == user.id)
+            .order_by(BibAttachment.sort_order.asc(), BibAttachment.created_at.asc())
+        )
+    ).all()
+    return [
+        AttachmentSummary(
+            id=att.id,
+            file_id=att.file_id,
+            label=att.label,
+            sort_order=att.sort_order,
+            file_name=f.original_name,
+            file_size=f.size_bytes,
+            created_at=_dt(att.created_at),
+        )
+        for att, f in rows
+    ]
+
+
+@router.get("/entries/{entry_id}/attachments", response_model=list[AttachmentSummary])
+async def list_attachments(
+    entry_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[AttachmentSummary]:
+    entry = await get_owned_entry(db, user, entry_id)
+    return await _list_attachments_inner(db, user, entry)
+
+
+@router.patch("/entries/{entry_id}/attachments/{attachment_id}", response_model=AttachmentSummary)
+async def update_attachment(
+    entry_id: str,
+    attachment_id: str,
+    request: AttachmentUpdateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AttachmentSummary:
+    entry = await get_owned_entry(db, user, entry_id)
+    att = (
+        await db.execute(
+            select(BibAttachment).where(
+                BibAttachment.id == attachment_id,
+                BibAttachment.bib_entry_id == entry.id,
+                BibAttachment.owner_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if att is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在。")
+    if request.label is not None:
+        att.label = request.label.strip()
+    if request.sort_order is not None:
+        att.sort_order = request.sort_order
+    await db.commit()
+    f = await db.get(File, att.file_id)
+    return AttachmentSummary(
+        id=att.id,
+        file_id=att.file_id,
+        label=att.label,
+        sort_order=att.sort_order,
+        file_name=f.original_name if f else None,
+        file_size=f.size_bytes if f else None,
+        created_at=_dt(att.created_at),
+    )
+
+
+@router.delete("/entries/{entry_id}/attachments/{attachment_id}")
+async def delete_attachment(
+    entry_id: str,
+    attachment_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    entry = await get_owned_entry(db, user, entry_id)
+    att = (
+        await db.execute(
+            select(BibAttachment).where(
+                BibAttachment.id == attachment_id,
+                BibAttachment.bib_entry_id == entry.id,
+                BibAttachment.owner_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if att is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在。")
+    await db.delete(att)
+    await db.commit()
+    return {"ok": True}
+
 
 
 @router.post("/entries/{entry_id}/fulltext-search", response_model=FullTextLookupResponse)
@@ -1041,7 +1282,7 @@ async def search_entry_fulltext(
 @router.get("/entries/{entry_id}/reader", response_model=ReaderResponse)
 async def get_entry_reader(
     entry_id: str,
-    view: str = Query(default="original", pattern="^(original|translated)$"),
+    view: str = Query(default="original"),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReaderResponse:
@@ -1069,19 +1310,61 @@ async def get_entry_reader(
         )
     ).scalar_one_or_none()
 
+    attachment_rows = (
+        await db.execute(
+            select(BibAttachment, File)
+            .join(File, File.id == BibAttachment.file_id)
+            .where(BibAttachment.bib_entry_id == entry.id, BibAttachment.owner_user_id == user.id)
+            .order_by(BibAttachment.sort_order.asc(), BibAttachment.created_at.asc())
+        )
+    ).all()
+
     versions = [
         ReaderVersion(version="original", label="原文", available=markdown_file is not None),
         ReaderVersion(version="translated", label="译文", available=translation_row is not None),
     ]
-    current = view
-    if current == "translated" and translation_row is None:
-        current = "original"
-    if current == "original" and markdown_file is None and translation_row is not None:
-        current = "translated"
-    if current == "original" and markdown_file is None:
-        raise HTTPException(status_code=404, detail="当前文献尚未绑定 Markdown 原文。")
+    for att, att_file in attachment_rows:
+        versions.append(
+            ReaderVersion(version=f"attachment:{att.file_id}", label=att.label, available=True)
+        )
 
-    if current == "translated":
+    attachment_file_map: dict[str, tuple[BibAttachment, File]] = {
+        att.file_id: (att, f) for att, f in attachment_rows
+    }
+
+    current = view
+    is_attachment_view = current.startswith("attachment:")
+
+    if is_attachment_view:
+        att_file_id = current.split(":", 1)[1]
+        if att_file_id not in attachment_file_map:
+            if markdown_file is not None:
+                current = "original"
+                is_attachment_view = False
+            elif translation_row is not None:
+                current = "translated"
+                is_attachment_view = False
+            else:
+                raise HTTPException(status_code=404, detail="请求的附件不存在。")
+    else:
+        if current == "translated" and translation_row is None:
+            current = "original"
+        if current == "original" and markdown_file is None and translation_row is not None:
+            current = "translated"
+        if current == "original" and markdown_file is None and not attachment_rows:
+            raise HTTPException(status_code=404, detail="当前文献尚未绑定 Markdown 原文。")
+        if current == "original" and markdown_file is None and attachment_rows:
+            first_att, first_f = attachment_rows[0]
+            current = f"attachment:{first_att.file_id}"
+            is_attachment_view = True
+
+    if is_attachment_view:
+        att_file_id = current.split(":", 1)[1]
+        _, att_file = attachment_file_map[att_file_id]
+        markdown = read_markdown_file(att_file.storage_path)
+        source_markdown_file_id = att_file.id
+        source_translation_artifact_id = None
+    elif current == "translated":
         markdown = read_artifact_markdown(translation_row.storage_path) if translation_row else ""
         source_translation_artifact_id = translation_row.id if translation_row else None
         source_markdown_file_id = None
@@ -1185,7 +1468,7 @@ async def update_ai_comment(
             detail="AI comment cannot be empty.",
         )
     comment.note = note
-    comment.updated_at = datetime.now(UTC)
+    comment.updated_at = utcnow_naive()
     await db.commit()
     await db.refresh(comment)
     return LibraryAiComment(
@@ -1291,6 +1574,164 @@ class OnlineMatchResponse(BaseModel):
 
 class ApplyMatchRequest(BaseModel):
     candidate: dict
+
+
+async def _merge_duplicate_bib_entry(db: AsyncSession, winner: BibEntry, loser: BibEntry) -> list[str]:
+    if not winner.doi and loser.doi:
+        winner.doi = loser.doi
+    if not winner.journal and loser.journal:
+        winner.journal = loser.journal
+    if not winner.abstract and loser.abstract:
+        winner.abstract = loser.abstract
+    if not winner.year and loser.year:
+        winner.year = loser.year
+    if not winner.volume and loser.volume:
+        winner.volume = loser.volume
+    if not winner.issue and loser.issue:
+        winner.issue = loser.issue
+    if not winner.pages and loser.pages:
+        winner.pages = loser.pages
+    if not winner.venue_type and loser.venue_type:
+        winner.venue_type = loser.venue_type
+    if not winner.citation_count and loser.citation_count:
+        winner.citation_count = loser.citation_count
+
+    winner_authors = json.loads(winner.authors_json) if winner.authors_json else []
+    loser_authors = json.loads(loser.authors_json) if loser.authors_json else []
+    if not winner_authors and loser_authors:
+        winner.authors_json = json.dumps(loser_authors, ensure_ascii=False)
+
+    winner_kw = json.loads(winner.keywords_json) if winner.keywords_json else []
+    loser_kw = json.loads(loser.keywords_json) if loser.keywords_json else []
+    if not winner_kw and loser_kw:
+        winner.keywords_json = json.dumps(loser_kw, ensure_ascii=False)
+
+    if not winner.source_file_id and loser.source_file_id:
+        winner.source_file_id = loser.source_file_id
+
+    better_status = {"read": 4, "reading": 3, "has_pdf": 2, "none": 1}
+    if better_status.get(loser.reading_status, 0) > better_status.get(winner.reading_status, 0):
+        winner.reading_status = loser.reading_status
+
+    link_rows = (
+        await db.execute(
+            select(BibFilterLink).where(BibFilterLink.bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for link in link_rows:
+        existing = (
+            await db.execute(
+                select(BibFilterLink).where(
+                    BibFilterLink.bib_entry_id == winner.id,
+                    BibFilterLink.filter_job_id == link.filter_job_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            link.bib_entry_id = winner.id
+        else:
+            await db.delete(link)
+
+    jbe_rows = (
+        await db.execute(
+            select(JobBibEntry).where(JobBibEntry.bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for jbe in jbe_rows:
+        existing_jbe = (
+            await db.execute(
+                select(JobBibEntry).where(
+                    JobBibEntry.job_id == jbe.job_id,
+                    JobBibEntry.bib_entry_id == winner.id,
+                    JobBibEntry.role == jbe.role,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_jbe is None:
+            jbe.bib_entry_id = winner.id
+        else:
+            await db.delete(jbe)
+
+    ri_rows = (
+        await db.execute(
+            select(ReadingItem).where(
+                ReadingItem.bib_entry_id == loser.id,
+                ReadingItem.owner_user_id == winner.owner_user_id,
+            )
+        )
+    ).scalars().all()
+    for ri in ri_rows:
+        ri.bib_entry_id = winner.id
+
+    attachment_rows = (
+        await db.execute(
+            select(BibAttachment).where(BibAttachment.bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for attachment in attachment_rows:
+        existing_attachment = (
+            await db.execute(
+                select(BibAttachment).where(
+                    BibAttachment.bib_entry_id == winner.id,
+                    BibAttachment.file_id == attachment.file_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_attachment is None:
+            attachment.bib_entry_id = winner.id
+        else:
+            await db.delete(attachment)
+
+    matched_ref_rows = (
+        await db.execute(
+            select(BibReference).where(BibReference.matched_bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for ref in matched_ref_rows:
+        ref.matched_bib_entry_id = winner.id
+
+    source_ref_rows = (
+        await db.execute(
+            select(BibReference).where(BibReference.source_bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for ref in source_ref_rows:
+        ref.source_bib_entry_id = winner.id
+
+    citation_rows = (
+        await db.execute(
+            select(BibReferenceCitation).where(BibReferenceCitation.source_bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for citation in citation_rows:
+        citation.source_bib_entry_id = winner.id
+
+    annotation_rows = (
+        await db.execute(
+            select(Annotation).where(Annotation.bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for annotation in annotation_rows:
+        annotation.bib_entry_id = winner.id
+
+    card_rows = (
+        await db.execute(
+            select(CardNote).where(CardNote.source_bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for card in card_rows:
+        card.source_bib_entry_id = winner.id
+
+    feedback_rows = (
+        await db.execute(
+            select(UserFeedback).where(UserFeedback.related_bib_entry_id == loser.id)
+        )
+    ).scalars().all()
+    for feedback in feedback_rows:
+        feedback.related_bib_entry_id = winner.id
+
+    await db.delete(loser)
+    return ["merged_with_local"]
 
 
 @router.post("/entries/{entry_id}/match-online", response_model=OnlineMatchResponse)
@@ -1493,97 +1934,7 @@ async def apply_match(
         if other_entry is None:
             raise HTTPException(status_code=400, detail="本地候选文献不存在。")
 
-        winner, loser = entry, other_entry
-
-        if not winner.doi and loser.doi:
-            winner.doi = loser.doi
-        if not winner.journal and loser.journal:
-            winner.journal = loser.journal
-        if not winner.abstract and loser.abstract:
-            winner.abstract = loser.abstract
-        if not winner.year and loser.year:
-            winner.year = loser.year
-        if not winner.volume and loser.volume:
-            winner.volume = loser.volume
-        if not winner.issue and loser.issue:
-            winner.issue = loser.issue
-        if not winner.pages and loser.pages:
-            winner.pages = loser.pages
-        if not winner.venue_type and loser.venue_type:
-            winner.venue_type = loser.venue_type
-        if not winner.citation_count and loser.citation_count:
-            winner.citation_count = loser.citation_count
-
-        winner_authors = json.loads(winner.authors_json) if winner.authors_json else []
-        loser_authors = json.loads(loser.authors_json) if loser.authors_json else []
-        if not winner_authors and loser_authors:
-            winner.authors_json = json.dumps(loser_authors, ensure_ascii=False)
-
-        winner_kw = json.loads(winner.keywords_json) if winner.keywords_json else []
-        loser_kw = json.loads(loser.keywords_json) if loser.keywords_json else []
-        if not winner_kw and loser_kw:
-            winner.keywords_json = json.dumps(loser_kw, ensure_ascii=False)
-
-        if not winner.source_file_id and loser.source_file_id:
-            winner.source_file_id = loser.source_file_id
-
-        better_status = {"read": 4, "reading": 3, "has_pdf": 2, "none": 1}
-        if better_status.get(loser.reading_status, 0) > better_status.get(winner.reading_status, 0):
-            winner.reading_status = loser.reading_status
-
-        link_rows = (
-            await db.execute(
-                select(BibFilterLink).where(BibFilterLink.bib_entry_id == loser.id)
-            )
-        ).scalars().all()
-        for link in link_rows:
-            existing = (
-                await db.execute(
-                    select(BibFilterLink).where(
-                        BibFilterLink.bib_entry_id == winner.id,
-                        BibFilterLink.filter_job_id == link.filter_job_id,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing is None:
-                link.bib_entry_id = winner.id
-            else:
-                await db.delete(link)
-
-        jbe_rows = (
-            await db.execute(
-                select(JobBibEntry).where(JobBibEntry.bib_entry_id == loser.id)
-            )
-        ).scalars().all()
-        for jbe in jbe_rows:
-            existing_jbe = (
-                await db.execute(
-                    select(JobBibEntry).where(
-                        JobBibEntry.job_id == jbe.job_id,
-                        JobBibEntry.bib_entry_id == winner.id,
-                        JobBibEntry.role == jbe.role,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing_jbe is None:
-                jbe.bib_entry_id = winner.id
-            else:
-                await db.delete(jbe)
-
-        ri_rows = (
-            await db.execute(
-                select(ReadingItem).where(
-                    ReadingItem.bib_entry_id == loser.id,
-                    ReadingItem.owner_user_id == user.id,
-                )
-            )
-        ).scalars().all()
-        for ri in ri_rows:
-            ri.bib_entry_id = winner.id
-
-        await db.delete(loser)
-
-        updated_fields = ["merged_with_local"]
+        updated_fields = await _merge_duplicate_bib_entry(db, entry, other_entry)
     else:
         candidate = CandidateMetadata(
             title=c.get("title", ""),
@@ -1612,12 +1963,25 @@ async def apply_match(
     new_title = entry.title
     new_authors = json.loads(entry.authors_json) if entry.authors_json else []
     new_year = entry.year
-    entry.dedup_key = compute_dedup_key(
+    new_dedup_key = compute_dedup_key(
         normalize_doi(new_doi) or new_doi,
         new_title,
         new_authors,
         new_year,
     )
+    duplicate_entry = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.owner_user_id == user.id,
+                BibEntry.id != entry.id,
+                BibEntry.dedup_key == new_dedup_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if duplicate_entry is not None:
+        updated_fields = await _merge_duplicate_bib_entry(db, entry, duplicate_entry)
+        await db.flush()
+    entry.dedup_key = new_dedup_key
 
     mc_title = entry.title
     mc_authors = json.loads(entry.authors_json) if entry.authors_json else []
@@ -1640,3 +2004,35 @@ async def apply_match(
 
     await db.commit()
     return {"message": "Match applied successfully.", "updated_fields": updated_fields}
+
+
+@router.post("/entries/{entry_id}/wos-search")
+async def wos_search(
+    entry_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Use Playwright to search the entry title on Web of Science and return the result URL."""
+    entry = (
+        await db.execute(
+            select(BibEntry).where(
+                BibEntry.id == entry_id,
+                BibEntry.owner_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="文献不存在。")
+
+    if not entry.title or not entry.title.strip():
+        raise HTTPException(status_code=400, detail="文献标题为空，无法搜索。")
+
+    from services.wos_search import search_wos_by_title
+
+    try:
+        url = await search_wos_by_title(entry.title)
+    except Exception as exc:
+        logger.exception("WoS search failed for entry %s", entry_id)
+        raise HTTPException(status_code=502, detail=f"WOS 搜索失败：{exc}") from exc
+
+    return {"url": url}

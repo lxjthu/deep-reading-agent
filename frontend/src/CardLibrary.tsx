@@ -7,7 +7,8 @@ type CardNote = {
   id: string
   source_bib_entry_id: string
   source_title: string | null
-  source_version: 'original' | 'translated'
+  source_version: 'original' | 'translated' | 'attachment'
+  source_markdown_file_id: string | null
   title: string
   summary: string | null
   tags: string[]
@@ -146,7 +147,7 @@ export default function CardLibrary() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-950">Markdown 卡片库</h1>
-          <p className="mt-1 text-sm text-gray-500">集中管理从原文和译文中生成的原子阅读卡。</p>
+          <p className="mt-1 text-sm text-gray-500">集中管理从原文、译文和附件中生成的原子阅读卡。</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -221,7 +222,7 @@ export default function CardLibrary() {
                 {card.summary && <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">{card.summary}</div>}
                 <div className="mt-2 flex flex-wrap gap-1">
                   <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-700">
-                    {card.source_version === 'translated' ? '译文' : '原文'}
+                    {card.source_version === 'translated' ? '译文' : card.source_version === 'attachment' ? '附件' : '原文'}
                   </span>
                   {card.tags.slice(0, 4).map((item) => (
                     <span key={item} className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-500">#{item}</span>
@@ -239,7 +240,7 @@ export default function CardLibrary() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-xs font-semibold text-emerald-700">
-                      {selected.source_version === 'translated' ? '译文卡片' : '原文卡片'}
+                      {selected.source_version === 'translated' ? '译文卡片' : selected.source_version === 'attachment' ? '附件卡片' : '原文卡片'}
                     </div>
                     <h2 className="mt-1 text-lg font-bold text-gray-950">{selected.title}</h2>
                     <p className="mt-1 text-sm text-gray-500">{selected.source_title}</p>
@@ -247,7 +248,12 @@ export default function CardLibrary() {
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => navigate(`/workspace/cards/reader/${selected.source_bib_entry_id}?view=${selected.source_version}`)}
+                      onClick={() => {
+                        const view = selected.source_version === 'attachment' && selected.source_markdown_file_id
+                          ? `attachment:${selected.source_markdown_file_id}`
+                          : selected.source_version
+                        navigate(`/workspace/cards/reader/${selected.source_bib_entry_id}?view=${view}`)
+                      }}
                       className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
                     >
                       回到原文

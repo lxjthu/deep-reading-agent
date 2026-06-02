@@ -1,7 +1,8 @@
 # WoS 搜索按钮集成规划
 
-> 状态：**待实施**
+> 状态：**已实施，待部署验证**
 > 创建时间：2026-05-31
+> 实施时间：2026-05-31
 > 前置条件：`pip install playwright && playwright install chromium`
 
 ## 一、需求
@@ -255,3 +256,46 @@ playwright install --with-deps chromium
 
 - 优点：响应更快（省去启动时间）
 - 缺点：内存占用，实现复杂
+
+## 七、部署注意事项
+
+### 7.1 ⚠️ 校园网限制
+
+**WoS（Web of Science）需要校园网或机构 VPN 才能访问。** 线上服务器（阿里云）不在校园网内，无法访问 WoS，因此该功能**仅限本地打包版使用**，线上版暂不启用。
+
+- 线上版：按钮已注释隐藏
+- 本地打包版：取消注释即可使用，前提是运行环境能访问 `webofscience.clarivate.cn`
+
+### 7.2 服务器安装 Playwright + Chromium（本地打包版）
+
+```bash
+pip install playwright
+playwright install --with-deps chromium
+```
+
+`--with-deps` 会自动安装 Chromium 所需的系统库。Alibaba Cloud Linux（RHEL 系）需额外安装：
+```bash
+dnf install -y at-spi2-atk nss atk cups-libs libXcomposite libXdamage libXrandr mesa-libgbm pango alsa-lib libdrm libxkbcommon
+```
+
+### 7.3 本次改动文件清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/services/wos_search.py` | 新建 | Playwright 搜索逻辑 |
+| `backend/routers/library.py` | 修改 | 新增 `/entries/{id}/wos-search` 端点 |
+| `frontend/src/LibraryTab.tsx` | 修改 | 新增 WOS 搜索按钮 + 处理函数 |
+| `frontend/dist/` | 重新构建 | `npm run build` |
+| `backend/requirements.txt` | 修改 | 添加 `playwright` 依赖 |
+
+### 7.4 双 routers/ 目录陷阱
+
+`library.py` 是否受影响取决于根目录 `routers/` 下是否也存在 `library.py`。
+本次 `library.py` 只存在于 `backend/routers/`，不受 `sys.path.insert` 影响，无需同步到根目录。
+
+### 7.5 部署后验证
+
+1. `systemctl is-active deepreading-api`
+2. 浏览器打开文献库 → 点击某文献详情 → 确认"知网搜索"按钮旁边出现"WOS 搜索"按钮
+3. 点击"WOS 搜索" → 应显示"搜索中..." → 约 10-30 秒后弹出 WoS 结果页
+4. 检查 `/var/log/deepreading/api-error.log` 无 Playwright 报错

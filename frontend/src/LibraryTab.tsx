@@ -60,6 +60,17 @@ type LibraryEntryDetail = LibraryEntrySummary & {
   timeline: LibraryTimelineItem[]
   filter_evaluations: LibraryFilterEvaluation[]
   ai_comments: LibraryAiComment[]
+  attachments: AttachmentSummary[]
+}
+
+type AttachmentSummary = {
+  id: string
+  file_id: string
+  label: string
+  sort_order: number
+  file_name: string | null
+  file_size: number | null
+  created_at: string | null
 }
 
 type LibraryFilterEvaluation = {
@@ -401,8 +412,12 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [translating, setTranslating] = useState(false)
   const [translateProgress, setTranslateProgress] = useState('')
   const [markdownUploading, setMarkdownUploading] = useState(false)
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null)
   const [fulltextSearching, setFulltextSearching] = useState(false)
   const [fulltextResult, setFulltextResult] = useState<FullTextLookupResponse | null>(null)
+  // WOS 搜索：需校园网，仅本地打包版启用
+  // const [wosSearching, setWosSearching] = useState(false)
 
   const [chatOpen, setChatOpen] = useState(false)
   const [chatQuestion, setChatQuestion] = useState('')
@@ -426,7 +441,8 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
       item.artifacts.some((artifact) => artifact.artifact_type === 'translation_md'),
     ),
   )
-  const readerDefaultView = hasMarkdownReaderSource ? 'original' : 'translated'
+  const hasAttachmentReaderSource = Boolean(detail?.attachments && detail.attachments.length > 0)
+  const readerDefaultView = hasMarkdownReaderSource ? 'original' : hasTranslatedReaderSource ? 'translated' : hasAttachmentReaderSource ? `attachment:${detail?.attachments?.[0]?.file_id}` : 'original'
   const chatEntryNumberById = useMemo(
     () => new Map((chatFilteredIds || []).map((entryId, index) => [entryId, index + 1])),
     [chatFilteredIds],
@@ -718,10 +734,69 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     }
   }
 
+  async function handleAttachmentUpload(file: File | null) {
+    if (!detail || !file) return
+    setAttachmentUploading(true)
+    setSaveMessage('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const response = await fetch(`/api/library/entries/${encodeURIComponent(detail.id)}/attachments`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.detail || '附件上传失败。')
+      }
+      const attachments: AttachmentSummary[] = await response.json()
+      setDetail((prev) => prev ? { ...prev, attachments } : prev)
+      setSaveMessage('附件已添加。')
+    } catch (error: unknown) {
+      setSaveMessage(error instanceof Error ? error.message : '附件上传失败。')
+    } finally {
+      setAttachmentUploading(false)
+    }
+  }
+
+  async function handleAttachmentDelete(attachmentId: string) {
+    if (!detail) return
+    try {
+      const response = await fetch(`/api/library/entries/${encodeURIComponent(detail.id)}/attachments/${encodeURIComponent(attachmentId)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.detail || '删除失败。')
+      }
+      setDetail((prev) => prev ? { ...prev, attachments: prev.attachments.filter((a) => a.id !== attachmentId) } : prev)
+      setSaveMessage('附件已删除。')
+    } catch (error: unknown) {
+      setSaveMessage(error instanceof Error ? error.message : '删除附件失败。')
+    }
+  }
+
   function openCnkiTitleSearch(entry: LibraryEntrySummary | LibraryEntryDetail) {
     const url = buildCnkiTitleSearchUrl(entry.title)
     window.open(url, '_blank', 'noopener,noreferrer')
   }
+
+  // WOS 搜索：需校园网，仅本地打包版启用
+  // async function handleWosSearch() {
+  //   if (!detail || wosSearching) return
+  //   setWosSearching(true)
+  //   try {
+  //     const response = await fetch(`/api/library/entries/${encodeURIComponent(detail.id)}/wos-search`, {
+  //       method: 'POST',
+  //     })
+  //     const data = await parseJsonOrThrow<{ url: string }>(response)
+  //     window.open(data.url, '_blank', 'noopener,noreferrer')
+  //   } catch (error: unknown) {
+  //     alert(`WOS 搜索失败：${error instanceof Error ? error.message : String(error)}`)
+  //   } finally {
+  //     setWosSearching(false)
+  //   }
+  // }
 
   async function handleFullTextSearch() {
     if (!detail || fulltextSearching) return
@@ -1805,6 +1880,16 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                     >
                       知网搜索
                     </button>
+                    {/* WOS 搜索：需校园网环境，仅限本地打包版使用，线上版暂不启用
+                    <button
+                      type="button"
+                      disabled={wosSearching}
+                      className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                      onClick={() => void handleWosSearch()}
+                    >
+                      {wosSearching ? '搜索中...' : 'WOS 搜索'}
+                    </button>
+                    */}
                     <button
                       type="button"
                       disabled={fulltextSearching}
@@ -1815,7 +1900,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                     </button>
                     <button
                       type="button"
-                      disabled={!hasMarkdownReaderSource && !hasTranslatedReaderSource}
+                      disabled={!hasMarkdownReaderSource && !hasTranslatedReaderSource && !hasAttachmentReaderSource}
                       className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300"
                       onClick={() => navigate(`/workspace/cards/reader/${detail.id}?view=${readerDefaultView}`)}
                     >
@@ -1866,6 +1951,57 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                   </div>
                 </div>
 
+                <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-gray-800">附件管理</h4>
+                    <input
+                      ref={attachmentInputRef}
+                      type="file"
+                      accept=".md,.markdown,text/markdown"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] || null
+                        event.currentTarget.value = ''
+                        void handleAttachmentUpload(file)
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={attachmentUploading}
+                      className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                      onClick={() => attachmentInputRef.current?.click()}
+                    >
+                      {attachmentUploading ? '上传中...' : '添加 Markdown 附件'}
+                    </button>
+                  </div>
+                  {detail.attachments && detail.attachments.length > 0 ? (
+                    <div className="mt-3 space-y-1.5">
+                      {detail.attachments.map((att) => (
+                        <div key={att.id} className="flex items-center gap-2 rounded-lg border border-violet-100 bg-white px-3 py-2">
+                          <span className="min-w-0 flex-1 truncate text-xs text-gray-700" title={att.label}>{att.label}</span>
+                          <span className="text-[11px] text-gray-400">{att.file_size ? `${(att.file_size / 1024).toFixed(0)} KB` : ''}</span>
+                          <button
+                            type="button"
+                            className="rounded px-2 py-0.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100"
+                            onClick={() => navigate(`/workspace/cards/reader/${detail.id}?view=attachment:${att.file_id}`)}
+                          >
+                            阅读
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded px-2 py-0.5 text-[11px] font-medium text-red-600 hover:bg-red-100"
+                            onClick={() => { if (window.confirm(`确定删除附件「${att.label}」？`)) void handleAttachmentDelete(att.id) }}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-gray-400">上传 Markdown 文件作为附件，每个附件可独立阅读并制卡。</p>
+                  )}
+                </div>
+
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => void handleSave()}
@@ -1876,7 +2012,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                     {saving ? '保存中...' : '保存元数据'}
                   </button>
                   {saveMessage && (
-                    <span className={`text-sm ${saveMessage === '保存成功。' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    <span className={`text-sm ${saveMessage.includes('失败') || saveMessage.includes('错误') ? 'text-red-600' : 'text-emerald-600'}`}>
                       {saveMessage}
                     </span>
                   )}
