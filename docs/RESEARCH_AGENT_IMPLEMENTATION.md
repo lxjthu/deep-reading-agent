@@ -521,3 +521,31 @@ Agent 读取以下表（全部按 `owner_user_id` 过滤）：
 - 后端编译通过，39 项单测全绿
 - 前端 TypeScript 编译 + Vite 构建通过
 - 已部署到 http://8.162.14.154:18080/ 并验证首页 200、runtime 200
+
+## 13. 2026-06-02 上传文件夹入口线上修复
+
+### 13.1 故障现象
+
+- AI 助手「上传文件夹」请求 `/api/agent/inbox/upload-folder` 在线上返回 500。
+- 前端只显示“上传失败 connection”，但后台日志显示真实原因在数据库 flush 顺序和参数类型。
+
+### 13.2 根因
+
+- `_persist_inbox_upload()` 调用 `bind_uploaded_file_to_existing_bib()` 时传入了 `User` ORM 对象；该函数实际需要 `user_id: int`。
+- `upload_agent_inbox_folder()` 创建 `UploadBatch` 后未先 flush，PostgreSQL 插入 `files.batch_id` 时可能找不到父批次。
+- `File` 记录未先 flush 就更新匹配到的 `BibEntry.source_file_id` / `markdown_source_file_id`，PostgreSQL 会检查到目标 `files.id` 尚不存在。
+
+### 13.3 修复
+
+- `backend/routers/agent.py`
+  - 创建 `UploadBatch` 后立即 `await db.flush()`。
+  - `_persist_inbox_upload()` 里先 `db.add(record)` + `await db.flush()`，再绑定已有文献。
+  - 绑定文献库时调用 `bind_uploaded_file_to_existing_bib(db, user.id, record)`。
+- `backend/tests/test_library.py`
+  - 新增上传文件夹回归测试，断言 batch、file、匹配 BibEntry 绑定都成功。
+
+### 13.4 验证
+
+- `python -m py_compile backend\routers\agent.py backend\routers\upload.py backend\tests\test_library.py`
+- `python -m unittest backend.tests.test_library`
+- 已手动 SCP 到 `/root/deep-reading-agent/backend/routers/agent.py` 并通过 `systemctl restart deepreading-api` 部署。

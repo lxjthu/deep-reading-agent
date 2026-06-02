@@ -942,7 +942,8 @@ async def _persist_inbox_upload(
             expires_at=reading.compute_expires_at(user),
         )
         db.add(record)
-        matched_bib = await bind_uploaded_file_to_existing_bib(db, user, record)
+        await db.flush()
+        matched_bib = await bind_uploaded_file_to_existing_bib(db, user.id, record)
         await db.flush()
         logger.info(
             "[inbox_upload] success: user_id=%s, batch_id=%s, filename=%s, file_id=%s, matched_bib=%s",
@@ -990,6 +991,7 @@ async def upload_agent_inbox_folder(
         expires_at=reading.compute_expires_at(user),
     )
     db.add(batch)
+    await db.flush()
     results: list[dict[str, Any]] = []
     for upload in files:
         try:

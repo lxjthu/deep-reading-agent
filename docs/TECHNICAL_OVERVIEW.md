@@ -1996,6 +1996,29 @@ v2 页面核心架构（与 v1 对比）：
 - `library.py` 在线上实际加载路径是 `/root/deep-reading-agent/backend/routers/library.py`；服务器存在根目录 `routers/`，但本轮确认没有 `routers/library.py`，不属于双 router 副本问题。
 - 修改 `apply_match` 所在 FastAPI router 后，必须验证 `match-online` 和 `apply-match` 路由同时存在，避免编辑范围误删相邻路由。
 
+### 8.23 AI 助手上传文件夹外键顺序修复（2026-06-02）
+故障现象：
+
+- 线上 `POST /api/agent/inbox/upload-folder` 返回 500，前端表现为“上传失败 connection”。
+- 后台先后出现三类 PostgreSQL/SQLAlchemy 异常：
+  - `BibEntry.owner_user_id == <User object>`：上传文件绑定文献库时把 `User` 对象传给了需要 `user_id` 的函数。
+  - `files_batch_id_fkey`：`File.batch_id` 指向的 `UploadBatch` 还没有先 flush。
+  - `bib_entries_source_file_id_fkey`：绑定 `BibEntry.source_file_id` / `markdown_source_file_id` 时，目标 `File` 记录还没有先 flush。
+
+修复落点：
+
+- `backend/routers/agent.py`：
+  - `UploadBatch` 创建后立即 `await db.flush()`，确保 `files.batch_id` 外键父记录已存在。
+  - `_persist_inbox_upload()` 中先 `db.add(record)` + `await db.flush()` 落盘 `File`，再调用 `bind_uploaded_file_to_existing_bib(db, user.id, record)`。
+  - 文献库绑定函数只传 `user.id`，不再传 `User` ORM 对象。
+- `backend/tests/test_library.py`：
+  - 新增 `test_agent_folder_upload_persists_batch_file_and_binds_matching_entry`，覆盖 AI 助手上传 Markdown 文件夹、创建 `UploadBatch`、保存 `File.batch_id`、并绑定匹配 `BibEntry.markdown_source_file_id` 的回归路径。
+
+部署经验：
+
+- 这个问题只涉及 `backend/routers/agent.py`，不在根目录双 `routers/` 陷阱名单内；线上实际路径为 `/root/deep-reading-agent/backend/routers/agent.py`。
+- PostgreSQL 外键检查会暴露 SQLite 测试中不明显的 flush 顺序问题；涉及同一事务内父子表和反向绑定时，应显式 flush 父记录，再更新依赖记录。
+
 ## 9. 改代码时的推荐查找路径
 
 ## 9.1 要改注册/登录/权限

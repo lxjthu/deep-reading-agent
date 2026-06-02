@@ -37,8 +37,9 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from db import Base, SYNC_DATABASE_URL, engine as async_engine  # noqa: E402
-from db.models import Artifact, BibEntry, BibReference, File, Job, JobBibEntry, User  # noqa: E402
+from db.models import Artifact, BibEntry, BibReference, File, Job, JobBibEntry, UploadBatch, User  # noqa: E402
 from routers import auth as auth_router  # noqa: E402
+from routers import agent as agent_router  # noqa: E402
 from routers import library as library_router  # noqa: E402
 from upload_storage import build_storage_path  # noqa: E402
 
@@ -48,6 +49,7 @@ class LibraryRouterTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         app = FastAPI()
         app.include_router(auth_router.router, prefix="/api/auth", tags=["Auth"])
+        app.include_router(agent_router.router, prefix="/api/agent", tags=["Agent"])
         app.include_router(library_router.router, prefix="/api/library", tags=["Library"])
         cls.client = TestClient(app)
         cls.sync_engine = create_engine(SYNC_DATABASE_URL)
@@ -207,6 +209,50 @@ class LibraryRouterTests(unittest.TestCase):
     def test_library_list_requires_authentication(self) -> None:
         response = self.client.get("/api/library/entries")
         self.assertEqual(response.status_code, 401, response.text)
+
+    def test_agent_folder_upload_persists_batch_file_and_binds_matching_entry(self) -> None:
+        user_id = self.register("agent-folder")
+        headers = self.login_headers("agent-folder")
+        bib_id = str(uuid.uuid4())
+        with Session(self.sync_engine) as session:
+            session.add(
+                BibEntry(
+                    id=bib_id,
+                    owner_user_id=user_id,
+                    title="Ecological Product Value",
+                    source_db="manual",
+                    dedup_key="title:ecological product value",
+                )
+            )
+            session.commit()
+
+        response = self.client.post(
+            "/api/agent/inbox/upload-folder",
+            headers=headers,
+            files=[
+                (
+                    "files",
+                    (
+                        "folder/Ecological Product Value.md",
+                        b"# Ecological Product Value\n\nsample",
+                        "text/markdown",
+                    ),
+                )
+            ],
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["succeeded"], 1, data)
+        self.assertEqual(data["failed"], 0, data)
+        self.assertEqual(data["results"][0]["matched_bib_entry_id"], bib_id, data)
+
+        with Session(self.sync_engine) as session:
+            batch = session.get(UploadBatch, data["batch_id"])
+            self.assertIsNotNone(batch)
+            uploaded = session.execute(select(File).where(File.batch_id == data["batch_id"])).scalar_one()
+            entry = session.get(BibEntry, bib_id)
+            self.assertEqual(uploaded.owner_user_id, user_id)
+            self.assertEqual(entry.markdown_source_file_id, uploaded.id)
 
     def test_library_list_only_returns_current_user_entries(self) -> None:
         alice_id = self.register("alice")
