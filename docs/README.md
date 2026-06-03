@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-06-01
+> 最后更新：2026-06-03
 
 ---
 
@@ -85,6 +85,7 @@
 | [LIBRARY_AI_CHAT_IMPL.md](LIBRARY_AI_CHAT_IMPL.md) | 实现 | 文献库 AI 多轮查询、标签确认写库、标签搜索筛选和逐篇 AI 点评 | 维护文献库 AI 助手、结果联动和点评链路 |
 | [AGENT_ASSISTANT_IMPL.md](AGENT_ASSISTANT_IMPL.md) | 实现 | AI 文献助手 tool calling、input 文件夹白名单、文件夹扫描、文献库对比、批量精读编排和前端 JSON HTML 展示 | 升级 AI 助手、Agent 工具、文件夹导入、持久会话和执行确认时 |
 | [RESEARCH_AGENT_UPGRADE_PLAN.md](RESEARCH_AGENT_UPGRADE_PLAN.md) | 方案 | 研究助手智能体整改总方案（重写版）：以 runtime-first 为核心，覆盖 Task Frame、状态机、Sufficiency、结构化工作记忆、预算治理、联网授权与分期路线图 | 规划下一代数据库驱动研究智能体、修复 AI 助手“听不懂/幻觉/空转/联网失控”等问题时 |
+| [RESEARCH_AGENT_RUNTIME_ROADMAP_2026_06_02.md](RESEARCH_AGENT_RUNTIME_ROADMAP_2026_06_02.md) | 路线图 | Research Agent Runtime 新路线图：以 Sufficiency Engine、显式状态机、联网授权票据、Result Set UI 和工具覆盖扩展为后续主线 | 继续实施 AI 助手 runtime-first 改造、判断哪些能力已做和下一步先做什么时 |
 | [RESEARCH_AGENT_IMPLEMENTATION_TASKLIST.md](RESEARCH_AGENT_IMPLEMENTATION_TASKLIST.md) | 方案/任务清单 | Research Agent 整改实施任务拆解：按 P0/P1/P2、文件、模块、测试与验收标准组织的执行清单 | 准备真正开工实施 Research Agent 整改、拆分任务和排期时 |
 | [AGENT_SESSION_CONFIRMATION_UI_PLAN.md](AGENT_SESSION_CONFIRMATION_UI_PLAN.md) | 方案 | AI 文献助手持久会话、agent_sessions/agent_messages、执行前确认、导入/精读确认弹窗和结果 UI 改造规划 | 实施可靠多轮对话、执行确认和 JSON 页面美化前 |
 | [TESTSET_AND_P2_PLAN.md](TESTSET_AND_P2_PLAN.md) | 方案 | 测试集与 P2 规划 | 测试相关规划 |

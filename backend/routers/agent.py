@@ -122,6 +122,8 @@ MODEL = "deepseek-v4-flash"
 MAX_TOOL_ROUNDS = 8
 AGENT_INBOX_EXTENSIONS = {".pdf", ".md", ".markdown"}
 AGENT_INBOX_MAX_FILES = 200
+AGENT_SCAN_MAX_FILES = 500
+AGENT_SCAN_DEFAULT_BATCH_SIZE = 100
 
 
 def utcnow_naive() -> datetime:
@@ -710,6 +712,7 @@ def _summarize_scan_result(
     rows: list[dict[str, Any]],
     skipped: list[dict[str, Any]],
     input_batch_id: str,
+    scan_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     skipped_reasons: dict[str, int] = {}
     skipped_examples: list[dict[str, str]] = []
@@ -740,6 +743,11 @@ def _summarize_scan_result(
     if skipped:
         recommendations.append("有文件被跳过，建议先检查失败原因再继续扫描或导入。")
 
+    if scan_plan and scan_plan.get("has_next_batch"):
+        recommendations.append(
+            f"Continue with scan_input_folder offset={scan_plan.get('next_offset')} after settling notes for this batch."
+        )
+
     return {
         "source": source,
         "topic": topic,
@@ -756,7 +764,56 @@ def _summarize_scan_result(
         "skipped_count": len(skipped),
         "skipped_reasons": skipped_reasons,
         "skipped_examples": skipped_examples,
+        "scan_plan": scan_plan or {},
         "recommendations": recommendations,
+    }
+
+
+def _normalize_scan_batch_size(max_files: int | None) -> int:
+    try:
+        value = int(max_files or AGENT_SCAN_DEFAULT_BATCH_SIZE)
+    except (TypeError, ValueError):
+        value = AGENT_SCAN_DEFAULT_BATCH_SIZE
+    return max(1, min(value, AGENT_SCAN_MAX_FILES))
+
+
+def _normalize_scan_offset(offset: int | None) -> int:
+    try:
+        value = int(offset or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return max(0, value)
+
+
+def _build_scan_plan(
+    *,
+    total_available: int,
+    offset: int,
+    batch_size: int,
+    scanned: int,
+) -> dict[str, Any]:
+    total_available = max(0, int(total_available or 0))
+    offset = _normalize_scan_offset(offset)
+    batch_size = _normalize_scan_batch_size(batch_size)
+    scanned = max(0, int(scanned or 0))
+    processed_total = min(total_available, offset + scanned)
+    remaining_count = max(0, total_available - processed_total)
+    has_next_batch = remaining_count > 0
+    return {
+        "batch_size": batch_size,
+        "offset": offset,
+        "next_offset": processed_total if has_next_batch else None,
+        "processed_total": processed_total,
+        "total_available": total_available,
+        "remaining_count": remaining_count,
+        "has_next_batch": has_next_batch,
+        "next_tool": "scan_input_folder" if has_next_batch else None,
+        "workflow_steps": [
+            "settle_notes",
+            "scan_next_batch",
+            "iterate_notes",
+            "final_result",
+        ],
     }
 
 
@@ -1697,7 +1754,7 @@ async def _import_source_file(
     }
 
 
-def _collect_folder_files(input_folder: Path, recursive: bool, max_files: int) -> list[Path]:
+def _list_folder_files(input_folder: Path, recursive: bool) -> list[Path]:
     pattern = "**/*" if recursive else "*"
     files = [
         path
@@ -1705,7 +1762,14 @@ def _collect_folder_files(input_folder: Path, recursive: bool, max_files: int) -
         if path.is_file() and path.suffix.lower() in {".pdf", ".md", ".markdown"}
     ]
     files.sort(key=lambda path: path.name.lower())
-    return files[: max(1, min(max_files, 100))]
+    return files
+
+
+def _collect_folder_files(input_folder: Path, recursive: bool, max_files: int, offset: int = 0) -> list[Path]:
+    files = _list_folder_files(input_folder, recursive)
+    start = _normalize_scan_offset(offset)
+    batch_size = _normalize_scan_batch_size(max_files)
+    return files[start: start + batch_size]
 
 
 def _classify_relevance(api_key: str, topic: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1767,9 +1831,12 @@ async def tool_scan_input_folder(
     api_key: str,
     topic: str = "*",
     recursive: bool = False,
-    max_files: int = 50,
+    max_files: int = AGENT_SCAN_DEFAULT_BATCH_SIZE,
+    offset: int = 0,
     confidence_threshold: float = 0.55,
 ) -> dict[str, Any]:
+    batch_size = _normalize_scan_batch_size(max_files)
+    offset = _normalize_scan_offset(offset)
     prefs = await get_agent_preferences(db, user)
     input_batch_id = str(prefs.get("input_batch_id") or "")
     input_file_ids = [
@@ -1781,12 +1848,22 @@ async def tool_scan_input_folder(
     candidates: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     source_label = "upload_batch" if input_batch_id else "server_folder"
+    total_available = 0
 
     if input_batch_id:
         batch = await db.get(UploadBatch, input_batch_id)
         if not batch or batch.owner_user_id != user.id:
             return {"error": "input_batch_missing", "batch_id": input_batch_id}
         if input_file_ids:
+            total_available = (
+                await db.execute(
+                    select(func.count(File.id)).where(
+                        File.owner_user_id == user.id,
+                        File.id.in_(input_file_ids),
+                        File.file_type.in_(["pdf", "markdown"]),
+                    )
+                )
+            ).scalar_one()
             file_records = (
                 await db.execute(
                     select(File)
@@ -1796,10 +1873,20 @@ async def tool_scan_input_folder(
                         File.file_type.in_(["pdf", "markdown"]),
                     )
                     .order_by(File.original_name.asc())
-                    .limit(max(1, min(max_files, 100)))
+                    .offset(offset)
+                    .limit(batch_size)
                 )
             ).scalars().all()
         else:
+            total_available = (
+                await db.execute(
+                    select(func.count(File.id)).where(
+                        File.owner_user_id == user.id,
+                        File.batch_id == input_batch_id,
+                        File.file_type.in_(["pdf", "markdown"]),
+                    )
+                )
+            ).scalar_one()
             file_records = (
                 await db.execute(
                     select(File)
@@ -1809,7 +1896,8 @@ async def tool_scan_input_folder(
                         File.file_type.in_(["pdf", "markdown"]),
                     )
                     .order_by(File.original_name.asc())
-                    .limit(max(1, min(max_files, 100)))
+                    .offset(offset)
+                    .limit(batch_size)
                 )
             ).scalars().all()
         scanned_count = len(file_records)
@@ -1835,7 +1923,9 @@ async def tool_scan_input_folder(
         input_folder = Path(input_folder_path)
         if not input_folder.exists() or not input_folder.is_dir():
             return {"error": "input_folder_missing", "path": input_folder_path}
-        path_files = _collect_folder_files(input_folder, recursive, max_files)
+        all_path_files = _list_folder_files(input_folder, recursive)
+        total_available = len(all_path_files)
+        path_files = all_path_files[offset: offset + batch_size]
         scanned_count = len(path_files)
         for index, source_path in enumerate(path_files, start=1):
             try:
@@ -1959,6 +2049,12 @@ async def tool_scan_input_folder(
             }
         )
 
+    scan_plan = _build_scan_plan(
+        total_available=int(total_available or 0),
+        offset=offset,
+        batch_size=batch_size,
+        scanned=scanned_count,
+    )
     summary = _summarize_scan_result(
         source=source_label,
         topic=topic,
@@ -1966,6 +2062,7 @@ async def tool_scan_input_folder(
         rows=rows,
         skipped=skipped,
         input_batch_id=input_batch_id,
+        scan_plan=scan_plan,
     )
 
     return {
@@ -1973,6 +2070,9 @@ async def tool_scan_input_folder(
         "input_batch_id": input_batch_id,
         "source": source_label,
         "topic": topic,
+        "offset": offset,
+        "batch_size": batch_size,
+        "total_available": int(total_available or 0),
         "scanned": scanned_count,
         "count": len(rows),
         "relevant_count": sum(1 for row in rows if row["relevant"]),
@@ -1984,6 +2084,7 @@ async def tool_scan_input_folder(
         },
         "papers": rows,
         "skipped": skipped,
+        "scan_plan": scan_plan,
         "summary": summary,
         "note": "这是只读清单；在线版扫描的是已上传到 AI 助手 inbox 的文件夹批次，未启动精读任务。",
     }
@@ -1998,6 +2099,7 @@ async def tool_import_folder_and_start_reading(
     mode: str,
     recursive: bool = False,
     max_files: int = 30,
+    offset: int = 0,
     confidence_threshold: float = 0.55,
     conflict_resolution: str = "skip",
     analysis_dims: list[str] | None = None,
@@ -2013,6 +2115,7 @@ async def tool_import_folder_and_start_reading(
         topic=topic,
         recursive=recursive,
         max_files=max_files,
+        offset=offset,
         confidence_threshold=confidence_threshold,
     )
     if scan.get("error"):
@@ -2160,7 +2263,8 @@ async def execute_tool(
             api_key=api_key,
             topic=args.get("topic", "*"),
             recursive=bool(args.get("recursive", False)),
-            max_files=int(args.get("max_files") or 50),
+            max_files=int(args.get("max_files") or AGENT_SCAN_DEFAULT_BATCH_SIZE),
+            offset=int(args.get("offset") or 0),
             confidence_threshold=float(args.get("confidence_threshold") or 0.55),
         )
         preview = {
@@ -2223,6 +2327,8 @@ def build_messages(
                 "这两个工具返回的是临时 P3 线索和 open_urls，前端会协助批量打开新标签页；不得声称这些结果已经保存进数据库。"
                 "写库、启动任务、应用在线匹配等动作必须走 proposal，不得在普通回答中假装已经执行。"
                 "limit_entries 参数：默认搜索全部文献（limit_entries=0）。如需缩小范围可设 limit_entries>0。"
+                "For scan_input_folder, if scan_plan.has_next_batch is true, settle a short working note for the current batch, "
+                "then continue with scan_input_folder using scan_plan.next_offset before producing the final complete result."
             ),
         }
     )

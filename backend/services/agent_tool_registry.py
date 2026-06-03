@@ -276,6 +276,7 @@ AGENT_TOOLS = [
         description=(
             "Read-only scan of the user's uploaded AI assistant inbox batch and compare it with the user's library. "
             "Use this when the user asks to see, list, inspect, or tabulate papers. "
+            "Use offset to continue the next batch after settling working notes. "
             "This never imports files and never starts reading jobs."
         ),
         permission="read_local",
@@ -284,7 +285,8 @@ AGENT_TOOLS = [
             {
                 "topic": {"type": "string"},
                 "recursive": {"type": "boolean"},
-                "max_files": {"type": "integer", "minimum": 1, "maximum": 100},
+                "max_files": {"type": "integer", "minimum": 1, "maximum": 500},
+                "offset": {"type": "integer", "minimum": 0},
                 "confidence_threshold": {"type": "number", "minimum": 0, "maximum": 1},
             }
         ),
@@ -304,7 +306,8 @@ AGENT_TOOLS = [
                 "topic": {"type": "string"},
                 "mode": {"type": "string", "enum": ["quant", "qual", "long"]},
                 "recursive": {"type": "boolean"},
-                "max_files": {"type": "integer", "minimum": 1, "maximum": 100},
+                "max_files": {"type": "integer", "minimum": 1, "maximum": 500},
+                "offset": {"type": "integer", "minimum": 0},
                 "confidence_threshold": {"type": "number", "minimum": 0, "maximum": 1},
                 "conflict_resolution": {
                     "type": "string",

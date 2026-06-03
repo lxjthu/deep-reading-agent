@@ -8,6 +8,7 @@ from copy import deepcopy
 from typing import Any
 
 from backend.services.agent_errors import RuntimeNoticeCode
+from backend.services.research_sufficiency import assess_evidence_sufficiency
 
 
 CONTINUATION_PATTERNS = (
@@ -824,6 +825,13 @@ def normalize_tool_args(
             normalized["max_entries"] = max(0, min(int(raw_max_entries), 2000))
         return normalized
 
+    if name in {"scan_input_folder", "import_folder_and_start_reading"}:
+        if not str(normalized.get("topic") or "").strip():
+            normalized["topic"] = "*"
+        normalized["max_files"] = max(1, min(int(normalized.get("max_files") or 100), 500))
+        normalized["offset"] = max(0, int(normalized.get("offset") or 0))
+        return normalized
+
     if name in ENTRY_ID_TOOLS:
         resolved_ids = _entry_ids_from_context(resolved_context)
         explicit_ids = [str(item) for item in (normalized.get("entry_ids") or []) if item]
@@ -1146,6 +1154,12 @@ def update_state_after_tool(
             "entries": refs,
             "tier_summary": tier_counts,
         }
+        next_state["last_sufficiency"] = assess_evidence_sufficiency(
+            result,
+            user_requested_external=bool(
+                (next_state.get("active_task_frame") or {}).get("user_requested_external")
+            ),
+        )
 
     if name in {"analyze_reading_candidates", "filter_analysis_cache"}:
         working_notes = result.get("working_notes") or []
@@ -1189,6 +1203,7 @@ def summarize_state_for_ui(state: dict[str, Any] | None) -> dict[str, Any]:
     last_runtime_notice = state.get("last_runtime_notice") or {}
     last_stop_summary = state.get("last_stop_summary") or {}
     last_agent_error = state.get("last_agent_error") or {}
+    last_sufficiency = state.get("last_sufficiency") or {}
     last_scan = state.get("last_scan") or {}
     working_notes = state.get("working_notes") or []
     last_analysis_summary = state.get("last_analysis_summary") or {}
@@ -1217,6 +1232,7 @@ def summarize_state_for_ui(state: dict[str, Any] | None) -> dict[str, Any]:
         "last_runtime_notice": last_runtime_notice if last_runtime_notice else None,
         "last_stop_summary": last_stop_summary if last_stop_summary else None,
         "last_agent_error": last_agent_error if last_agent_error else None,
+        "last_sufficiency": last_sufficiency if last_sufficiency else None,
         "last_scan_summary": (
             {
                 "source": (last_scan.get("summary") or {}).get("source"),
@@ -1229,6 +1245,7 @@ def summarize_state_for_ui(state: dict[str, Any] | None) -> dict[str, Any]:
                 "skipped_count": (last_scan.get("summary") or {}).get("skipped_count"),
                 "skipped_reasons": (last_scan.get("summary") or {}).get("skipped_reasons") or {},
                 "skipped_examples": ((last_scan.get("summary") or {}).get("skipped_examples") or [])[:5],
+                "scan_plan": (last_scan.get("summary") or {}).get("scan_plan") or {},
                 "recommendations": (last_scan.get("summary") or {}).get("recommendations") or [],
             }
             if (last_scan.get("summary") or {})

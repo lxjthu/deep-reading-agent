@@ -3887,6 +3887,14 @@ type AgentSessionState = {
     count?: number
     tier_summary?: Record<string, number>
   } | null
+  last_sufficiency?: {
+    status?: string
+    can_answer?: boolean
+    needs_external_consent?: boolean
+    evidence_count?: number
+    tier_summary?: Record<string, number>
+    message?: string
+  } | null
   budget_snapshot?: {
     tool_counts?: Record<string, number>
     empty_tool_counts?: Record<string, number>
@@ -3906,6 +3914,17 @@ type AgentSessionState = {
     skipped_count?: number
     skipped_reasons?: Record<string, number>
     skipped_examples?: Array<{ filename?: string; reason?: string; message?: string }>
+    scan_plan?: {
+      batch_size?: number
+      offset?: number
+      next_offset?: number | null
+      processed_total?: number
+      total_available?: number
+      remaining_count?: number
+      has_next_batch?: boolean
+      next_tool?: string | null
+      workflow_steps?: string[]
+    }
     recommendations?: string[]
   } | null
   working_notes?: AgentWorkingNote[]
@@ -3978,6 +3997,46 @@ function isAgentStructuredError(value: unknown): value is AgentStructuredError {
     || typeof value.message === 'string'
     || typeof value.stage === 'string'
   )
+}
+
+function getSufficiencyTitle(status?: string) {
+  if (status === 'sufficient') return '证据充分'
+  if (status === 'p2_only') return '主要依据 AI 笔记'
+  if (status === 'needs_external_consent') return '需要联网授权'
+  if (status === 'external_only') return '仅有外部线索'
+  if (status === 'insufficient') return '证据不足'
+  return '证据状态'
+}
+
+function getSufficiencyStyle(status?: string) {
+  if (status === 'sufficient') return {
+    border: 'border-emerald-200',
+    bg: 'bg-emerald-50/70',
+    text: 'text-emerald-900',
+    badge: 'border-emerald-200 bg-white text-emerald-700',
+    bar: 'bg-emerald-600',
+  }
+  if (status === 'needs_external_consent') return {
+    border: 'border-amber-200',
+    bg: 'bg-amber-50/80',
+    text: 'text-amber-900',
+    badge: 'border-amber-200 bg-white text-amber-700',
+    bar: 'bg-amber-500',
+  }
+  if (status === 'p2_only') return {
+    border: 'border-violet-200',
+    bg: 'bg-violet-50/70',
+    text: 'text-violet-900',
+    badge: 'border-violet-200 bg-white text-violet-700',
+    bar: 'bg-violet-500',
+  }
+  return {
+    border: 'border-gray-200',
+    bg: 'bg-gray-50',
+    text: 'text-gray-900',
+    badge: 'border-gray-200 bg-white text-gray-700',
+    bar: 'bg-gray-400',
+  }
 }
 
 function getAgentErrorTitle(error: AgentStructuredError, fallback = '错误'): string {
@@ -4375,6 +4434,55 @@ function AgentRuntimeNoticeCard({ notice }: { notice: AgentRuntimeNotice }) {
   )
 }
 
+function AgentSufficiencyCard({ sufficiency }: { sufficiency: NonNullable<AgentSessionState['last_sufficiency']> }) {
+  const style = getSufficiencyStyle(sufficiency.status)
+  const tierSummary = sufficiency.tier_summary || {}
+  const tiers = ['P0', 'P1', 'P2', 'P3']
+  const evidenceCount = typeof sufficiency.evidence_count === 'number'
+    ? sufficiency.evidence_count
+    : tiers.reduce((sum, tier) => sum + (tierSummary[tier] || 0), 0)
+
+  return (
+    <div className={`rounded-lg border ${style.border} ${style.bg} p-4 shadow-sm`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className={`text-sm font-semibold ${style.text}`}>{getSufficiencyTitle(sufficiency.status)}</div>
+          <div className="mt-1 text-sm text-gray-700">
+            {sufficiency.message || '最近一次证据包已完成质量判断。'}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${style.badge}`}>
+            {sufficiency.can_answer ? '可回答' : '先别回答'}
+          </span>
+          {sufficiency.needs_external_consent && (
+            <span className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-xs font-medium text-amber-700">
+              需授权
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        {tiers.map((tier) => {
+          const count = tierSummary[tier] || 0
+          const width = evidenceCount > 0 ? Math.max(8, Math.round((count / evidenceCount) * 100)) : 0
+          return (
+            <div key={tier} className="rounded-md border border-white/70 bg-white p-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-gray-700">{tier}</span>
+                <span className="text-gray-500">{count}</span>
+              </div>
+              <div className="mt-2 h-1.5 rounded-full bg-gray-100">
+                <div className={`h-1.5 rounded-full ${style.bar}`} style={{ width: `${width}%` }} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function AgentInboxSummaryCard({ summary }: { summary: AgentInboxUploadSummary }) {
   const errorEntries = Object.entries(summary.error_counts || {})
   const failedExamples = summary.failed_examples || []
@@ -4643,6 +4751,7 @@ function AgentScanSummaryCard({ summary }: { summary: NonNullable<AgentSessionSt
   const skippedReasonEntries = Object.entries(summary.skipped_reasons || {})
   const skippedExamples = summary.skipped_examples || []
   const recommendations = summary.recommendations || []
+  const scanPlan = summary.scan_plan || {}
   const sourceLabel = summary.source === 'upload_batch'
     ? '已上传批次'
     : summary.source === 'server_folder'
@@ -4670,6 +4779,24 @@ function AgentScanSummaryCard({ summary }: { summary: NonNullable<AgentSessionSt
         <div className="rounded-md border border-violet-100 bg-white p-3">相关文献：{summary.relevant_count ?? 0}</div>
         <div className="rounded-md border border-violet-100 bg-white p-3">跳过文件：{summary.skipped_count ?? 0}</div>
       </div>
+      {typeof scanPlan.total_available === 'number' && (
+        <div className="rounded-md border border-violet-100 bg-white p-3 text-xs text-gray-700">
+          <div className="font-semibold text-violet-900">Batch workflow</div>
+          <div className="mt-1">
+            Processed {scanPlan.processed_total ?? 0}/{scanPlan.total_available ?? 0}
+            {scanPlan.has_next_batch && typeof scanPlan.next_offset === 'number'
+              ? `; next offset ${scanPlan.next_offset}`
+              : '; all batches scanned'}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(scanPlan.workflow_steps || []).map((step) => (
+              <span key={step} className="rounded-full border border-violet-100 bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">
+                {step}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       {libraryEntries.length > 0 && (
         <div>
           <div className="mb-1 text-xs font-semibold text-gray-500">文献库映射</div>
@@ -5342,6 +5469,9 @@ function AgentTab({ apiKey }: { apiKey: string }) {
           )}
           {sessionState?.last_stop_summary && (
             <AgentRuntimeNoticeCard notice={sessionState.last_stop_summary} />
+          )}
+          {sessionState?.last_sufficiency && (
+            <AgentSufficiencyCard sufficiency={sessionState.last_sufficiency} />
           )}
           {sessionState?.last_scan_summary && (
             <AgentScanSummaryCard summary={sessionState.last_scan_summary} />
