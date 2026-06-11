@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Deep Reading Agent normal-user cleanup every midnight (Asia/Shanghai)
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 Asia/Shanghai
+Persistent=true
+Unit=deepreading-cleanup-normal-users.service
+
+[Install]
+WantedBy=timers.target

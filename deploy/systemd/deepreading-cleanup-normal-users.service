@@ -1,0 +1,15 @@
+[Unit]
+Description=Deep Reading Agent normal-user midnight cleanup
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/deep-reading-agent/backend
+EnvironmentFile=/root/deep-reading-agent/.env.production
+ExecStart=/root/deep-reading-agent/venv/bin/python -m scripts.run_cleanup_normal_users --no-dry-run
+StandardOutput=append:/var/log/deepreading/cleanup-runner.log
+StandardError=append:/var/log/deepreading/cleanup-runner-error.log
+
+[Install]
+WantedBy=multi-user.target
