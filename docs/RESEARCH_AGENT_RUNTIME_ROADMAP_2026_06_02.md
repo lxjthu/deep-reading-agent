@@ -26,9 +26,11 @@ Still incomplete:
 
 - No explicit state machine. `agent_chat` still loops over LLM tool calls directly.
 - Sufficiency is not yet enforced as a required runtime transition; natural evidence questions can still route through `research_search` without producing `last_sufficiency`.
+- Focused evidence packs can already include `reading_source_evidence`, but the internal ordering still needs an explicit policy so validated original-text snippets appear ahead of title/abstract or AI-note matches.
 - No durable external consent ticket.
 - Result sets are useful but not complete enough for named sets and stable follow-up references.
 - Compare, synthesis, translation, references, cards, and annotations are not fully covered as runtime tools.
+- Writing-style questions such as "analyze this author's introduction style" or "analyze this journal's theory-derivation style" do not yet have a dedicated original-passage retrieval tool.
 - Agent tests now cover the Phase 1/1.5 pure modules and narrow runtime wiring, but the Phase 2 state machine still needs its own test suite.
 
 ## 3. Product Rules
@@ -168,6 +170,7 @@ Tool families:
 - References and citation evidence read tools.
 - Cards and annotations read/proposal tools.
 - Dimension-set read tools.
+- Writing-style analysis read tool: retrieve original introduction/theory/method passages by author, journal, or selected paper, then let the assistant synthesize reusable style patterns and imitation guidance from those passages.
 
 Acceptance:
 
@@ -192,6 +195,23 @@ Phase 1.5:
 4. Keep actual note synthesis on the existing `working_notes` / `analyze_reading_candidates` path, while making scan batches declare when the agent must continue before finalizing.
 
 These slices are intentionally small. They give the next state-machine work tested decision objects without disturbing the production chat loop yet.
+
+## 5.5 Planned Follow-Up Slices
+
+2026-06-12:
+
+- Evidence-pack ranking: keep the existing P0/P1/P2/P3 rule, but within the same tier rank validated `reading_source_evidence` before title, abstract, and AI reading-note matches. This is especially important after a paper has been deeply read, because focused follow-up questions should see original source snippets first.
+- Evidence-pack observability: add `source_kind_summary` and `table_summary` to `get_evidence_pack` results so the runtime and UI can explain how many items came from original-text evidence, metadata, notes, references, or other sources.
+- Writing-style analysis: add a read-only AI assistant tool, tentatively `analyze_writing_style`, for requests such as "analyze XX author's introduction writing style" or "analyze XX journal papers' theory-derivation style." The tool should extract relevant original sections from local source text, return concise original-passage evidence, and leave the final synthesis to the assistant.
+- Scope guardrails: this slice should not add embeddings, vector storage, online retrieval, or write operations. It should reuse local PostgreSQL search, existing source files, and the newly stored source evidence where useful.
+
+Acceptance:
+
+- For a focused read-paper evidence question, P0 `source_evidence` appears before P0 metadata and P2 AI notes in the returned evidence pack.
+- For a writing-style request, the assistant calls the style retrieval tool and cites returned original passages before distilling style patterns.
+- If original sections cannot be found locally, the tool returns a clear limitation instead of inventing examples.
+
+Detailed plan: `docs/superpowers/plans/2026-06-12-agent-evidence-ranking-and-writing-style-analysis.md`.
 
 ## 6. Deployment and Verification Notes
 

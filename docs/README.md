@@ -1,7 +1,7 @@
 # docs 目录索引
 
 > 本文档列出 `docs/` 下所有文档及其用途，方便快速查找。
-> 最后更新：2026-06-03
+> 最后更新：2026-06-12
 
 ---
 
@@ -123,6 +123,7 @@
 | [superpowers/plans/2026-05-26-batch-reading-concurrency-and-asyncpg.md](superpowers/plans/2026-05-26-batch-reading-concurrency-and-asyncpg.md) | 批量精读并发与 asyncpg 稳定性修复计划 | 新 PostgreSQL 服务器批量长文本精读进度 500、连接池跨 event loop 和并发限流问题 |
 | [superpowers/plans/2026-05-26-quant-qual-concurrency-reuse-long-fix.md](superpowers/plans/2026-05-26-quant-qual-concurrency-reuse-long-fix.md) | 七步/四步精读并发复用长文本修复计划 | 为七步和四步精读增加显式内层并发配置，复用新服务器稳定并发方案 |
 | [superpowers/plans/2026-05-26-library-existing-files-start-reading.md](superpowers/plans/2026-05-26-library-existing-files-start-reading.md) | 文献库已有文件直接发起精读计划 | 从文献库多选已有 PDF/Markdown 文献并直接启动长文本/七步/四步精读，含 AI 助手入口 |
+| [superpowers/plans/2026-06-12-agent-evidence-ranking-and-writing-style-analysis.md](superpowers/plans/2026-06-12-agent-evidence-ranking-and-writing-style-analysis.md) | AI 助手 evidence 排序与原文写作风格分析计划 | 调整 evidence pack 排序，新增作者/期刊引言写作风格、理论推导风格的原文片段检索与蒸馏工具 |
 
 ---
 

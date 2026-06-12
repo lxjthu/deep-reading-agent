@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -803,6 +804,76 @@ class ReadingItemEdit(Base):
 
 Index("idx_rie_reading_item", ReadingItemEdit.reading_item_id)
 Index("idx_rie_owner", ReadingItemEdit.owner_user_id)
+
+
+class ReadingSourceEvidence(Base):
+    """Validated original-text evidence extracted during reading."""
+    __tablename__ = "reading_source_evidence"
+    __table_args__ = (
+        CheckConstraint(
+            "source_version IN ('original','translated')",
+            name="ck_rse_source_version",
+        ),
+        CheckConstraint(
+            "source_tier IN ('P0','P1','P2','P3')",
+            name="ck_rse_source_tier",
+        ),
+        CheckConstraint(
+            "validation_status IN ('exact','fuzzy','unmatched')",
+            name="ck_rse_validation_status",
+        ),
+        UniqueConstraint("reading_item_id", "quote_hash", name="uq_rse_item_quote"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    bib_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("bib_entries.id", ondelete="CASCADE"), nullable=False
+    )
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    reading_item_id: Mapped[int] = mapped_column(
+        ForeignKey("reading_items.id", ondelete="CASCADE"), nullable=False
+    )
+    source_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("files.id"), nullable=True)
+    source_version: Mapped[str] = mapped_column(
+        String, nullable=False, default="original", server_default="original"
+    )
+    source_tier: Mapped[str] = mapped_column(
+        String, nullable=False, default="P0", server_default="P0"
+    )
+    validation_status: Mapped[str] = mapped_column(String, nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    item_key: Mapped[str] = mapped_column(String, nullable=False)
+    item_label: Mapped[str] = mapped_column(String, nullable=False)
+    evidence_role: Mapped[str] = mapped_column(
+        String, nullable=False, default="support", server_default="support"
+    )
+    claim_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    quote_text: Mapped[str] = mapped_column(Text, nullable=False)
+    quote_hash: Mapped[str] = mapped_column(String, nullable=False)
+    page_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    section_hint: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    heading_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    char_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    char_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    match_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+Index("idx_rse_owner", ReadingSourceEvidence.owner_user_id)
+Index("idx_rse_bib", ReadingSourceEvidence.bib_entry_id)
+Index("idx_rse_job", ReadingSourceEvidence.job_id)
+Index("idx_rse_item", ReadingSourceEvidence.reading_item_id)
+Index("idx_rse_tier_status", ReadingSourceEvidence.source_tier, ReadingSourceEvidence.validation_status)
+Index("idx_rse_expires", ReadingSourceEvidence.expires_at)
 
 
 class Annotation(Base):

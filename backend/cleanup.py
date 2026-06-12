@@ -29,6 +29,7 @@ from db.models import (
     PromptTemplate,
     ReadingItem,
     ReadingItemEdit,
+    ReadingSourceEvidence,
     RefFormatPreset,
     UploadBatch,
     UserFeedback,
@@ -90,7 +91,7 @@ async def reapply_user_retention(
 ) -> datetime | None:
     """Recompute expires_at for all user-owned records after a role change."""
     expires_at = compute_expires_at_for_role(role, now)
-    for model in (UploadBatch, File, BibEntry, Job, Artifact, CardNote):
+    for model in (UploadBatch, File, BibEntry, Job, Artifact, CardNote, ReadingSourceEvidence):
         await db.execute(
             update(model)
             .where(model.owner_user_id == user_id)
@@ -170,6 +171,7 @@ async def _cleanup_with_session(
         "dry_run": dry_run,
         "artifacts_deleted": 0,
         "card_notes_deleted": 0,
+        "reading_source_evidence_deleted": 0,
         "jobs_deleted": 0,
         "bib_entries_deleted": 0,
         "files_deleted": 0,
@@ -213,6 +215,19 @@ async def _cleanup_with_session(
         await db.delete(card)
         stats["card_notes_deleted"] += 1
 
+    expired_source_evidence = (
+        await db.execute(
+            select(ReadingSourceEvidence).where(
+                ReadingSourceEvidence.expires_at.is_not(None),
+                ReadingSourceEvidence.expires_at <= now,
+            )
+        )
+    ).scalars().all()
+    for evidence in expired_source_evidence:
+        if not dry_run:
+            await db.delete(evidence)
+        stats["reading_source_evidence_deleted"] += 1
+
     expired_jobs = (
         await db.execute(
             select(Job).where(Job.expires_at.is_not(None), Job.expires_at <= now)
@@ -233,6 +248,7 @@ async def _cleanup_with_session(
             await db.execute(sa_delete(ReadingItemEdit).where(ReadingItemEdit.reading_item_id.in_(
                 select(ReadingItem.id).where(ReadingItem.bib_entry_id == bib.id)
             )))
+            await db.execute(sa_delete(ReadingSourceEvidence).where(ReadingSourceEvidence.bib_entry_id == bib.id))
             await db.execute(sa_delete(Annotation).where(Annotation.bib_entry_id == str(bib.id)))
             await db.execute(sa_delete(ReadingItem).where(ReadingItem.bib_entry_id == bib.id))
             await db.delete(bib)
@@ -325,6 +341,7 @@ async def _cleanup_normal_with_session(
         "bib_cross_links_cleared": 0,
         "job_links_cleared": 0,
         "card_links_cleared": 0,
+        "reading_source_evidence_deleted": 0,
         "reading_items_deleted": 0,
         "reading_item_edits_deleted": 0,
         "annotations_deleted": 0,
@@ -439,6 +456,12 @@ async def _cleanup_normal_with_session(
     )
     stats["annotations_deleted"] = await _scalar_count(
         db, select(func.count()).select_from(Annotation).where(Annotation.owner_user_id.in_(normal_user_ids))
+    )
+    stats["reading_source_evidence_deleted"] = await _scalar_count(
+        db,
+        select(func.count()).select_from(ReadingSourceEvidence).where(
+            ReadingSourceEvidence.owner_user_id.in_(normal_user_ids)
+        ),
     )
     stats["reading_items_deleted"] = await _scalar_count(
         db, select(func.count()).select_from(ReadingItem).where(ReadingItem.owner_user_id.in_(normal_user_ids))
@@ -564,6 +587,7 @@ async def _cleanup_normal_with_session(
             )
         )
         await db.execute(sa_delete(ReadingItemEdit).where(ReadingItemEdit.owner_user_id.in_(normal_user_ids)))
+        await db.execute(sa_delete(ReadingSourceEvidence).where(ReadingSourceEvidence.owner_user_id.in_(normal_user_ids)))
         await db.execute(sa_delete(Annotation).where(Annotation.owner_user_id.in_(normal_user_ids)))
         await db.execute(sa_delete(ReadingItem).where(ReadingItem.owner_user_id.in_(normal_user_ids)))
         await db.execute(sa_delete(CardNote).where(CardNote.owner_user_id.in_(normal_user_ids)))
@@ -582,6 +606,7 @@ async def _cleanup_normal_with_session(
         "sessions={agent_sessions_deleted} messages={agent_messages_deleted} "
         "proposals={agent_action_proposals_deleted} refs={bib_references_deleted} "
         "ref_citations={bib_reference_citations_deleted} "
+        "source_evidence={reading_source_evidence_deleted} "
         "artifacts={artifacts_deleted} jobs={jobs_deleted} bib_entries={bib_entries_deleted} "
         "files={files_deleted} batches={upload_batches_deleted} physical_files={physical_files_deleted} "
         "empty_dirs={empty_dirs_deleted}"

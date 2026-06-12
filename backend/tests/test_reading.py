@@ -35,7 +35,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from db import Base, SYNC_DATABASE_URL, engine as async_engine  # noqa: E402
-from db.models import Artifact, BibEntry, File, Job, JobBibEntry, ReadingItem  # noqa: E402
+from db.models import Artifact, BibEntry, File, Job, JobBibEntry, ReadingItem, ReadingSourceEvidence  # noqa: E402
 from routers import auth as auth_router  # noqa: E402
 from routers import reading as reading_router  # noqa: E402
 from routers import upload as upload_router  # noqa: E402
@@ -201,6 +201,24 @@ class ReadingRouterTests(unittest.TestCase):
                 user_id,
                 [{"artifact_type": "reading_final", "absolute_path": report_path}],
                 reading_items=reading_router.build_long_reading_items(results),
+                source_evidence_by_item_key={
+                    "long.research_question": [
+                        {
+                            "source_tier": "P0",
+                            "validation_status": "exact",
+                            "evidence_role": "finding",
+                            "claim_text": "论文回答了核心研究问题。",
+                            "quote_text": "This exact original passage supports the research question.",
+                            "quote_hash": "long-research-question-source-hash",
+                            "section_hint": "Introduction",
+                            "page_label": "1",
+                            "char_start": 0,
+                            "char_end": 57,
+                            "match_score": 1.0,
+                            "metadata": {"model_confidence": "high"},
+                        }
+                    ]
+                },
             )
         )
         reading_router.task_queue.mark_completed(task_id)
@@ -462,6 +480,22 @@ class ReadingRouterTests(unittest.TestCase):
             self.assertEqual(items[0].section_type, "dimension")
             self.assertEqual(items[0].item_key, "long.research_question")
             self.assertEqual(items[1].item_key, "long.theory_framework")
+
+    def test_long_writes_source_evidence_for_reading_item(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+        payload = self.upload_pdf(headers)
+        started = self.start_long(headers, payload["file_id"])
+
+        with Session(self.sync_engine) as session:
+            evidence = session.execute(
+                select(ReadingSourceEvidence).where(ReadingSourceEvidence.job_id == started["task_id"])
+            ).scalars().all()
+            self.assertEqual(len(evidence), 1)
+            self.assertEqual(evidence[0].source_tier, "P0")
+            self.assertEqual(evidence[0].validation_status, "exact")
+            self.assertEqual(evidence[0].item_key, "long.research_question")
+            self.assertIn("research question", evidence[0].quote_text)
 
     def test_quant_writes_step_and_subquestion_reading_items(self) -> None:
         self.register("alice", "pwd12345")

@@ -7,7 +7,7 @@ import uuid
 import threading
 import re
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from services.deepseek_limiter import deepseek_semaphore
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import current_user
 from db import AsyncSessionLocal, get_db
-from db.models import Artifact, BibEntry, BibReference, File, Job, JobBibEntry, ReadingItem, User
+from db.models import Artifact, BibEntry, BibReference, File, Job, JobBibEntry, ReadingItem, ReadingSourceEvidence, User
 from db.utils import compute_dedup_key, title_match_score
 from backend.routers.metadata_extractor import build_frontmatter
 from services.pdf_metadata_extract import extract_front_matter
@@ -35,6 +35,7 @@ from prompt_service import get_effective_prompt_map
 from result_storage import build_result_storage_path, get_results_root, resolve_result_path
 from upload_storage import lookup_original_name, lookup_path_by_file_id
 from services.queue_manager import task_queue
+from services.reading_source_evidence import validate_source_evidence_candidates
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -55,9 +56,6 @@ def _parse_positive_int(raw: object, default: int) -> int:
 
 
 READING_FILE_CONCURRENCY = _parse_positive_int(os.getenv("READING_FILE_CONCURRENCY"), 3)
-LONG_DIMENSION_CONCURRENCY = _parse_positive_int(os.getenv("LONG_DIMENSION_CONCURRENCY"), 6)
-QUANT_STEP_CONCURRENCY = _parse_positive_int(os.getenv("QUANT_STEP_CONCURRENCY"), 4)
-QUAL_STEP_CONCURRENCY = _parse_positive_int(os.getenv("QUAL_STEP_CONCURRENCY"), 3)
 reading_file_semaphore = threading.BoundedSemaphore(READING_FILE_CONCURRENCY)
 
 LONG_DIMENSION_KEYS = {
@@ -567,6 +565,7 @@ async def cleanup_old_reading_data(db: AsyncSession, bib_entry: BibEntry, job_ty
                     except OSError:
                         pass
         await db.execute(delete(Artifact).where(Artifact.job_id.in_(old_job_ids)))
+        await db.execute(delete(ReadingSourceEvidence).where(ReadingSourceEvidence.job_id.in_(old_job_ids)))
         await db.execute(delete(ReadingItem).where(ReadingItem.job_id.in_(old_job_ids)))
         await db.execute(delete(JobBibEntry).where(JobBibEntry.job_id.in_(old_job_ids)))
         await db.execute(delete(Job).where(Job.id.in_(old_job_ids)))
@@ -580,6 +579,7 @@ async def cleanup_old_reading_data(db: AsyncSession, bib_entry: BibEntry, job_ty
     ).scalars().all()
 
     if not remaining_jobs:
+        await db.execute(delete(ReadingSourceEvidence).where(ReadingSourceEvidence.bib_entry_id == bib_entry.id))
         await db.execute(delete(ReadingItem).where(ReadingItem.bib_entry_id == bib_entry.id))
         bib_entry.reading_status = "has_pdf"
     await db.flush()
@@ -600,6 +600,35 @@ def init_task_payload(task_id: str, task_type: str, user_id: int, file_id: str, 
         "error": None,
         "created_at": utcnow_naive(),
     }
+
+
+def _collect_latest_source_evidence(engine, paper_text: str) -> list[dict]:
+    if not getattr(engine, "results", None):
+        return []
+    latest = engine.results[-1]
+    candidates = getattr(latest, "source_evidence", None) or []
+    if not candidates:
+        return []
+    return validate_source_evidence_candidates(candidates, paper_text=paper_text)
+
+
+def _map_source_evidence_to_item_keys(
+    reading_items: list[dict],
+    source_evidence_by_label: dict[str, list[dict]],
+) -> dict[str, list[dict]]:
+    if not source_evidence_by_label:
+        return {}
+    mapped: dict[str, list[dict]] = {}
+    for item in reading_items:
+        if item.get("parent_key"):
+            continue
+        records = (
+            source_evidence_by_label.get(item["item_key"])
+            or source_evidence_by_label.get(item["item_label"])
+        )
+        if records:
+            mapped[item["item_key"]] = records
+    return mapped
 
 
 async def sync_job_and_bib_start(task_id: str, bib_entry_id: str, *, stage: str, progress: int) -> None:
@@ -624,6 +653,7 @@ async def finalize_reading_success(
     user_id: int,
     artifact_files: list[dict],
     reading_items: Optional[list[dict]] = None,
+    source_evidence_by_item_key: Optional[dict[str, list[dict]]] = None,
 ) -> None:
     async with AsyncSessionLocal() as db:
         job = await db.get(Job, task_id)
@@ -646,21 +676,54 @@ async def finalize_reading_success(
             )
             db.add(artifact)
 
+        evidence_by_item_key = source_evidence_by_item_key or {}
+        expires_at = compute_expires_at(owner)
         for item in reading_items or []:
-            db.add(
-                ReadingItem(
-                    owner_user_id=user_id,
-                    bib_entry_id=bib_entry_id,
-                    job_id=task_id,
-                    mode=item["mode"],
-                    section_type=item["section_type"],
-                    parent_key=item.get("parent_key"),
-                    item_key=item["item_key"],
-                    item_label=item["item_label"],
-                    sort_order=item.get("sort_order", 0),
-                    content=item["content"],
-                )
+            reading_item = ReadingItem(
+                owner_user_id=user_id,
+                bib_entry_id=bib_entry_id,
+                job_id=task_id,
+                mode=item["mode"],
+                section_type=item["section_type"],
+                parent_key=item.get("parent_key"),
+                item_key=item["item_key"],
+                item_label=item["item_label"],
+                sort_order=item.get("sort_order", 0),
+                content=item["content"],
             )
+            db.add(reading_item)
+            records = evidence_by_item_key.get(item["item_key"]) or []
+            if not records:
+                continue
+            await db.flush()
+            for record in records:
+                db.add(
+                    ReadingSourceEvidence(
+                        owner_user_id=user_id,
+                        bib_entry_id=bib_entry_id,
+                        job_id=task_id,
+                        reading_item_id=reading_item.id,
+                        source_file_id=job.input_file_id,
+                        source_version="original",
+                        source_tier=record.get("source_tier") or "P2",
+                        validation_status=record.get("validation_status") or "unmatched",
+                        mode=item["mode"],
+                        item_key=item["item_key"],
+                        item_label=item["item_label"],
+                        evidence_role=record.get("evidence_role") or "support",
+                        claim_text=record.get("claim_text") or None,
+                        quote_text=record["quote_text"],
+                        quote_hash=record["quote_hash"],
+                        page_label=record.get("page_label"),
+                        section_hint=record.get("section_hint") or None,
+                        heading_path=record.get("heading_path") or None,
+                        char_start=record.get("char_start"),
+                        char_end=record.get("char_end"),
+                        match_score=record.get("match_score"),
+                        metadata_json=json.dumps(record.get("metadata") or {}, ensure_ascii=False),
+                        expires_at=expires_at,
+                    )
+                )
 
         job.status = "success"
         job.progress = 100
@@ -994,6 +1057,28 @@ def _is_empty_result(content: str, min_chars: int = 50) -> bool:
     return False
 
 
+def _run_units_serially(
+    units,
+    analyze_one,
+    *,
+    on_progress=None,
+    should_cancel=None,
+):
+    results = {}
+    total = len(units)
+    for done_count, unit in enumerate(units, start=1):
+        if should_cancel and should_cancel():
+            return results, True
+        key, answer, err = analyze_one(unit)
+        if err == "cancelled":
+            return results, True
+        if answer is not None:
+            results[key] = answer
+        if on_progress:
+            on_progress(done_count, total, key, err)
+    return results, False
+
+
 def _check_and_retry_empty_dimensions(
     results: dict[str, str],
     task_id: str,
@@ -1008,30 +1093,23 @@ def _check_and_retry_empty_dimensions(
             f"[后检查] 第 {attempt} 次重试：{len(empty_keys)} 个维度需要重新分析"
         )
 
-        def _retry_one(key):
+        for key in empty_keys:
             if tasks[task_id].get("status") == "cancelled":
-                return key, None, "cancelled"
+                return results
             try:
                 new_content = retry_fn(key)
-                return key, new_content, None
+                err = None
             except Exception as e:
-                return key, None, str(e)
+                new_content = None
+                err = str(e)
 
-        with ThreadPoolExecutor(max_workers=min(len(empty_keys), 6)) as pool:
-            retry_futures = {pool.submit(_retry_one, k): k for k in empty_keys}
-            for future in as_completed(retry_futures):
-                if tasks[task_id].get("status") == "cancelled":
-                    return results
-                key, new_content, err = future.result()
-                if err == "cancelled":
-                    return results
-                if new_content and not _is_empty_result(new_content):
-                    results[key] = new_content
-                    tasks[task_id]["logs"].append(f"✓ [重试] {key} 完成")
-                elif err:
-                    tasks[task_id]["logs"].append(f"⚠ [重试] {key} 失败: {str(err)[:80]}")
-                else:
-                    tasks[task_id]["logs"].append(f"⚠ [重试] {key} 仍为空")
+            if new_content and not _is_empty_result(new_content):
+                results[key] = new_content
+                tasks[task_id]["logs"].append(f"✓ [重试] {key} 完成")
+            elif err:
+                tasks[task_id]["logs"].append(f"⚠ [重试] {key} 失败: {str(err)[:80]}")
+            else:
+                tasks[task_id]["logs"].append(f"⚠ [重试] {key} 仍为空")
     still_empty = [k for k, v in results.items() if _is_empty_result(v)]
     if still_empty:
         tasks[task_id]["logs"].append(
@@ -1195,6 +1273,7 @@ def run_long_context_task(
                 prev_items = {}
 
         results = {}
+        source_evidence_by_label: dict[str, list[dict]] = {}
         total_dims = len(analysis_dims)
 
         dims_to_analyze = []
@@ -1221,33 +1300,37 @@ def run_long_context_task(
                 mapped_key = dim_map.get(dim_key)
                 try:
                     if mapped_key:
-                        answer = engine.analyze_dimension(mapped_key)
+                        answer = engine.analyze_dimension(mapped_key, source_evidence_enabled=True)
                     elif custom_dim_map and dim_key in custom_dim_map:
-                        answer = engine.analyze_dimension(dim_key, dim_meta=custom_dim_map[dim_key])
+                        answer = engine.analyze_dimension(
+                            dim_key,
+                            dim_meta=custom_dim_map[dim_key],
+                            source_evidence_enabled=True,
+                        )
                     else:
-                        answer = engine.analyze_dimension("overview")
+                        answer = engine.analyze_dimension("overview", source_evidence_enabled=True)
+                    source_evidence_by_label[dim_key] = _collect_latest_source_evidence(engine, paper_text)
                     return dim_key, answer, None
                 except Exception as e:
                     return dim_key, f"[分析出错: {str(e)[:200]}]", str(e)
 
-        workers = min(len(dims_to_analyze), LONG_DIMENSION_CONCURRENCY)
-        if workers > 0:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {pool.submit(_analyze_long_dim, dk): dk for dk in dims_to_analyze}
-                done_count = 0
-                for future in as_completed(futures):
-                    if tasks[task_id]["status"] == "cancelled":
-                        break
-                    dim_key, answer, err = future.result()
-                    if err == "cancelled":
-                        return
-                    results[dim_key] = answer
-                    done_count += 1
-                    tasks[task_id]["progress"] = 50 + int(40 * done_count / max(len(dims_to_analyze), 1))
-                    if err:
-                        tasks[task_id]["logs"].append(f"⚠ {dim_key} 出错: {str(err)[:80]}")
-                    else:
-                        tasks[task_id]["logs"].append(f"✓ {dim_key} 完成")
+        if dims_to_analyze:
+            def _on_long_progress(done_count, total, dim_key, err):
+                tasks[task_id]["progress"] = 50 + int(40 * done_count / max(total, 1))
+                if err:
+                    tasks[task_id]["logs"].append(f"⚠ {dim_key} 出错: {str(err)[:80]}")
+                else:
+                    tasks[task_id]["logs"].append(f"✓ {dim_key} 完成")
+
+            new_results, cancelled = _run_units_serially(
+                dims_to_analyze,
+                _analyze_long_dim,
+                on_progress=_on_long_progress,
+                should_cancel=lambda: tasks[task_id].get("status") == "cancelled",
+            )
+            if cancelled:
+                return
+            results.update(new_results)
         else:
             tasks[task_id]["logs"].append("ℹ 无需新增维度分析，直接进入后处理。")
         
@@ -1256,7 +1339,8 @@ def run_long_context_task(
             tasks[task_id]["stage"] = f"分析维度: 自定义问题..."
             tasks[task_id]["logs"].append(f"[自定义问题] {custom_question[:50]}...")
             try:
-                answer = engine.analyze_dimension("custom", custom_question)
+                answer = engine.analyze_dimension("custom", custom_question, source_evidence_enabled=True)
+                source_evidence_by_label["long.custom_question"] = _collect_latest_source_evidence(engine, paper_text)
                 results["自定义问题"] = answer
                 tasks[task_id]["logs"].append(f"✓ 自定义问题 完成")
             except Exception as e:
@@ -1275,12 +1359,20 @@ def run_long_context_task(
         def _retry_long(key):
             mapped = _LONG_DIM_MAP.get(key)
             if mapped:
-                return engine.analyze_dimension(mapped)
+                answer = engine.analyze_dimension(mapped, source_evidence_enabled=True)
+                source_evidence_by_label[key] = _collect_latest_source_evidence(engine, paper_text)
+                return answer
             if custom_dim_map and key in custom_dim_map:
-                return engine.analyze_dimension(key, dim_meta=custom_dim_map[key])
+                answer = engine.analyze_dimension(key, dim_meta=custom_dim_map[key], source_evidence_enabled=True)
+                source_evidence_by_label[key] = _collect_latest_source_evidence(engine, paper_text)
+                return answer
             if key == "自定义问题":
-                return engine.analyze_dimension("custom", custom_question)
-            return engine.analyze_dimension("overview")
+                answer = engine.analyze_dimension("custom", custom_question, source_evidence_enabled=True)
+                source_evidence_by_label["long.custom_question"] = _collect_latest_source_evidence(engine, paper_text)
+                return answer
+            answer = engine.analyze_dimension("overview", source_evidence_enabled=True)
+            source_evidence_by_label[key] = _collect_latest_source_evidence(engine, paper_text)
+            return answer
         results = _check_and_retry_empty_dimensions(results, task_id, _retry_long)
         
         # 4. Generate report
@@ -1374,6 +1466,10 @@ def run_long_context_task(
             "dimensions": list(results.keys()),
         }
         reading_items = build_long_reading_items(results, custom_question)
+        source_evidence_by_item_key = _map_source_evidence_to_item_keys(
+            reading_items,
+            source_evidence_by_label,
+        )
         # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
         # Only pass reading_final artifact to avoid duplicates
         all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
@@ -1384,6 +1480,7 @@ def run_long_context_task(
                 user_id,
                 all_artifacts,
                 reading_items=reading_items,
+                source_evidence_by_item_key=source_evidence_by_item_key,
             )
         )
         task_queue.mark_completed(task_id)
@@ -1437,10 +1534,9 @@ def run_quant_task(
         logger.info("[quant:%s] 开始七步精读 user=%s bib=%s file=%s", task_id[:8], user_id, bib_entry_id, file_path)
         task_queue.mark_running(task_id)
         logger.info(
-            "[quant:%s] concurrency file=%s steps=%s",
+            "[quant:%s] concurrency file=%s step_mode=serial",
             task_id[:8],
             READING_FILE_CONCURRENCY,
-            QUANT_STEP_CONCURRENCY,
         )
         running_started = True
         loop.run_until_complete(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
@@ -1472,6 +1568,7 @@ def run_quant_task(
         logger.info("[quant:%s] PDF 提取完成，开始七步分析", task_id[:8])
         
         steps = list(QUANT_PROMPT_KEYS.items())
+        source_evidence_by_label: dict[str, list[dict]] = {}
         
         def _analyze_quant_step(step_name, prompt_key):
             with deepseek_semaphore:
@@ -1479,33 +1576,47 @@ def run_quant_task(
                     return step_name, None, "cancelled"
                 try:
                     prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
-                    answer = engine.ask(prompt_content)
+                    answer = engine.ask(prompt_content, source_evidence_enabled=True)
+                    source_evidence_by_label[step_name] = _collect_latest_source_evidence(engine, paper_text)
                     return step_name, answer, None
                 except Exception as e:
                     return step_name, f"[分析出错: {str(e)[:200]}]", str(e)
 
-        results = {}
-        with ThreadPoolExecutor(max_workers=min(len(steps), QUANT_STEP_CONCURRENCY)) as pool:
-            futures = {pool.submit(_analyze_quant_step, sn, pk): sn for sn, pk in steps}
-            done_count = 0
-            for future in as_completed(futures):
-                done_count += 1
-                step_name, answer, err = future.result()
-                if err == "cancelled":
-                    return
-                results[step_name] = answer
-                if err:
-                    tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(err)[:80]}")
-                    logger.warning("[quant:%s] %s 出错: %s", task_id[:8], step_name, err)
-                else:
-                    tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
-                    logger.info("[quant:%s] %s 完成, 回答长度=%d", task_id[:8], step_name, len(answer or ""))
-                tasks[task_id]["progress"] = 15 + int(75 * done_count / len(steps))
+        def _analyze_quant_unit(unit):
+            step_name, prompt_key = unit
+            key, answer, err = _analyze_quant_step(step_name, prompt_key)
+            if answer is not None:
+                tasks[task_id].setdefault("_last_step_answer_lengths", {})[key] = len(answer or "")
+            return key, answer, err
+
+        def _on_quant_progress(done_count, total, step_name, err):
+            tasks[task_id]["progress"] = 15 + int(75 * done_count / max(total, 1))
+            if err:
+                tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(err)[:80]}")
+                logger.warning("[quant:%s] %s 出错: %s", task_id[:8], step_name, err)
+            else:
+                length = tasks[task_id].get("_last_step_answer_lengths", {}).get(step_name, 0)
+                tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
+                logger.info("[quant:%s] %s 完成, 回答长度=%d", task_id[:8], step_name, length)
+
+        results, cancelled = _run_units_serially(
+            steps,
+            _analyze_quant_unit,
+            on_progress=_on_quant_progress,
+            should_cancel=lambda: tasks[task_id].get("status") == "cancelled",
+        )
+        if cancelled:
+            return
         
         # Post-check: retry empty steps
         def _retry_quant(step_name_inner):
             pk = QUANT_PROMPT_KEYS[step_name_inner]
-            return engine.ask(normalize_reading_prompt(prompt_overrides.get(pk, "")))
+            answer = engine.ask(
+                normalize_reading_prompt(prompt_overrides.get(pk, "")),
+                source_evidence_enabled=True,
+            )
+            source_evidence_by_label[step_name_inner] = _collect_latest_source_evidence(engine, paper_text)
+            return answer
         results = _check_and_retry_empty_dimensions(results, task_id, _retry_quant)
         
         # Generate report
@@ -1592,6 +1703,10 @@ def run_quant_task(
             "steps": list(results.keys()),
         }
         reading_items = build_step_reading_items(results, mode="quant")
+        source_evidence_by_item_key = _map_source_evidence_to_item_keys(
+            reading_items,
+            source_evidence_by_label,
+        )
         # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
         # Only pass reading_final artifact to avoid duplicates
         all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
@@ -1602,6 +1717,7 @@ def run_quant_task(
                 user_id,
                 all_artifacts,
                 reading_items=reading_items,
+                source_evidence_by_item_key=source_evidence_by_item_key,
             )
         )
         task_queue.mark_completed(task_id)
@@ -1656,10 +1772,9 @@ def run_qual_task(
         logger.info("[qual:%s] 开始四步精读 user=%s bib=%s file=%s", task_id[:8], user_id, bib_entry_id, file_path)
         task_queue.mark_running(task_id)
         logger.info(
-            "[qual:%s] concurrency file=%s steps=%s",
+            "[qual:%s] concurrency file=%s step_mode=serial",
             task_id[:8],
             READING_FILE_CONCURRENCY,
-            QUAL_STEP_CONCURRENCY,
         )
         running_started = True
         loop.run_until_complete(sync_job_and_bib_start(task_id, bib_entry_id, stage="提取文本...", progress=10))
@@ -1691,6 +1806,7 @@ def run_qual_task(
         logger.info("[qual:%s] PDF 提取完成，开始四步分析", task_id[:8])
         
         steps = list(QUAL_PROMPT_KEYS.items())
+        source_evidence_by_label: dict[str, list[dict]] = {}
         
         def _analyze_qual_step(step_name, prompt_key):
             with deepseek_semaphore:
@@ -1698,33 +1814,47 @@ def run_qual_task(
                     return step_name, None, "cancelled"
                 try:
                     prompt_content = normalize_reading_prompt(prompt_overrides.get(prompt_key, ""))
-                    answer = engine.ask(prompt_content)
+                    answer = engine.ask(prompt_content, source_evidence_enabled=True)
+                    source_evidence_by_label[step_name] = _collect_latest_source_evidence(engine, paper_text)
                     return step_name, answer, None
                 except Exception as e:
                     return step_name, f"[分析出错: {str(e)[:200]}]", str(e)
 
-        results = {}
-        with ThreadPoolExecutor(max_workers=min(len(steps), QUAL_STEP_CONCURRENCY)) as pool:
-            futures = {pool.submit(_analyze_qual_step, sn, pk): sn for sn, pk in steps}
-            done_count = 0
-            for future in as_completed(futures):
-                done_count += 1
-                step_name, answer, err = future.result()
-                if err == "cancelled":
-                    return
-                results[step_name] = answer
-                if err:
-                    tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(err)[:80]}")
-                    logger.warning("[qual:%s] %s 出错: %s", task_id[:8], step_name, err)
-                else:
-                    tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
-                    logger.info("[qual:%s] %s 完成, 回答长度=%d", task_id[:8], step_name, len(answer or ""))
-                tasks[task_id]["progress"] = 20 + int(70 * done_count / len(steps))
+        def _analyze_qual_unit(unit):
+            step_name, prompt_key = unit
+            key, answer, err = _analyze_qual_step(step_name, prompt_key)
+            if answer is not None:
+                tasks[task_id].setdefault("_last_step_answer_lengths", {})[key] = len(answer or "")
+            return key, answer, err
+
+        def _on_qual_progress(done_count, total, step_name, err):
+            tasks[task_id]["progress"] = 20 + int(70 * done_count / max(total, 1))
+            if err:
+                tasks[task_id]["logs"].append(f"⚠ {step_name} 出错: {str(err)[:80]}")
+                logger.warning("[qual:%s] %s 出错: %s", task_id[:8], step_name, err)
+            else:
+                length = tasks[task_id].get("_last_step_answer_lengths", {}).get(step_name, 0)
+                tasks[task_id]["logs"].append(f"✓ {step_name} 完成")
+                logger.info("[qual:%s] %s 完成, 回答长度=%d", task_id[:8], step_name, length)
+
+        results, cancelled = _run_units_serially(
+            steps,
+            _analyze_qual_unit,
+            on_progress=_on_qual_progress,
+            should_cancel=lambda: tasks[task_id].get("status") == "cancelled",
+        )
+        if cancelled:
+            return
         
         # Post-check: retry empty steps
         def _retry_qual(step_name_inner):
             pk = QUAL_PROMPT_KEYS[step_name_inner]
-            return engine.ask(normalize_reading_prompt(prompt_overrides.get(pk, "")))
+            answer = engine.ask(
+                normalize_reading_prompt(prompt_overrides.get(pk, "")),
+                source_evidence_enabled=True,
+            )
+            source_evidence_by_label[step_name_inner] = _collect_latest_source_evidence(engine, paper_text)
+            return answer
         results = _check_and_retry_empty_dimensions(results, task_id, _retry_qual)
         
         # Generate report
@@ -1811,6 +1941,10 @@ def run_qual_task(
             "steps": list(results.keys()),
         }
         reading_items = build_step_reading_items(results, mode="qual")
+        source_evidence_by_item_key = _map_source_evidence_to_item_keys(
+            reading_items,
+            source_evidence_by_label,
+        )
         # Note: ref_artifacts are already persisted by _try_extract_references via persist_trace_success
         # Only pass reading_final artifact to avoid duplicates
         all_artifacts = [{"artifact_type": "reading_final", "absolute_path": report_path}]
@@ -1821,6 +1955,7 @@ def run_qual_task(
                 user_id,
                 all_artifacts,
                 reading_items=reading_items,
+                source_evidence_by_item_key=source_evidence_by_item_key,
             )
         )
         task_queue.mark_completed(task_id)

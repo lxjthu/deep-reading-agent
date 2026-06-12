@@ -1,7 +1,7 @@
 """对话式分析引擎 - 核心模块"""
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass
 
 from openai import OpenAI
@@ -9,6 +9,17 @@ from openai import OpenAI
 from .config import Config
 from .paper_cache import PaperCache
 from .analysis_dimensions import ANALYSIS_DIMENSIONS
+
+try:
+    from backend.services.reading_source_evidence import (
+        SOURCE_EVIDENCE_INSTRUCTION,
+        split_answer_and_evidence,
+    )
+except Exception:  # pragma: no cover - packaged/runtime import fallback
+    from services.reading_source_evidence import (  # type: ignore
+        SOURCE_EVIDENCE_INSTRUCTION,
+        split_answer_and_evidence,
+    )
 
 
 @dataclass
@@ -20,6 +31,8 @@ class TurnResult:
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    source_evidence: Optional[List[Dict[str, Any]]] = None
+    source_evidence_parse_error: Optional[str] = None
     
 
 class ConversationEngine:
@@ -92,7 +105,12 @@ class ConversationEngine:
                 return content
         return None
     
-    def _build_messages(self, question: str, dimension: Optional[str] = None) -> List[Dict[str, str]]:
+    def _build_messages(
+        self,
+        question: str,
+        dimension: Optional[str] = None,
+        source_evidence_enabled: bool = False,
+    ) -> List[Dict[str, str]]:
         """
         构建API消息列表（优化缓存命中率）
         
@@ -141,6 +159,9 @@ class ConversationEngine:
                 enhanced_question = f"【分析维度：{dim_info['name']}】\n{dim_info['system_prompt_addition']}\n\n{question}"
         else:
             enhanced_question = question
+
+        if source_evidence_enabled:
+            enhanced_question = f"{enhanced_question}\n\n{SOURCE_EVIDENCE_INSTRUCTION}"
             
         messages.append({"role": "user", "content": enhanced_question})
         
@@ -156,7 +177,12 @@ class ConversationEngine:
                 summaries.append(f"Q: {q_summary}")
         return "\n".join(summaries)
     
-    def ask(self, question: str, dimension: Optional[str] = None) -> str:
+    def ask(
+        self,
+        question: str,
+        dimension: Optional[str] = None,
+        source_evidence_enabled: bool = False,
+    ) -> str:
         """
         提出一个问题，获取回答
         
@@ -166,7 +192,11 @@ class ConversationEngine:
         3. 保存对话历史
         4. 返回结果
         """
-        messages = self._build_messages(question, dimension)
+        messages = self._build_messages(
+            question,
+            dimension,
+            source_evidence_enabled=source_evidence_enabled,
+        )
         
         # 显示上下文信息
         total_chars = sum(len(m["content"]) for m in messages)
@@ -183,7 +213,15 @@ class ConversationEngine:
             )
             elapsed = __import__('time').time() - start_time
             
-            answer = response.choices[0].message.content
+            raw_answer = response.choices[0].message.content or ""
+            source_evidence = []
+            source_evidence_parse_error = None
+            if source_evidence_enabled:
+                answer, source_evidence, source_evidence_parse_error = split_answer_and_evidence(raw_answer)
+                if source_evidence_parse_error:
+                    print(f"  [SourceEvidence] parse_error={source_evidence_parse_error}")
+            else:
+                answer = raw_answer
             usage = response.usage
             
             # 显示缓存命中情况
@@ -203,6 +241,8 @@ class ConversationEngine:
                 prompt_tokens=usage.prompt_tokens if usage else 0,
                 completion_tokens=usage.completion_tokens if usage else 0,
                 total_tokens=usage.total_tokens if usage else 0,
+                source_evidence=source_evidence,
+                source_evidence_parse_error=source_evidence_parse_error,
             )
             self.results.append(turn)
             self.paper_cache.add_turn(question, answer, dimension)
@@ -227,19 +267,20 @@ class ConversationEngine:
         dimension: str,
         custom_question: Optional[str] = None,
         dim_meta: Optional[Dict] = None,
+        source_evidence_enabled: bool = False,
     ) -> str:
         if dimension in ANALYSIS_DIMENSIONS:
             dim_info = ANALYSIS_DIMENSIONS[dimension]
             question = custom_question or (dim_info["default_questions"][0] if dim_info["default_questions"] else "请分析这个维度。")
             print(f"\n[分析维度: {dim_info['name']}] {question}")
-            return self.ask(question, dimension)
+            return self.ask(question, dimension, source_evidence_enabled=source_evidence_enabled)
         elif dim_meta:
             question = custom_question or dim_meta.get("default_question", "请分析这个维度。")
             dim_name = dim_meta.get("dim_name", dimension)
             prompt_content = dim_meta.get("prompt_content", "")
             enhanced = f"【分析维度：{dim_name}】\n{prompt_content}\n\n{question}" if prompt_content else f"【分析维度：{dim_name}】\n{question}"
             print(f"\n[分析维度: {dim_name}] {question}")
-            return self.ask(enhanced, dimension=None)
+            return self.ask(enhanced, dimension=None, source_evidence_enabled=source_evidence_enabled)
         else:
             return f"未知维度: {dimension}"
     

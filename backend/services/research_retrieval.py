@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
@@ -18,6 +18,7 @@ from db.models import (
     File,
     ReadingItem,
     ReadingItemEdit,
+    ReadingSourceEvidence,
 )
 from upload_storage import resolve_storage_path
 
@@ -35,6 +36,7 @@ FIELD_WEIGHTS = {
     "edited_reading_item": 13.0,
     "annotation": 11.0,
     "card_note": 10.0,
+    "source_evidence": 24.0,
     "reading_item": 7.0,
 }
 
@@ -79,6 +81,35 @@ def _contains_any(text: str | None, terms: list[str]) -> bool:
         return True
     lowered = (text or "").lower()
     return any(term in lowered for term in terms)
+
+
+def _dialect_name(db: AsyncSession) -> str:
+    try:
+        return db.get_bind().dialect.name
+    except Exception:
+        return ""
+
+
+def _source_evidence_match_filter(db: AsyncSession, terms: list[str], likes: list[str]):
+    predicates = [
+        *[ReadingSourceEvidence.quote_text.ilike(like) for like in likes],
+        *[ReadingSourceEvidence.claim_text.ilike(like) for like in likes],
+        *[ReadingSourceEvidence.section_hint.ilike(like) for like in likes],
+    ]
+    if _dialect_name(db) == "postgresql" and terms:
+        text_expr = (
+            func.coalesce(ReadingSourceEvidence.quote_text, "")
+            + literal(" ")
+            + func.coalesce(ReadingSourceEvidence.claim_text, "")
+            + literal(" ")
+            + func.coalesce(ReadingSourceEvidence.section_hint, "")
+        )
+        predicates.append(
+            func.to_tsvector("simple", text_expr).op("@@")(
+                func.plainto_tsquery("simple", " ".join(terms))
+            )
+        )
+    return or_(*predicates)
 
 
 def _coverage(text: str | None, terms: list[str]) -> float:
@@ -203,6 +234,21 @@ async def _load_entries(db: AsyncSession, owner_user_id: int, query: ResearchQue
             )
         ).scalars().all()
         related_ids.update(str(item) for item in edited_ids)
+
+        if query.include_source_text:
+            source_evidence_ids = (
+                await db.execute(
+                    select(ReadingSourceEvidence.bib_entry_id)
+                    .where(
+                        ReadingSourceEvidence.owner_user_id == owner_user_id,
+                        ReadingSourceEvidence.source_tier == "P0",
+                        ReadingSourceEvidence.validation_status.in_(["exact", "fuzzy"]),
+                        _source_evidence_match_filter(db, terms, likes),
+                    )
+                    .limit(limit)
+                )
+            ).scalars().all()
+            related_ids.update(str(item) for item in source_evidence_ids)
 
         annotation_ids = (
             await db.execute(
@@ -473,6 +519,40 @@ async def _collect_entry_evidence(
                     terms=terms,
                 )
             )
+
+    if query.include_source_text:
+        source_rows = (
+            await db.execute(
+                select(ReadingSourceEvidence)
+                .where(
+                    ReadingSourceEvidence.owner_user_id == owner_user_id,
+                    ReadingSourceEvidence.bib_entry_id == entry.id,
+                    ReadingSourceEvidence.source_tier == "P0",
+                    ReadingSourceEvidence.validation_status.in_(["exact", "fuzzy"]),
+                )
+                .order_by(ReadingSourceEvidence.id)
+            )
+        ).scalars().all()
+        for row in source_rows:
+            match_text = "\n".join(
+                part for part in [row.claim_text, row.quote_text, row.section_hint] if part
+            )
+            if _contains_any(match_text, terms):
+                evidence.append(
+                    _evidence(
+                        entry_id=entry.id,
+                        source_tier="P0",
+                        source_kind="source_evidence",
+                        table="reading_source_evidence",
+                        row_id=row.id,
+                        field_name="quote_text",
+                        item_label=row.item_label,
+                        page_label=row.page_label,
+                        heading_path=row.heading_path or row.section_hint,
+                        text=row.quote_text,
+                        terms=terms,
+                    )
+                )
 
     if query.include_user_notes and _contains_any(entry.user_note, terms):
         evidence.append(

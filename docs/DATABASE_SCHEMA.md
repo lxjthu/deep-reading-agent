@@ -684,6 +684,64 @@ CREATE INDEX idx_reading_items_parent ON reading_items (parent_key);
 - `reading_items` 保留 job 级历史，支持同一篇文献多次精读
 - `artifacts` 继续保存 Markdown 产物，作为下载与人工阅读版本
 
+### 3.13.1 `reading_source_evidence` — 精读原文证据缓存（v2.6 新增）
+
+> 目的：在长文本/七步/四步精读过程中，保存 DeepSeek 从论文全文中抽取、并由后端回原文校验过的逐字原文片段。该表默认不用于页面展示，主要作为 Research Agent 检索时的 P0 原文证据缓存。
+
+```sql
+CREATE TABLE reading_source_evidence (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    bib_entry_id        TEXT NOT NULL REFERENCES bib_entries(id) ON DELETE CASCADE,
+    job_id              TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    reading_item_id     INTEGER NOT NULL REFERENCES reading_items(id) ON DELETE CASCADE,
+    source_file_id      TEXT REFERENCES files(id),
+    source_version      TEXT NOT NULL DEFAULT 'original'
+                        CHECK (source_version IN ('original','translated')),
+    source_tier         TEXT NOT NULL DEFAULT 'P0'
+                        CHECK (source_tier IN ('P0','P1','P2','P3')),
+    validation_status   TEXT NOT NULL
+                        CHECK (validation_status IN ('exact','fuzzy','unmatched')),
+    mode                TEXT NOT NULL,             -- long / quant / qual
+    item_key            TEXT NOT NULL,             -- reading_items.item_key 的冗余快照
+    item_label          TEXT NOT NULL,
+    evidence_role       TEXT NOT NULL DEFAULT 'support',
+    claim_text          TEXT,
+    quote_text          TEXT NOT NULL,             -- 逐字原文片段
+    quote_hash          TEXT NOT NULL,
+    page_label          TEXT,
+    section_hint        TEXT,
+    heading_path        TEXT,
+    char_start          INTEGER,
+    char_end            INTEGER,
+    match_score         FLOAT,
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    created_at          DATETIME NOT NULL DEFAULT (datetime('now')),
+    expires_at          DATETIME,
+
+    UNIQUE (reading_item_id, quote_hash)
+);
+
+CREATE INDEX idx_rse_owner ON reading_source_evidence (owner_user_id);
+CREATE INDEX idx_rse_bib ON reading_source_evidence (bib_entry_id);
+CREATE INDEX idx_rse_job ON reading_source_evidence (job_id);
+CREATE INDEX idx_rse_item ON reading_source_evidence (reading_item_id);
+CREATE INDEX idx_rse_tier_status ON reading_source_evidence (source_tier, validation_status);
+CREATE INDEX idx_rse_expires ON reading_source_evidence (expires_at);
+```
+
+**PostgreSQL 索引**：
+
+- `pg_trgm`：`quote_text`、`claim_text` 使用 GIN trigram 索引，支持 `ILIKE`/近似文本召回。
+- FTS：`quote_text + claim_text + section_hint` 建 `to_tsvector('simple', ...)` GIN 索引，用于 Research Agent 的原文证据检索。
+
+**入库约定**：
+
+- DeepSeek 返回的隐藏 JSON 证据块会从用户可见 Markdown 中剥离。
+- 后端先用全文原文校验 `quote_text`，逐字命中或高相似窗口命中才标为 `source_tier='P0'`。
+- 未能回原文定位的片段可保留为 `P2/unmatched`，但 Research Agent 只把 `P0 + exact/fuzzy` 当作原文强证据。
+- `.dra` 导出/导入包含该表，当前 `CURRENT_SCHEMA_VERSION = "026"`。
+
 ### 3.14 `artifacts` — 任务产物
 
 ```sql
@@ -771,7 +829,7 @@ CREATE INDEX idx_card_notes_translation ON card_notes (source_translation_artifa
 
 - `source_version='original'` 时记录 `source_markdown_file_id`。
 - `source_version='translated'` 时记录对应 `translation_md` 的 `source_translation_artifact_id`。
-- `.dra` 导出/导入包含该表和 Markdown 镜像，当前 `CURRENT_SCHEMA_VERSION = "021"`。
+- `.dra` 导出/导入包含该表和 Markdown 镜像，当前 `CURRENT_SCHEMA_VERSION = "026"`。
 
 ### 3.16 `dimension_sets` — 用户维度集合（v1.4 新增）
 
@@ -912,10 +970,10 @@ CREATE INDEX idx_tpl_items_template ON template_items (template_id);
 
 | 触发 | 行为 |
 |---|---|
-| 删除 `users` | 级联删除该用户的 settings/files/bib_entries/jobs/reading_items/artifacts/upload_batches/invite_codes/bib_references/bib_reference_citations/dimension_sets（DB ON DELETE CASCADE，dimension_sets 级联删除 dimension_items） + 物理删除 `_uploads/{user_id}/` 和 `deep_reading_results/{user_id}/` |
-| 删除 `bib_entries` | DB 级联删 bib_filter_links、job_bib_entries、reading_items、以其为 `source_bib_entry_id` 的 `bib_references / bib_reference_citations`（**只删关联/结构化结果**）；通过应用层逻辑清理仅由本档案独占的 jobs/artifacts |
+| 删除 `users` | 级联删除该用户的 settings/files/bib_entries/jobs/reading_items/reading_source_evidence/artifacts/upload_batches/invite_codes/bib_references/bib_reference_citations/dimension_sets（DB ON DELETE CASCADE，dimension_sets 级联删除 dimension_items） + 物理删除 `_uploads/{user_id}/` 和 `deep_reading_results/{user_id}/` |
+| 删除 `bib_entries` | DB 级联删 bib_filter_links、job_bib_entries、reading_items、reading_source_evidence、以其为 `source_bib_entry_id` 的 `bib_references / bib_reference_citations`（**只删关联/结构化结果**）；通过应用层逻辑清理仅由本档案独占的 jobs/artifacts |
 | 删除 `files` | 应用层处理：清空所有引用该 file 的 `bib_entries.source_file_id`；若 file 是 filter job 的 input，禁止删除（除非任务已完成） |
-| 删除 `jobs` | DB 级联删 job_bib_entries、reading_items、artifacts，以及以其为 `source_job_id` 的 `bib_references / bib_reference_citations`；不动 bib_entries 本身 |
+| 删除 `jobs` | DB 级联删 job_bib_entries、reading_items、reading_source_evidence、artifacts，以及以其为 `source_job_id` 的 `bib_references / bib_reference_citations`；不动 bib_entries 本身 |
 | 删除 `dimension_templates` | DB 级联删 `template_items`（ON DELETE CASCADE） |
 
 **应用层级联清理 bib_entries 时的逻辑**：
@@ -953,11 +1011,11 @@ def cleanup_normal_user_data() -> None:
 
 **`expires_at` 计算**（在创建/更新时设置）：
 
-| 角色 | files | bib_entries | jobs | reading_items | artifacts |
-|---|---|---|---|---|---|
-| normal | created+24h | created+24h | created+24h | created+24h | created+24h |
-| vip | NULL | NULL | NULL | NULL | NULL |
-| admin | NULL | NULL | NULL | NULL | NULL |
+| 角色 | files | bib_entries | jobs | reading_items | reading_source_evidence | artifacts |
+|---|---|---|---|---|---|---|
+| normal | created+24h | created+24h | created+24h | created+24h | created+24h | created+24h |
+| vip | NULL | NULL | NULL | NULL | NULL | NULL |
+| admin | NULL | NULL | NULL | NULL | NULL | NULL |
 
 **API Key 不入清理范围**：DeepSeek API Key 仅存储于用户浏览器 `localStorage`，服务端不持有，故 24h 任务不涉及 key。
 
@@ -1241,7 +1299,10 @@ backend/migrations/versions/
 ├── 020_add_markdown_card_notes.py  # Markdown 原文绑定 + card_notes + card_note 提示词类型
 ├── 021_add_feedback_admin_tables.py  # 用户反馈、反馈事件、管理员审计日志
 ├── 022_add_library_chat_history.py  # library_chat job/artifact 类型
-└── 023_add_ref_format_generation.py  # ref_format_presets + ref_format job/artifact 类型
+├── 023_add_ref_format_generation.py  # ref_format_presets + ref_format job/artifact 类型
+├── 024_add_journal_kb_prompt_type.py  # prompt_templates 增加 journal_kb
+├── 025_add_bib_attachments.py  # bib_attachments + card_notes.source_version 扩展
+└── 026_add_reading_source_evidence.py  # 精读原文证据缓存 + PostgreSQL FTS/trigram 索引
 ```
 
 > 说明：`admin` 账号继续通过 `backend/scripts/seed_admin.py` 初始化，不放入 Alembic 迁移。
@@ -1311,7 +1372,7 @@ backend/migrations/versions/
 
 Migration: `019_add_agent_sessions.py`
 
-These tables persist the AI literature assistant conversation, tool events, and execution proposals. They are user data and are included in `.dra` export/import via `backend/services/data_portability.py` with `CURRENT_SCHEMA_VERSION = "021"`.
+These tables persist the AI literature assistant conversation, tool events, and execution proposals. They are user data and are included in `.dra` export/import via `backend/services/data_portability.py` with `CURRENT_SCHEMA_VERSION = "026"`.
 
 ### `agent_sessions`
 

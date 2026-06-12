@@ -42,6 +42,7 @@ from db.models import (
     PromptTemplate,
     ReadingItem,
     ReadingItemEdit,
+    ReadingSourceEvidence,
     RefFormatPreset,
     UploadBatch,
     User,
@@ -51,7 +52,7 @@ from upload_storage import build_storage_path, get_upload_root, resolve_storage_
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "025"
+CURRENT_SCHEMA_VERSION = "026"
 IMPORT_MODE_APPEND = "merge_append"
 IMPORT_MODE_REPLACE = "merge_replace"
 SUPPORTED_IMPORT_MODES = {IMPORT_MODE_APPEND, IMPORT_MODE_REPLACE}
@@ -81,6 +82,7 @@ EXPORT_TABLE_ORDER = [
     BibFilterLink,
     JobBibEntry,
     ReadingItem,
+    ReadingSourceEvidence,
     ReadingItemEdit,
     Annotation,
     AgentSession,
@@ -99,6 +101,7 @@ IMPORT_CLEAR_ORDER = [
     CardNote,
     Annotation,
     ReadingItemEdit,
+    ReadingSourceEvidence,
     ReadingItem,
     Artifact,
     AgentActionProposal,
@@ -483,6 +486,12 @@ FK_REMAP_FIELDS: dict[str, dict[str, str]] = {
     "reading_items": {
         "bib_entry_id": "bib_entries",
         "job_id": "jobs",
+    },
+    "reading_source_evidence": {
+        "bib_entry_id": "bib_entries",
+        "job_id": "jobs",
+        "reading_item_id": "reading_items",
+        "source_file_id": "files",
     },
     "reading_item_edits": {"reading_item_id": "reading_items"},
     "agent_messages": {"session_id": "agent_sessions"},

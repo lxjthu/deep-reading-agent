@@ -37,6 +37,7 @@ from db.models import (  # noqa: E402
     Job,
     ReadingItem,
     ReadingItemEdit,
+    ReadingSourceEvidence,
     User,
 )
 from services.research_retrieval import ResearchQuery, get_evidence_pack, research_search  # noqa: E402
@@ -140,6 +141,28 @@ class ResearchRetrievalTests(unittest.TestCase):
                         owner_user_id=owner_id,
                         edited_content="Edited human reading: platform responsibility is the core argument.",
                     ),
+                    ReadingSourceEvidence(
+                        owner_user_id=owner_id,
+                        bib_entry_id=entry_id,
+                        job_id=job_id,
+                        reading_item_id=reading_item_id,
+                        source_file_id="file-md",
+                        source_version="original",
+                        source_tier="P0",
+                        validation_status="exact",
+                        mode="long",
+                        item_key="theory",
+                        item_label="Theory",
+                        evidence_role="finding",
+                        claim_text="The paper treats platform responsibility as a core obligation.",
+                        quote_text="Original source text states that platform responsibility must be treated as a core governance obligation.",
+                        quote_hash="source-evidence-platform",
+                        section_hint="Findings",
+                        char_start=10,
+                        char_end=110,
+                        match_score=1.0,
+                        metadata_json="{}",
+                    ),
                     Annotation(
                         id="anno-human",
                         owner_user_id=owner_id,
@@ -218,6 +241,7 @@ class ResearchRetrievalTests(unittest.TestCase):
             max(item["score"] for item in evidence if item["source_tier"] == "P0") + 1,
         )
         self.assertTrue(any(item["source_kind"] == "edited_reading_item" for item in evidence))
+        self.assertTrue(any(item["source_kind"] == "source_evidence" and item["source_tier"] == "P0" for item in evidence))
         self.assertTrue(any(item["source_kind"] == "reading_item" and item["source_tier"] == "P2" for item in evidence))
 
     def test_get_evidence_pack_prefers_edited_notes_over_ai_reading_items(self) -> None:
@@ -237,8 +261,10 @@ class ResearchRetrievalTests(unittest.TestCase):
 
         pack = asyncio.run(run())
         evidence = pack["entries"][0]["evidence"]
+        source_index = next(i for i, item in enumerate(evidence) if item["source_kind"] == "source_evidence")
         edited_index = next(i for i, item in enumerate(evidence) if item["source_kind"] == "edited_reading_item")
         ai_index = next(i for i, item in enumerate(evidence) if item["source_kind"] == "reading_item")
+        self.assertLess(source_index, edited_index)
         self.assertLess(edited_index, ai_index)
         self.assertIn("未联网", "".join(pack["limitations"]))
 
