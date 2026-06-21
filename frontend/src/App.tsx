@@ -4183,6 +4183,79 @@ function JsonHtmlView({ value, depth = 0 }: { value: unknown; depth?: number }) 
   return <span className="text-sm text-gray-800">{formatJsonScalar(value)}</span>
 }
 
+const KATEX_CDN_BASES = [
+  'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist',
+  'https://unpkg.com/katex@0.16.11/dist',
+]
+
+let katexLoadPromise: Promise<boolean> | null = null
+
+function loadScriptOnce(id: string, src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const existing = document.getElementById(id) as HTMLScriptElement | null
+    if (existing) {
+      if (existing.dataset.loaded === 'true') {
+        resolve()
+      } else {
+        existing.addEventListener('load', () => resolve(), { once: true })
+        existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true })
+      }
+      return
+    }
+    const script = document.createElement('script')
+    script.id = id
+    script.src = src
+    script.defer = true
+    script.onload = () => {
+      script.dataset.loaded = 'true'
+      resolve()
+    }
+    script.onerror = () => reject(new Error(`Failed to load ${src}`))
+    document.head.appendChild(script)
+  })
+}
+
+async function ensureKatexAutoRender(): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return false
+  if (typeof (window as any).renderMathInElement === 'function') return true
+  if (katexLoadPromise) return katexLoadPromise
+
+  katexLoadPromise = (async () => {
+    for (const base of KATEX_CDN_BASES) {
+      try {
+        if (!document.getElementById('dra-katex-css')) {
+          const link = document.createElement('link')
+          link.id = 'dra-katex-css'
+          link.rel = 'stylesheet'
+          link.href = `${base}/katex.min.css`
+          document.head.appendChild(link)
+        }
+        await loadScriptOnce('dra-katex-script', `${base}/katex.min.js`)
+        await loadScriptOnce('dra-katex-auto-render', `${base}/contrib/auto-render.min.js`)
+        return typeof (window as any).renderMathInElement === 'function'
+      } catch {
+        document.getElementById('dra-katex-css')?.remove()
+        document.getElementById('dra-katex-script')?.remove()
+        document.getElementById('dra-katex-auto-render')?.remove()
+      }
+    }
+    return false
+  })()
+
+  return katexLoadPromise
+}
+
+function renderMathInAgentElement(el: HTMLElement) {
+  ;(window as any).renderMathInElement(el, {
+    delimiters: [
+      { left: '$$', right: '$$', display: true },
+      { left: '$', right: '$', display: false },
+      { left: '\\(', right: '\\)', display: false },
+      { left: '\\[', right: '\\]', display: true },
+    ],
+  })
+}
+
 function AgentMdContent({ raw }: { raw: string }) {
   const elRef = useRef<HTMLDivElement>(null)
   const html = useMemo(() => {
@@ -4192,15 +4265,16 @@ function AgentMdContent({ raw }: { raw: string }) {
     return h
   }, [raw])
   useEffect(() => {
-    if (elRef.current && typeof (window as any).renderMathInElement === 'function') {
-      ;(window as any).renderMathInElement(elRef.current, {
-        delimiters: [
-          { left: '$$', right: '$$', display: true },
-          { left: '$', right: '$', display: false },
-          { left: '\\(', right: '\\)', display: false },
-          { left: '\\[', right: '\\]', display: true },
-        ],
-      })
+    let cancelled = false
+    async function render() {
+      const ok = await ensureKatexAutoRender()
+      if (!cancelled && ok && elRef.current) {
+        renderMathInAgentElement(elRef.current)
+      }
+    }
+    void render()
+    return () => {
+      cancelled = true
     }
   }, [html])
   return (

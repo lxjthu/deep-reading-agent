@@ -97,6 +97,26 @@ STATUS_PATTERNS = (
     "check status",
     "job status",
 )
+WRITING_STYLE_PATTERNS = (
+    "写作风格",
+    "写法",
+    "行文",
+    "文风",
+    "引言写作",
+    "引言怎么写",
+    "理论部分怎么写",
+    "方法部分怎么写",
+    "论证风格",
+    "模仿",
+    "像这篇",
+    "how to write like",
+    "writing style",
+    "introduction style",
+    "theory derivation style",
+    "method writing",
+    "argumentation style",
+)
+
 COMPARE_PATTERNS = (
     "综述",
     "比较",
@@ -221,6 +241,7 @@ ENTRY_ID_TOOLS = {
     "get_evidence_pack",
     "get_source_windows",
     "get_reading_context",
+    "analyze_writing_style",
     "search_cnki",
     "lookup_english_fulltext",
 }
@@ -573,6 +594,7 @@ def build_task_frame(message: str, state: dict[str, Any] | None) -> dict[str, An
     wants_external = _contains_any(raw, EXTERNAL_PATTERNS)
     wants_execution = _contains_any(raw, EXECUTION_PATTERNS)
     wants_status = _contains_any(raw, STATUS_PATTERNS)
+    wants_writing_style = _contains_any(raw, WRITING_STYLE_PATTERNS)
     wants_compare = _contains_any(raw, COMPARE_PATTERNS)
     wants_analyze = _contains_any(raw, ANALYZE_PATTERNS)
     wants_count = _contains_any(raw, COUNT_PATTERNS)
@@ -591,7 +613,9 @@ def build_task_frame(message: str, state: dict[str, Any] | None) -> dict[str, An
         and not wants_external
     )
 
-    if wants_status:
+    if wants_writing_style:
+        intent = "writing_style_analysis"
+    elif wants_status:
         intent = "check_status"
     elif default_cache_followup:
         intent = "analyze_cached_collection"
@@ -615,7 +639,7 @@ def build_task_frame(message: str, state: dict[str, Any] | None) -> dict[str, An
         "raw_message": raw,
         "intent": intent,
         "continuation_ref": continuation or default_cache_followup,
-        "requires_local_search": intent in {"library_lookup", "library_count", "summarize_topic", "continue_result_set", "analyze_collection", "analyze_cached_collection"},
+        "requires_local_search": intent in {"library_lookup", "library_count", "summarize_topic", "continue_result_set", "analyze_collection", "analyze_cached_collection", "writing_style_analysis"},
         "requires_external_search": wants_external,
         "requires_write_proposal": intent == "start_job",
         "user_requested_external": wants_external,
@@ -766,6 +790,13 @@ def build_runtime_system_prompts(
         )
         prompts.append("查询进度时优先使用真实 job_id，不要把 proposal_id 当成 job_id。")
 
+    if task_frame.get("intent") == "writing_style_analysis":
+        prompts.append(
+            "本轮是写作风格分析场景。优先调用 analyze_writing_style 获取本地原文片段；"
+            "回答必须引用或明确指向返回的 style_evidence。若没有原文片段，只能说明证据不足，"
+            "不要虚构作者、期刊或论文的原文写法。"
+        )
+
     if not task_frame.get("user_requested_external"):
         prompts.append("本轮用户没有明确授权外部检索；除非用户明确要求 CNKI/全文/PDF/联网/网页检索，否则不要调用 external_read 工具。")
     return prompts
@@ -840,6 +871,18 @@ def normalize_tool_args(
                 normalized["entry_ids"] = resolved_ids
             elif all(re.fullmatch(r"\d{5,}", item or "") for item in explicit_ids):
                 normalized["entry_ids"] = resolved_ids
+
+    if name == "analyze_writing_style" and not normalized.get("question"):
+        normalized["question"] = task_frame.get("raw_message") or ""
+        if not normalized.get("section_type"):
+            raw_message = task_frame.get("raw_message") or ""
+            if _contains_any(raw_message, ("引言", "导论", "绪论", "introduction", "intro")):
+                normalized["section_type"] = "introduction"
+            elif _contains_any(raw_message, ("理论", "文献综述", "假设", "机制", "theory", "hypothesis", "mechanism")):
+                normalized["section_type"] = "theory"
+            elif _contains_any(raw_message, ("方法", "数据", "模型", "识别", "实证", "method", "methods", "data", "empirical", "identification")):
+                normalized["section_type"] = "method"
+        return normalized
 
     if name in {"research_search", "get_evidence_pack"} and not normalized.get("question"):
         normalized["question"] = task_frame.get("raw_message") or ""
@@ -1012,6 +1055,7 @@ def build_stop_summary(
     state: dict[str, Any] | None,
     reason: str,
     max_tool_rounds: int | None = None,
+    auto_continue_attempts: int = 0,
 ) -> dict[str, Any]:
     state = state or {}
     count = int(((state.get("last_result_set") or {}).get("count") or 0))
@@ -1025,6 +1069,9 @@ def build_stop_summary(
             message = f"本轮工具调用已达到上限；当前已有 {count} 篇文献结果可继续复用。"
         if max_tool_rounds:
             recommendations.append(f"本轮已使用 {max_tool_rounds} 轮工具调用，请避免重复无效搜索。")
+        if auto_continue_attempts:
+            message = f"{message} 已自动续跑 {auto_continue_attempts} 次，仍未完成。"
+            recommendations.append("系统已经自动承接同一提示词续跑；如仍未完成，请缩小范围或指定文献。")
     else:
         message = "本轮已停止，请基于当前结果集或更明确的目标继续。"
 
@@ -1034,10 +1081,31 @@ def build_stop_summary(
         "message": message,
         "intent": task_frame.get("intent"),
         "result_set_count": count,
+        "auto_continue_attempts": auto_continue_attempts,
         "budget_snapshot": state.get("budget_snapshot") or {},
         "recommendations": recommendations,
     }
 
+
+
+def build_auto_continue_prompt(
+    *,
+    task_frame: dict[str, Any],
+    state: dict[str, Any] | None,
+    pass_index: int,
+    max_passes: int,
+) -> str:
+    state = state or {}
+    result_count = int(((state.get("last_result_set") or {}).get("count") or 0))
+    raw_message = str(task_frame.get("raw_message") or "")
+    return (
+        f"自动续跑 {pass_index}/{max_passes}：上一段已达到工具调用轮次上限，但用户请求尚未完成。"
+        f"请承接同一用户提示词继续完成，不要要求用户重复输入同一提示词。"
+        f"原始用户提示词：{raw_message}。"
+        f"当前可复用结果集数量：{result_count}。"
+        "优先使用已有工具结果、last_result_set、last_evidence_pack、analysis_cache 或 working_notes；"
+        "不要重复调用相同工具和相同参数。如果证据已经足够，请直接给出最终回答。"
+    )
 
 def append_working_note(
     state: dict[str, Any],

@@ -39,6 +39,7 @@ try:
     from backend.services.research_agent_runtime import (
         append_working_note,
         apply_execution_result_to_state,
+        build_auto_continue_prompt,
         build_stop_summary,
         build_runtime_system_prompts,
         build_task_frame,
@@ -56,6 +57,7 @@ try:
         get_source_windows,
         research_search,
     )
+    from backend.services.writing_style_retrieval import analyze_writing_style
     from backend.utils.api_key import validate_deepseek_key
     from backend.services.agent_errors import AgentErrorCode, RuntimeNoticeCode, make_agent_error_payload
     from backend.utils.llm_provider import (
@@ -71,6 +73,7 @@ except ModuleNotFoundError:  # Support the backend/ working directory used by lo
     from services.research_agent_runtime import (
         append_working_note,
         apply_execution_result_to_state,
+        build_auto_continue_prompt,
         build_stop_summary,
         build_runtime_system_prompts,
         build_task_frame,
@@ -88,6 +91,7 @@ except ModuleNotFoundError:  # Support the backend/ working directory used by lo
         get_source_windows,
         research_search,
     )
+    from services.writing_style_retrieval import analyze_writing_style
     from utils.api_key import validate_deepseek_key
     from utils.llm_provider import (
         create_openai_client,
@@ -120,6 +124,7 @@ router = APIRouter()
 
 MODEL = "deepseek-v4-flash"
 MAX_TOOL_ROUNDS = 8
+MAX_AUTO_CONTINUE_PASSES = 2
 AGENT_INBOX_EXTENSIONS = {".pdf", ".md", ".markdown"}
 AGENT_INBOX_MAX_FILES = 200
 AGENT_SCAN_MAX_FILES = 500
@@ -2177,6 +2182,17 @@ async def execute_tool(
         return await research_search(db, owner_user_id=user.id, query=_research_query_from_args(args))
     if name == "get_evidence_pack":
         return await get_evidence_pack(db, owner_user_id=user.id, query=_research_query_from_args(args))
+    if name == "analyze_writing_style":
+        return await analyze_writing_style(
+            db,
+            owner_user_id=user.id,
+            question=str(args.get("question") or ""),
+            author_or_journal=str(args.get("author_or_journal") or ""),
+            entry_ids=[str(item) for item in (args.get("entry_ids") or []) if item],
+            section_type=str(args.get("section_type") or ""),
+            limit_entries=max(1, min(int(args.get("limit_entries") or 5), 20)),
+            max_sections_per_entry=max(1, min(int(args.get("max_sections_per_entry") or 3), 8)),
+        )
     if name == "get_source_windows":
         return await get_source_windows(
             db,
@@ -2398,149 +2414,176 @@ async def agent_chat(
                 )
             messages = build_messages(req, extra_system_contents=runtime_prompts)
 
-            for _ in range(MAX_TOOL_ROUNDS):
-                error_stage = "llm_completion"
-                active_tool = None
-                response = client.chat.completions.create(
-                    model=model,
-                    extra_body={"thinking": {"type": "disabled"}},
-                    messages=messages,
-                    tools=TOOL_SCHEMAS,
-                    tool_choice="auto",
-                    temperature=0.2,
-                    max_tokens=4000,
-                )
-                message = response.choices[0].message
-                tool_calls = message.tool_calls or []
-                messages.append(message.model_dump(exclude_none=True))
-                if not tool_calls:
-                    content = message.content or ""
-                    await _save_agent_message(db, user, session, role="assistant", event_type="message", content=content)
-                    await db.commit()
-                    yield sse_event("answer", {"content": content})
-                    yield sse_event("done", {})
-                    return
-
-                for tool_call in tool_calls:
-                    name = tool_call.function.name
-                    active_tool = name
-                    error_stage = "tool_argument_parse"
-                    try:
-                        args = json.loads(tool_call.function.arguments or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-                    normalized_args = normalize_tool_args(
-                        name,
-                        args,
-                        task_frame=task_frame,
-                        resolved_context=resolved_context,
-                        state=state,
+            auto_continue_attempts = 0
+            for pass_index in range(MAX_AUTO_CONTINUE_PASSES + 1):
+                for _ in range(MAX_TOOL_ROUNDS):
+                    error_stage = "llm_completion"
+                    active_tool = None
+                    response = client.chat.completions.create(
+                        model=model,
+                        extra_body={"thinking": {"type": "disabled"}},
+                        messages=messages,
+                        tools=TOOL_SCHEMAS,
+                        tool_choice="auto",
+                        temperature=0.2,
+                        max_tokens=4000,
                     )
-                    yield sse_event("tool_call", {"name": name, "arguments": normalized_args})
-                    await _save_agent_message(
-                        db,
-                        user,
-                        session,
-                        role="assistant",
-                        event_type="tool_call",
-                        tool_name=name,
-                        payload=normalized_args,
-                    )
-                    policy_result = enforce_tool_policy(
-                        name,
-                        normalized_args,
-                        task_frame=task_frame,
-                        state=state,
-                        resolved_context=resolved_context,
-                    )
-                    if policy_result is not None:
-                        result = policy_result
-                    else:
-                        error_stage = "tool_execution"
-                        if name == "analyze_reading_candidates":
-                            progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+                    message = response.choices[0].message
+                    tool_calls = message.tool_calls or []
+                    messages.append(message.model_dump(exclude_none=True))
+                    if not tool_calls:
+                        content = message.content or ""
+                        await _save_agent_message(db, user, session, role="assistant", event_type="message", content=content)
+                        await db.commit()
+                        yield sse_event("answer", {"content": content})
+                        yield sse_event("done", {})
+                        return
 
-                            async def _on_progress(payload: dict[str, Any]) -> None:
-                                await progress_queue.put(payload)
+                    for tool_call in tool_calls:
+                        name = tool_call.function.name
+                        active_tool = name
+                        error_stage = "tool_argument_parse"
+                        try:
+                            args = json.loads(tool_call.function.arguments or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        normalized_args = normalize_tool_args(
+                            name,
+                            args,
+                            task_frame=task_frame,
+                            resolved_context=resolved_context,
+                            state=state,
+                        )
+                        yield sse_event("tool_call", {"name": name, "arguments": normalized_args})
+                        await _save_agent_message(
+                            db,
+                            user,
+                            session,
+                            role="assistant",
+                            event_type="tool_call",
+                            tool_name=name,
+                            payload=normalized_args,
+                        )
+                        policy_result = enforce_tool_policy(
+                            name,
+                            normalized_args,
+                            task_frame=task_frame,
+                            state=state,
+                            resolved_context=resolved_context,
+                        )
+                        if policy_result is not None:
+                            result = policy_result
+                        else:
+                            error_stage = "tool_execution"
+                            if name == "analyze_reading_candidates":
+                                progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
-                            tool_task = asyncio.create_task(
-                                execute_tool(
+                                async def _on_progress(payload: dict[str, Any]) -> None:
+                                    await progress_queue.put(payload)
+
+                                tool_task = asyncio.create_task(
+                                    execute_tool(
+                                        name,
+                                        normalized_args,
+                                        db=db,
+                                        user=user,
+                                        api_key=api_key,
+                                        session=session,
+                                        progress_callback=_on_progress,
+                                    )
+                                )
+                                while True:
+                                    if tool_task.done() and progress_queue.empty():
+                                        break
+                                    try:
+                                        payload = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
+                                    except asyncio.TimeoutError:
+                                        continue
+                                    working_note = payload.get("working_note")
+                                    if isinstance(working_note, dict):
+                                        state = append_working_note(state, working_note)
+                                        await _replace_session_state(db, session, state=state)
+                                        await db.commit()
+                                        yield sse_event("session_state", {"last_state": summarize_state_for_ui(state)})
+                                    yield sse_event("analysis_progress", payload)
+                                result = await tool_task
+                            else:
+                                result = await execute_tool(
                                     name,
                                     normalized_args,
                                     db=db,
                                     user=user,
                                     api_key=api_key,
                                     session=session,
-                                    progress_callback=_on_progress,
                                 )
-                            )
-                            while True:
-                                if tool_task.done() and progress_queue.empty():
-                                    break
-                                try:
-                                    payload = await asyncio.wait_for(progress_queue.get(), timeout=0.2)
-                                except asyncio.TimeoutError:
-                                    continue
-                                working_note = payload.get("working_note")
-                                if isinstance(working_note, dict):
-                                    state = append_working_note(state, working_note)
-                                    await _replace_session_state(db, session, state=state)
-                                    await db.commit()
-                                    yield sse_event("session_state", {"last_state": summarize_state_for_ui(state)})
-                                yield sse_event("analysis_progress", payload)
-                            result = await tool_task
-                        else:
-                            result = await execute_tool(
-                                name,
-                                normalized_args,
-                                db=db,
-                                user=user,
-                                api_key=api_key,
-                                session=session,
-                            )
-                    state = update_state_after_tool(
-                        state,
-                        name=name,
-                        args=normalized_args,
-                        result=result,
-                        blocked_by_policy=policy_result is not None,
+                        state = update_state_after_tool(
+                            state,
+                            name=name,
+                            args=normalized_args,
+                            result=result,
+                            blocked_by_policy=policy_result is not None,
+                        )
+                        if name == "scan_input_folder":
+                            state["last_scan"] = result
+                        error_stage = "session_persistence"
+                        await _replace_session_state(db, session, state=state)
+                        resolved_context = resolve_context_refs(task_frame, state)
+                        await _save_agent_message(
+                            db,
+                            user,
+                            session,
+                            role="tool",
+                            event_type="tool_result",
+                            tool_name=name,
+                            payload=result,
+                        )
+                        if isinstance(result, dict) and result.get("proposal_id"):
+                            yield sse_event("proposal", result)
+                        await db.commit()
+                        yield sse_event("session_state", {"last_state": summarize_state_for_ui(state)})
+                        if state.get("last_runtime_notice"):
+                            yield sse_event("runtime_notice", state["last_runtime_notice"])
+                        yield sse_event("tool_result", {"name": name, "result": result})
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": json.dumps(result, ensure_ascii=False),
+                            }
+                        )
+                        active_tool = None
+                        error_stage = "llm_completion"
+
+                if pass_index < MAX_AUTO_CONTINUE_PASSES:
+                    auto_continue_attempts += 1
+                    auto_prompt = build_auto_continue_prompt(
+                        task_frame=task_frame,
+                        state=state,
+                        pass_index=auto_continue_attempts,
+                        max_passes=MAX_AUTO_CONTINUE_PASSES,
                     )
-                    if name == "scan_input_folder":
-                        state["last_scan"] = result
-                    error_stage = "session_persistence"
+                    messages.append({"role": "system", "content": auto_prompt})
+                    runtime = state.setdefault("_runtime", {})
+                    runtime["auto_continue_attempts"] = auto_continue_attempts
+                    state["last_runtime_notice"] = {
+                        "code": "auto_continue_tool_rounds",
+                        "severity": "info",
+                        "message": f"工具调用达到单段上限，系统正在自动续跑第 {auto_continue_attempts}/{MAX_AUTO_CONTINUE_PASSES} 次，无需重新输入提示词。",
+                        "intent": task_frame.get("intent"),
+                        "recommendations": ["继续复用当前会话状态和已返回证据。"],
+                    }
                     await _replace_session_state(db, session, state=state)
-                    resolved_context = resolve_context_refs(task_frame, state)
-                    await _save_agent_message(
-                        db,
-                        user,
-                        session,
-                        role="tool",
-                        event_type="tool_result",
-                        tool_name=name,
-                        payload=result,
-                    )
-                    if isinstance(result, dict) and result.get("proposal_id"):
-                        yield sse_event("proposal", result)
                     await db.commit()
                     yield sse_event("session_state", {"last_state": summarize_state_for_ui(state)})
-                    if state.get("last_runtime_notice"):
-                        yield sse_event("runtime_notice", state["last_runtime_notice"])
-                    yield sse_event("tool_result", {"name": name, "result": result})
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": json.dumps(result, ensure_ascii=False),
-                        }
-                    )
-                    active_tool = None
-                    error_stage = "llm_completion"
-
+                    yield sse_event("runtime_notice", state["last_runtime_notice"])
+                    continue
+                break
             stop_summary = build_stop_summary(
                 task_frame=task_frame,
                 state=state,
                 reason="max_tool_rounds_reached",
                 max_tool_rounds=MAX_TOOL_ROUNDS,
+                auto_continue_attempts=auto_continue_attempts,
             )
             state["last_stop_summary"] = stop_summary
             await _replace_session_state(db, session, state=state)

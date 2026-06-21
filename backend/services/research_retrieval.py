@@ -39,6 +39,21 @@ FIELD_WEIGHTS = {
     "source_evidence": 24.0,
     "reading_item": 7.0,
 }
+SOURCE_KIND_ORDER = {
+    "reading_source_evidence": 0,
+    "source_evidence": 0,
+    "source_window": 1,
+    "citation": 2,
+    "reference": 3,
+    "doi": 4,
+    "title": 5,
+    "abstract": 6,
+    "user_note": 7,
+    "edited_reading_item": 8,
+    "annotation": 9,
+    "card_note": 10,
+    "reading_item": 11,
+}
 
 
 @dataclass(slots=True)
@@ -190,8 +205,9 @@ def _sort_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         items,
         key=lambda item: (
             TIER_ORDER.get(str(item.get("source_tier")), 99),
+            SOURCE_KIND_ORDER.get(str(item.get("source_kind") or ""), 99),
             -float(item.get("score") or 0),
-            str(item.get("source_kind") or ""),
+            str(item.get("item_label") or ""),
         ),
     )
 
@@ -782,9 +798,22 @@ async def get_evidence_pack(
         entries_limit = len(result_entries)
     else:
         entries_limit = max(1, min(int(query.limit_entries or 100), len(result_entries)))
+    selected_entries = result_entries[:entries_limit]
+    source_kind_summary: dict[str, int] = {}
+    table_summary: dict[str, int] = {}
+    for entry in selected_entries:
+        for evidence in entry.get("evidence") or []:
+            kind = str(evidence.get("source_kind") or "")
+            table = str(evidence.get("table") or "")
+            if kind:
+                source_kind_summary[kind] = source_kind_summary.get(kind, 0) + 1
+            if table:
+                table_summary[table] = table_summary.get(table, 0) + 1
     return {
         "question": query.question,
-        "entries": result_entries[:entries_limit],
+        "entries": selected_entries,
+        "source_kind_summary": source_kind_summary,
+        "table_summary": table_summary,
         "external_evidence": [],
         "limitations": ["未联网检索；如需最新外部证据，需要先获得用户明确授权。"],
     }

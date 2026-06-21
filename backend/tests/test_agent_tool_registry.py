@@ -35,6 +35,7 @@ class AgentToolRegistryTests(unittest.TestCase):
         tool_names = {schema["function"]["name"] for schema in TOOL_SCHEMAS}
         self.assertIn("research_search", tool_names)
         self.assertIn("get_evidence_pack", tool_names)
+        self.assertIn("analyze_writing_style", tool_names)
         self.assertIn("get_source_windows", tool_names)
         self.assertIn("analyze_reading_candidates", tool_names)
         self.assertIn("filter_analysis_cache", tool_names)
@@ -63,6 +64,17 @@ class AgentToolRegistryTests(unittest.TestCase):
         self.assertTrue(fulltext.consent_required)
         self.assertTrue(fulltext.uses_internet)
         self.assertFalse(fulltext.writes_database)
+
+    def test_writing_style_tool_is_read_only_and_requires_question(self) -> None:
+        tool = get_tool("analyze_writing_style")
+        self.assertEqual(tool.permission, "read_local")
+        self.assertFalse(tool.consent_required)
+        self.assertFalse(tool.proposal_required)
+        self.assertFalse(tool.writes_database)
+        self.assertFalse(tool.uses_internet)
+        self.assertEqual(tool.schema["required"], ["question"])
+        self.assertIn("author_or_journal", tool.schema["properties"])
+        self.assertIn("max_sections_per_entry", tool.schema["properties"])
 
     def test_capability_matrix_is_serializable(self) -> None:
         matrix = list_tool_capabilities()

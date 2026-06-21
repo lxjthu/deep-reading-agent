@@ -70,6 +70,26 @@ AGENT_TOOLS = [
         ),
     ),
     AgentTool(
+        name="analyze_writing_style",
+        description=(
+            "Retrieve local original Markdown passages for writing-style analysis of an author, journal, "
+            "paper, introduction, theory section, methods section, or argument structure."
+        ),
+        permission="read_local",
+        handler="analyze_writing_style",
+        schema=_object(
+            {
+                "question": {"type": "string"},
+                "author_or_journal": {"type": "string"},
+                "entry_ids": {"type": "array", "items": {"type": "string"}},
+                "section_type": {"type": "string", "enum": ["", "introduction", "theory", "method", "general"]},
+                "limit_entries": {"type": "integer", "minimum": 1, "maximum": 20},
+                "max_sections_per_entry": {"type": "integer", "minimum": 1, "maximum": 8},
+            },
+            ["question"],
+        ),
+    ),
+    AgentTool(
         name="get_evidence_pack",
         description="Return P0/P1/P2 evidence packs for selected entries and a research question.",
         permission="read_local",

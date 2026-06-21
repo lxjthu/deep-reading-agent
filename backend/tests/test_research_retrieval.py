@@ -268,6 +268,33 @@ class ResearchRetrievalTests(unittest.TestCase):
         self.assertLess(edited_index, ai_index)
         self.assertIn("未联网", "".join(pack["limitations"]))
 
+    def test_source_evidence_ranks_ahead_of_metadata_for_focused_entry(self) -> None:
+        ids = self.seed_library()
+
+        async def run():
+            async with AsyncSessionLocal() as session:
+                return await get_evidence_pack(
+                    session,
+                    owner_user_id=ids["owner_id"],
+                    query=ResearchQuery(
+                        question="platform responsibility digital governance",
+                        entry_ids=[ids["entry_id"]],
+                        limit_evidence_per_entry=20,
+                    ),
+                )
+
+        pack = asyncio.run(run())
+        evidence = pack["entries"][0]["evidence"]
+        source_idx = next(i for i, ev in enumerate(evidence) if ev["source_kind"] == "source_evidence")
+        title_idx = next(i for i, ev in enumerate(evidence) if ev["source_kind"] == "title")
+        abstract_idx = next(i for i, ev in enumerate(evidence) if ev["source_kind"] == "abstract")
+        reading_idx = next(i for i, ev in enumerate(evidence) if ev["source_kind"] == "reading_item")
+        self.assertLess(source_idx, title_idx)
+        self.assertLess(source_idx, abstract_idx)
+        self.assertLess(source_idx, reading_idx)
+        self.assertGreaterEqual(pack["source_kind_summary"]["source_evidence"], 1)
+        self.assertGreaterEqual(pack["table_summary"]["reading_source_evidence"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

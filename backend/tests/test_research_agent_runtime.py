@@ -15,6 +15,7 @@ from services.research_agent_runtime import (  # noqa: E402
     apply_execution_result_to_state,
     build_stop_summary,
     build_runtime_system_prompts,
+    build_auto_continue_prompt,
     build_task_frame,
     enforce_tool_policy,
     normalize_tool_args,
@@ -77,6 +78,29 @@ class ResearchAgentRuntimeTests(unittest.TestCase):
     def test_build_task_frame_detects_english_status_intent(self) -> None:
         frame = build_task_frame("Check the job status and progress for the running batch.", {})
         self.assertEqual(frame["intent"], "check_status")
+
+    def test_build_task_frame_detects_writing_style_intent(self) -> None:
+        frame = build_task_frame("帮我分析宁健康这篇论文的引言写作风格", {})
+        self.assertEqual(frame["intent"], "writing_style_analysis")
+        self.assertTrue(frame["requires_local_search"])
+
+    def test_normalize_tool_args_fills_writing_style_question_and_context(self) -> None:
+        frame = build_task_frame("继续分析这些论文的方法写作风格", {"last_result_set": {"entries": [{"entry_id": "entry-1"}]}})
+        resolved = {"status": "resolved", "entries": [{"entry_id": "entry-1", "title": "Paper A"}]}
+        normalized = normalize_tool_args(
+            "analyze_writing_style",
+            {},
+            task_frame=frame,
+            resolved_context=resolved,
+            state={},
+        )
+        self.assertEqual(normalized["question"], "继续分析这些论文的方法写作风格")
+        self.assertEqual(normalized["entry_ids"], ["entry-1"])
+
+    def test_runtime_prompts_recommend_writing_style_tool(self) -> None:
+        frame = build_task_frame("帮我分析这篇文章理论部分怎么写", {})
+        prompts = build_runtime_system_prompts(frame, {"status": "not_needed", "entries": []}, {})
+        self.assertIn("analyze_writing_style", "\n".join(prompts))
 
     def test_build_task_frame_detects_count_intent(self) -> None:
         frame = build_task_frame("我库里一共有多少篇已经精读的论文？", {})
@@ -568,6 +592,29 @@ class ResearchAgentRuntimeTests(unittest.TestCase):
         self.assertEqual(ui_state["analysis_cache_summary"]["cache_id"], "cache-2")
         self.assertEqual(ui_state["analysis_cache_summary"]["source_scope"], "analysis_cache_subset")
         self.assertEqual(ui_state["analysis_cache_summary"]["reused_from_cache_id"], "cache-1")
+
+    def test_build_auto_continue_prompt_reuses_same_user_request(self) -> None:
+        prompt = build_auto_continue_prompt(
+            task_frame={"raw_message": "帮我分析这些论文的写作风格", "intent": "writing_style_analysis"},
+            state={"last_result_set": {"count": 3}, "budget_snapshot": {"tool_counts": {"analyze_writing_style": 8}}},
+            pass_index=1,
+            max_passes=2,
+        )
+        self.assertIn("自动续跑", prompt)
+        self.assertIn("帮我分析这些论文的写作风格", prompt)
+        self.assertIn("不要要求用户重复输入", prompt)
+        self.assertIn("3", prompt)
+
+    def test_build_stop_summary_reports_auto_continue_attempts(self) -> None:
+        summary = build_stop_summary(
+            task_frame={"intent": "summarize_topic"},
+            state={"last_result_set": {"count": 8}, "budget_snapshot": {"tool_counts": {"research_search": 2}}},
+            reason="max_tool_rounds_reached",
+            max_tool_rounds=8,
+            auto_continue_attempts=2,
+        )
+        self.assertEqual(summary["auto_continue_attempts"], 2)
+        self.assertIn("已自动续跑 2 次", summary["message"])
 
     def test_build_stop_summary_mentions_result_set_count(self) -> None:
         summary = build_stop_summary(
