@@ -83,6 +83,24 @@ class AgentToolRegistryTests(unittest.TestCase):
         self.assertIn("research_search", names)
         self.assertTrue(all("handler" not in item for item in matrix))
 
+    def test_idea_lab_tools_are_read_only(self) -> None:
+        construct_tool = get_tool("extract_research_constructs")
+        gap_tool = get_tool("diagnose_research_gaps")
+        idea_tool = get_tool("generate_research_ideas")
+
+        for tool in (construct_tool, gap_tool, idea_tool):
+            self.assertEqual(tool.permission, "read_local")
+            self.assertFalse(tool.consent_required)
+            self.assertFalse(tool.proposal_required)
+            self.assertFalse(tool.writes_database)
+            self.assertFalse(tool.uses_internet)
+
+    def test_extract_research_constructs_requires_topic(self) -> None:
+        tool = get_tool("extract_research_constructs")
+        self.assertIn("topic", tool.schema["required"])
+        self.assertIn("entry_ids", tool.schema["properties"])
 
 if __name__ == "__main__":
     unittest.main()
+
+

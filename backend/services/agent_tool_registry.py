@@ -226,6 +226,57 @@ AGENT_TOOLS = [
         ),
     ),
     AgentTool(
+        name="extract_research_constructs",
+        description=(
+            "Extract economics/management research constructs, mechanisms, variables, "
+            "and empirical design hints from local evidence packs or selected bibliography entries."
+        ),
+        permission="read_local",
+        handler="extract_research_constructs",
+        schema=_object(
+            {
+                "topic": {"type": "string"},
+                "entry_ids": {"type": "array", "items": {"type": "string"}},
+                "keywords": {"type": "array", "items": {"type": "string"}},
+                "max_constructs": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            ["topic"],
+        ),
+    ),
+    AgentTool(
+        name="diagnose_research_gaps",
+        description=(
+            "Diagnose theory, mechanism, measurement, context, and causal-identification gaps "
+            "from previously extracted economics/management constructs."
+        ),
+        permission="read_local",
+        handler="diagnose_research_gaps",
+        schema=_object(
+            {
+                "topic": {"type": "string"},
+                "entry_ids": {"type": "array", "items": {"type": "string"}},
+                "max_constructs": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            ["topic"],
+        ),
+    ),
+    AgentTool(
+        name="generate_research_ideas",
+        description=(
+            "Generate structured economics/management research idea candidates from local constructs "
+            "and evidence gaps, including research question, hypotheses, data strategy, contribution, and risks."
+        ),
+        permission="read_local",
+        handler="generate_research_ideas",
+        schema=_object(
+            {
+                "topic": {"type": "string"},
+                "entry_ids": {"type": "array", "items": {"type": "string"}},
+                "max_ideas": {"type": "integer", "minimum": 1, "maximum": 10},
+            },
+            ["topic"],
+        ),
+    ),    AgentTool(
         name="get_entry_detail",
         description="Get metadata, source file id, and recent workflow timeline for a bibliography entry.",
         permission="read_local",
@@ -363,3 +414,5 @@ def get_tool(name: str) -> AgentTool:
 
 def list_tool_capabilities() -> list[dict[str, Any]]:
     return [tool.as_capability() for tool in AGENT_TOOLS]
+
+
