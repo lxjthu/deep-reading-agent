@@ -50,6 +50,11 @@ try:
         update_state_after_tool,
     )
     from backend.services.reading_candidate_analysis import analyze_reading_candidates, filter_analysis_cache
+    from backend.services.research_idea_lab import (
+        diagnose_research_gaps as idea_lab_diagnose_research_gaps,
+        extract_constructs_from_evidence,
+        run_idea_lab_pipeline,
+    )
     from backend.services.agent_tool_registry import TOOL_SCHEMAS as REGISTERED_TOOL_SCHEMAS, list_tool_capabilities
     from backend.services.research_retrieval import (
         ResearchQuery,
@@ -84,6 +89,11 @@ except ModuleNotFoundError:  # Support the backend/ working directory used by lo
         update_state_after_tool,
     )
     from services.reading_candidate_analysis import analyze_reading_candidates, filter_analysis_cache
+    from services.research_idea_lab import (
+        diagnose_research_gaps as idea_lab_diagnose_research_gaps,
+        extract_constructs_from_evidence,
+        run_idea_lab_pipeline,
+    )
     from services.agent_tool_registry import TOOL_SCHEMAS as REGISTERED_TOOL_SCHEMAS, list_tool_capabilities
     from services.research_retrieval import (
         ResearchQuery,
@@ -2182,6 +2192,75 @@ async def execute_tool(
         return await research_search(db, owner_user_id=user.id, query=_research_query_from_args(args))
     if name == "get_evidence_pack":
         return await get_evidence_pack(db, owner_user_id=user.id, query=_research_query_from_args(args))
+    if name == "extract_research_constructs":
+        pack = await get_evidence_pack(
+            db,
+            owner_user_id=user.id,
+            query=_research_query_from_args(
+                {
+                    "question": args.get("topic") or "",
+                    "entry_ids": args.get("entry_ids") or [],
+                    "keywords": args.get("keywords") or [],
+                    "limit_entries": 0 if args.get("entry_ids") else 50,
+                    "limit_evidence_per_entry": 5,
+                    "include_source_text": True,
+                    "include_user_notes": True,
+                    "include_ai_notes": True,
+                }
+            ),
+        )
+        return extract_constructs_from_evidence(
+            evidence_pack=pack,
+            topic=str(args.get("topic") or ""),
+            max_constructs=max(1, min(int(args.get("max_constructs") or 8), 20)),
+        )
+    if name == "diagnose_research_gaps":
+        pack = await get_evidence_pack(
+            db,
+            owner_user_id=user.id,
+            query=_research_query_from_args(
+                {
+                    "question": args.get("topic") or "",
+                    "entry_ids": args.get("entry_ids") or [],
+                    "limit_entries": 0 if args.get("entry_ids") else 50,
+                    "limit_evidence_per_entry": 5,
+                    "include_source_text": True,
+                    "include_user_notes": True,
+                    "include_ai_notes": True,
+                }
+            ),
+        )
+        constructs = extract_constructs_from_evidence(
+            evidence_pack=pack,
+            topic=str(args.get("topic") or ""),
+            max_constructs=max(1, min(int(args.get("max_constructs") or 8), 20)),
+        )
+        return idea_lab_diagnose_research_gaps(
+            construct_result=constructs,
+            topic=str(args.get("topic") or ""),
+        )
+    if name == "generate_research_ideas":
+        pack = await get_evidence_pack(
+            db,
+            owner_user_id=user.id,
+            query=_research_query_from_args(
+                {
+                    "question": args.get("topic") or "",
+                    "entry_ids": args.get("entry_ids") or [],
+                    "limit_entries": 0 if args.get("entry_ids") else 50,
+                    "limit_evidence_per_entry": 5,
+                    "include_source_text": True,
+                    "include_user_notes": True,
+                    "include_ai_notes": True,
+                }
+            ),
+        )
+        return run_idea_lab_pipeline(
+            evidence_pack=pack,
+            topic=str(args.get("topic") or ""),
+            max_constructs=8,
+            max_ideas=max(1, min(int(args.get("max_ideas") or 5), 10)),
+        )
     if name == "analyze_writing_style":
         return await analyze_writing_style(
             db,
@@ -2619,3 +2698,5 @@ async def agent_chat(
             yield sse_event("error", payload)
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+

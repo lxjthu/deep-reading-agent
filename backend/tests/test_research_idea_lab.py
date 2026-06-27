@@ -124,6 +124,41 @@ class ResearchIdeaLabTests(unittest.TestCase):
         self.assertIn("hypotheses", idea)
         self.assertEqual(idea["evidence_refs"], ["entry-1"])
 
+
+    def test_run_idea_lab_pipeline_composes_constructs_gaps_and_ideas(self) -> None:
+        from services.research_idea_lab import run_idea_lab_pipeline
+
+        evidence_pack = {
+            "entries": [
+                {
+                    "entry_id": "entry-1",
+                    "title": "Digital Capability and Firm Resilience",
+                    "evidence": [
+                        {
+                            "source_tier": "P0",
+                            "source_kind": "abstract",
+                            "text": "Digital capability improves firm resilience through innovation efficiency.",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        result = run_idea_lab_pipeline(
+            evidence_pack=evidence_pack,
+            topic="digital capability",
+            max_constructs=5,
+            max_ideas=3,
+        )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertIn("constructs", result)
+        self.assertIn("gaps", result)
+        self.assertIn("ideas", result)
+
 if __name__ == "__main__":
     unittest.main()
+
+
+
 

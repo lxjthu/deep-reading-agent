@@ -177,3 +177,30 @@ def generate_research_ideas(
 
     return {"status": "ready", "topic": construct_result.get("topic") or "", "ideas": ideas, "gaps": gaps}
 
+def run_idea_lab_pipeline(
+    *,
+    evidence_pack: dict[str, Any],
+    topic: str,
+    max_constructs: int = 8,
+    max_ideas: int = 5,
+) -> dict[str, Any]:
+    construct_result = extract_constructs_from_evidence(
+        evidence_pack=evidence_pack,
+        topic=topic,
+        max_constructs=max_constructs,
+    )
+    gap_result = diagnose_research_gaps(construct_result=construct_result, topic=topic)
+    idea_result = generate_research_ideas(
+        construct_result=construct_result,
+        gap_result=gap_result,
+        max_ideas=max_ideas,
+    )
+    return {
+        "status": "ready",
+        "topic": topic,
+        "constructs": construct_result.get("constructs") or [],
+        "gaps": gap_result.get("gaps") or [],
+        "ideas": idea_result.get("ideas") or [],
+        "limitations": construct_result.get("limitations") or [],
+    }
+
