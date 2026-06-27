@@ -297,7 +297,7 @@ class PromptTemplate(Base):
         ),
         CheckConstraint(
             "prompt_type IN ('quant','qual','long','filter','compare','synthesis','ai_template',"
-            "'translation','library_chat','journal_kb','card_note','ref_format')",
+            "'translation','library_chat','journal_kb','card_note','ref_format','writing_style')",
             name="ck_prompt_templates_type",
         ),
         UniqueConstraint(
@@ -405,7 +405,7 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "job_type IN ('filter','reading_long','reading_quant','reading_qual',"
-            "'compare','synthesis','reference_trace','translation','translate_abstracts','library_chat','ref_format')",
+            "'compare','synthesis','reference_trace','translation','translate_abstracts','library_chat','ref_format','writing_style')",
             name="ck_jobs_job_type",
         ),
         CheckConstraint(
@@ -973,7 +973,7 @@ class Artifact(Base):
             "'filter_excel','compare_excel','compare_md','synthesis_md',"
             "'references_excel','references_with_citations_excel',"
             "'citation_trace_md','references_json','translation_md','translation_glossary',"
-            "'library_chat_md','ref_format_md')",
+            "'library_chat_md','ref_format_md','writing_style_md')",
             name="ck_artifacts_artifact_type",
         ),
     )

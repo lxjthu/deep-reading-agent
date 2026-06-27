@@ -1302,7 +1302,8 @@ backend/migrations/versions/
 ├── 023_add_ref_format_generation.py  # ref_format_presets + ref_format job/artifact 类型
 ├── 024_add_journal_kb_prompt_type.py  # prompt_templates 增加 journal_kb
 ├── 025_add_bib_attachments.py  # bib_attachments + card_notes.source_version 扩展
-└── 026_add_reading_source_evidence.py  # 精读原文证据缓存 + PostgreSQL FTS/trigram 索引
+├── 026_add_reading_source_evidence.py  # 精读原文证据缓存 + PostgreSQL FTS/trigram 索引
+└── 027_add_writing_style_analysis.py  # jobs/artifacts/prompt_templates CHECK 约束新增写作风格分析
 ```
 
 > 说明：`admin` 账号继续通过 `backend/scripts/seed_admin.py` 初始化，不放入 Alembic 迁移。

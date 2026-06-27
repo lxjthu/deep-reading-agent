@@ -5994,6 +5994,19 @@ function PromptsEditor() {
         { key: 'report_writer', title: '报告生成' },
       ],
     },
+    {
+      id: 'writing_style',
+      label: '写作风格分析',
+      steps: [
+        { key: 'single_fulltext_analyzer', title: '单篇全文：写法分析' },
+        { key: 'single_imitation_advisor', title: '单篇全文：模仿写作建议' },
+        { key: 'single_report_writer', title: '单篇全文：报告整理' },
+        { key: 'batch_section_analyzer', title: '批量抽样：分节写法分析' },
+        { key: 'batch_imitation_advisor', title: '批量抽样：模仿写作建议' },
+        { key: 'batch_comparative_synthesizer', title: '批量抽样：多篇风格对比' },
+        { key: 'batch_report_writer', title: '批量抽样：报告整理' },
+      ],
+    },
   ]
 
   const currentType =
@@ -6453,5 +6466,4 @@ function HistoryTab() {
     </div>
   )
 }
-
 

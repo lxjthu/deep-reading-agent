@@ -169,6 +169,40 @@ class WritingStyleRetrievalTests(unittest.TestCase):
         self.assertTrue(result["analysis_instructions"])
         self.assertIn("未联网", "".join(result["limitations"]))
 
+    def test_general_extract_samples_across_paper_structure(self) -> None:
+        markdown = """# Abstract
+Abstract style.
+# Introduction
+Introduction style.
+# Background
+Background style.
+# Literature Review
+Theory style.
+# Hypotheses
+Hypothesis style.
+# Data
+Data style.
+# Model
+Model style.
+# Results
+Result style.
+# Robustness Checks
+Robustness style.
+# Discussion
+Discussion style.
+# Conclusion
+Conclusion style.
+"""
+
+        sections = extract_style_sections(markdown, "general", max_sections=6)
+        headings = [section["heading_path"] for section in sections]
+
+        self.assertEqual(len(sections), 6)
+        self.assertIn("Introduction", headings)
+        self.assertTrue(any("Data" in heading or "Model" in heading for heading in headings))
+        self.assertTrue(any("Results" in heading for heading in headings))
+        self.assertTrue(any("Discussion" in heading or "Conclusion" in heading for heading in headings))
+
 
 if __name__ == "__main__":
     unittest.main()

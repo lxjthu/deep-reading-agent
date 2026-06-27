@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
 
-import markdown
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -16,6 +15,7 @@ from auth.dependencies import current_user
 from db import get_db
 from db.models import Artifact, BibEntry, Job, JobBibEntry, User
 from result_storage import build_result_storage_path, get_results_root, resolve_result_path
+from services.markdown_preview import render_markdown_preview_html
 
 router = APIRouter()
 
@@ -30,6 +30,7 @@ READING_ARTIFACT_TYPES = {
     "compare_md",
     "translation_md",
     "translation_glossary",
+    "writing_style_md",
 }
 FILTER_ARTIFACT_TYPES = {"filter_excel"}
 LIBRARY_CHAT_ARTIFACT_TYPES = {"library_chat_md"}
@@ -76,6 +77,8 @@ def _history_type(artifact: Artifact, job: Job) -> str:
         return "全文翻译"
     if job.job_type == "library_chat":
         return "文献助手"
+    if job.job_type == "writing_style":
+        return "写作风格分析"
     if artifact.artifact_type == "filter_excel":
         return "文献筛选"
     if artifact.artifact_type == "compare_md":
@@ -206,48 +209,8 @@ async def preview_file(
     if ext == '.md':
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
+        return render_markdown_preview_html(content, artifact.filename)
 
-        html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
-
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>{filename}</title>
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 40px 20px;
-            line-height: 1.8;
-            color: #333;
-            background: #fff;
-        }}
-        h1 {{ color: #059669; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }}
-        h2 {{ color: #374151; margin-top: 30px; }}
-        h3 {{ color: #4b5563; }}
-        code {{ background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }}
-        pre {{ background: #f9fafb; padding: 16px; border-radius: 8px; overflow-x: auto; }}
-        pre code {{ background: none; padding: 0; }}
-        table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
-        th, td {{ border: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; }}
-        th {{ background: #f9fafb; font-weight: 600; }}
-        blockquote {{ border-left: 4px solid #059669; margin: 16px 0; padding-left: 16px; color: #4b5563; }}
-        hr {{ border: none; border-top: 1px solid #e5e7eb; margin: 30px 0; }}
-        .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }}
-        .download-btn {{ background: #059669; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; }}
-        .download-btn:hover {{ background: #047857; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>📄 {filename}</h1>
-        <a href="/api/download/{filename}" download class="download-btn">⬇ 下载</a>
-    </div>
-    {html_content}
-</body>
-</html>"""
     else:
         # For non-markdown files, show a simple page with download link
         return f"""<!DOCTYPE html>

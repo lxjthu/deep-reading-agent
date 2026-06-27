@@ -36,6 +36,7 @@ from routers.upload import compute_expires_at, detect_file_type, persist_upload_
 from upload_storage import build_storage_path, get_user_upload_dir
 from services.card_notes import json_list, read_artifact_markdown, read_markdown_file, strip_frontmatter
 from services.fulltext_lookup import download_pdf_candidate, lookup_fulltext
+from services.writing_style_analysis import MissingMarkdownSourceError, analyze_library_writing_style
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -153,6 +154,12 @@ class LibraryAiCommentUpdateRequest(BaseModel):
 class BatchTranslateRequest(BaseModel):
     entry_ids: list[str] = Field(..., min_length=1, max_length=200)
     api_key: str
+
+
+class WritingStyleAnalyzeRequest(BaseModel):
+    entry_ids: list[str] = Field(..., min_length=1, max_length=5)
+    api_key: str
+    analysis_mode: str = "auto"
 
 
 class FullTextCandidateResponse(BaseModel):
@@ -1491,6 +1498,36 @@ async def delete_ai_comment(
     await db.delete(comment)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/writing-style/analyze")
+async def analyze_writing_style_endpoint(
+    req: WritingStyleAnalyzeRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        api_key = validate_deepseek_key(req.api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        return await analyze_library_writing_style(
+            db,
+            owner_user_id=user.id,
+            entry_ids=req.entry_ids,
+            api_key=api_key,
+            analysis_mode=req.analysis_mode,
+            expires_at=compute_expires_at(user),
+        )
+    except MissingMarkdownSourceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "missing_markdown_source",
+                "message": "这篇论文暂时无法进行原文写作风格分析。请先使用 PaddleOCR 将 PDF 转换为 Markdown，并把 Markdown 原文挂载/绑定到这篇文献后再分析。",
+                "skipped": exc.skipped,
+            },
+        ) from exc
 
 
 @router.post("/entries/batch-translate-abstracts")

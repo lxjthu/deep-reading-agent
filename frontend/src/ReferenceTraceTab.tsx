@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { downloadWithAuth } from './lib/download'
+import { downloadWithAuth, openPreviewWithAuth } from './lib/download'
 
 type TraceEntryOption = {
   id: string
@@ -624,22 +624,47 @@ export default function ReferenceTraceTab({ apiKey }: { apiKey: string }) {
                 <h3 className="text-sm font-semibold text-gray-800">产物下载</h3>
                 <div className="mt-3 space-y-2">
                   {summary?.latest_task?.artifacts?.length ? (
-                    summary.latest_task.artifacts.map((artifact) => (
-                      <button
-                        key={artifact.id}
-                        type="button"
-                        onClick={() =>
-                          downloadWithAuth(
-                            `/api/download/${encodeURIComponent(artifact.storage_path)}`,
-                            artifact.filename,
-                          ).catch((error) => setMessage(error.message))
-                        }
-                        className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700 hover:border-emerald-300 hover:text-emerald-700"
-                      >
-                        <span>{artifactLabel(artifact.artifact_type)}</span>
-                        <span className="text-xs text-gray-400">{artifact.filename}</span>
-                      </button>
-                    ))
+                    summary.latest_task.artifacts.map((artifact) => {
+                      const canPreview = artifact.filename.toLowerCase().endsWith('.md')
+                      return (
+                        <div
+                          key={artifact.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-medium">{artifactLabel(artifact.artifact_type)}</div>
+                            <div className="truncate text-xs text-gray-400">{artifact.filename}</div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {canPreview && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openPreviewWithAuth(
+                                    `/api/history/${encodeURIComponent(artifact.filename)}/preview`,
+                                  ).catch((error) => setMessage(error.message))
+                                }
+                                className="rounded-lg bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-700 hover:bg-teal-100"
+                              >
+                                预览
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                downloadWithAuth(
+                                  `/api/download/${encodeURIComponent(artifact.storage_path)}`,
+                                  artifact.filename,
+                                ).catch((error) => setMessage(error.message))
+                              }
+                              className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                            >
+                              下载
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })
                   ) : (
                     <div className="rounded-lg bg-gray-50 px-3 py-4 text-sm text-gray-400">暂无可下载产物。</div>
                   )}

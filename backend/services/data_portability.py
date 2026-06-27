@@ -52,7 +52,7 @@ from upload_storage import build_storage_path, get_upload_root, resolve_storage_
 
 FORMAT_VERSION = 1
 SUPPORTED_FORMAT_VERSIONS = {1}
-CURRENT_SCHEMA_VERSION = "026"
+CURRENT_SCHEMA_VERSION = "027"
 IMPORT_MODE_APPEND = "merge_append"
 IMPORT_MODE_REPLACE = "merge_replace"
 SUPPORTED_IMPORT_MODES = {IMPORT_MODE_APPEND, IMPORT_MODE_REPLACE}

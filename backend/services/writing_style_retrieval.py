@@ -57,11 +57,56 @@ def _matches_section(heading: str, section_type: str) -> bool:
     return any(alias.lower() in lowered for alias in aliases)
 
 
-def _section_quote(text: str, limit: int = 1400) -> str:
+def _section_quote(text: str, limit: int = 2400) -> str:
     clean = _compact_text(text)
     if len(clean) <= limit:
         return clean
     return clean[:limit].rstrip() + "..."
+
+
+GENERAL_STYLE_BUCKETS = (
+    ("front", ("摘要", "abstract", "引言", "导论", "绪论", "introduction", "intro")),
+    ("theory", ("理论", "文献综述", "假设", "机制", "theory", "literature", "hypothesis", "mechanism")),
+    ("method", ("方法", "数据", "模型", "识别", "实证", "method", "methods", "data", "model", "empirical", "identification")),
+    ("result", ("结果", "发现", "分析", "稳健", "异质", "result", "results", "finding", "analysis", "robust", "heterogeneity")),
+    ("discussion", ("讨论", "结论", "启示", "局限", "conclusion", "discussion", "implication", "limitation")),
+)
+
+
+def _general_bucket(heading_path: str | None) -> str:
+    lowered = (heading_path or "").lower()
+    for bucket, aliases in GENERAL_STYLE_BUCKETS:
+        if any(alias.lower() in lowered for alias in aliases):
+            return bucket
+    return "other"
+
+
+def _select_diverse_sections(sections: list[dict[str, Any]], max_sections: int) -> list[dict[str, Any]]:
+    limit = max(1, int(max_sections or 1))
+    if len(sections) <= limit:
+        return sections
+
+    selected: list[dict[str, Any]] = []
+    used_ids: set[int] = set()
+    for bucket, _aliases in GENERAL_STYLE_BUCKETS:
+        for section in sections:
+            if id(section) in used_ids:
+                continue
+            if _general_bucket(section.get("heading_path")) == bucket:
+                selected.append(section)
+                used_ids.add(id(section))
+                break
+            if len(selected) >= limit:
+                return selected
+
+    for section in sections:
+        if id(section) in used_ids:
+            continue
+        selected.append(section)
+        used_ids.add(id(section))
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def extract_style_sections(text: str, section_type: str = "general", max_sections: int = 3) -> list[dict[str, Any]]:
@@ -86,9 +131,10 @@ def extract_style_sections(text: str, section_type: str = "general", max_section
         level = len(match.group(1))
         heading = match.group(2).strip()
         path = path[: level - 1] + [heading]
+        heading_path = " / ".join(path)
         body_start = match.end()
         body_end = matches[index + 1].start() if index + 1 < len(matches) else len(clean)
-        if not _matches_section(heading, section_type):
+        if not _matches_section(heading_path, section_type):
             continue
         body = clean[body_start:body_end].strip()
         quote = _section_quote(body)
@@ -97,16 +143,16 @@ def extract_style_sections(text: str, section_type: str = "general", max_section
         sections.append(
             {
                 "section_type": section_type,
-                "heading_path": " / ".join(path),
+                "heading_path": heading_path,
                 "char_start": body_start,
                 "char_end": body_end,
                 "quote": quote,
             }
         )
-        if len(sections) >= max(1, int(max_sections or 1)):
-            break
-    return sections
 
+    if section_type == "general":
+        return _select_diverse_sections(sections, max_sections)
+    return sections[: max(1, int(max_sections or 1))]
 
 def _entry_summary(entry: BibEntry) -> dict[str, Any]:
     return {
@@ -172,7 +218,7 @@ async def analyze_writing_style(
     entry_ids: list[str] | None = None,
     section_type: str | None = None,
     limit_entries: int = 5,
-    max_sections_per_entry: int = 3,
+    max_sections_per_entry: int = 6,
 ) -> dict[str, Any]:
     style_focus = section_type if section_type in {"introduction", "theory", "method", "general"} else detect_style_focus(question)
     entries = await select_style_entries(
@@ -230,4 +276,3 @@ async def analyze_writing_style(
         ],
         "limitations": limitations,
     }
-

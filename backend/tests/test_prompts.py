@@ -218,3 +218,30 @@ class PromptRouterTests(unittest.TestCase):
         data = read_back.json()
         self.assertEqual(data["source"], "system_default")
         self.assertIn("Custom Tier", data["effective_content"])
+
+    def test_writing_style_prompt_slots_are_exposed(self) -> None:
+        self.register("alice", "pwd12345")
+        headers = self.login_headers("alice", "pwd12345")
+
+        response = self.client.get("/api/prompts/catalog", headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        types = {item["type"]: item for item in response.json()["types"]}
+
+        self.assertIn("writing_style", types)
+        self.assertEqual(types["writing_style"]["label"], "写作风格分析")
+        self.assertEqual(
+            {slot["key"] for slot in types["writing_style"]["items"]},
+            {
+                "single_fulltext_analyzer",
+                "single_imitation_advisor",
+                "single_report_writer",
+                "batch_section_analyzer",
+                "batch_imitation_advisor",
+                "batch_comparative_synthesizer",
+                "batch_report_writer",
+            },
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

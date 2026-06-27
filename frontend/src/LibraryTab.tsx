@@ -307,6 +307,10 @@ function languageClass(language: LibraryEntrySummary['language']) {
   }[language]
 }
 
+function entryHasMarkdownSource(entry: LibraryEntrySummary) {
+  return Boolean(entry.markdown_source_file_id || entry.source_file_type === 'markdown')
+}
+
 function sourceFileTypeLabel(fileType: LibraryEntrySummary['source_file_type']) {
   return (
     {
@@ -324,6 +328,11 @@ function artifactTypeLabel(artifactType: string) {
       filter_excel: '筛选报告',
       compare_md: '对比结果',
       synthesis_md: '综述结果',
+      citation_trace_md: '参考文献梳理报告',
+      references_excel: '参考文献表',
+      references_with_citations_excel: '含正文命中表',
+      references_json: '结构化 JSON',
+      writing_style_md: '\u5199\u4f5c\u98ce\u683c\u5206\u6790',
     }[artifactType] || artifactType
   )
 }
@@ -346,6 +355,8 @@ function jobTypeLabel(jobType: string) {
       reading_qual: '四步精读',
       compare: '对比分析',
       synthesis: 'AI 综述',
+      reference_trace: '参考文献溯源',
+      writing_style: '\u5199\u4f5c\u98ce\u683c\u5206\u6790',
     }[jobType] || jobType
   )
 }
@@ -411,6 +422,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const [batchTagsMessage, setBatchTagsMessage] = useState('')
   const [translating, setTranslating] = useState(false)
   const [translateProgress, setTranslateProgress] = useState('')
+  const [styleAnalyzing, setStyleAnalyzing] = useState(false)
   const [markdownUploading, setMarkdownUploading] = useState(false)
   const [attachmentUploading, setAttachmentUploading] = useState(false)
   const attachmentInputRef = useRef<HTMLInputElement | null>(null)
@@ -431,6 +443,17 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
   const selectedSummary = useMemo(
     () => entries.find((entry) => entry.id === selectedId) || null,
     [entries, selectedId],
+  )
+  const selectedEntries = useMemo(
+    () =>
+      Array.from(selectedIds)
+        .map((entryId) => entries.find((entry) => entry.id === entryId))
+        .filter((entry): entry is LibraryEntrySummary => Boolean(entry)),
+    [entries, selectedIds],
+  )
+  const selectedMarkdownCount = useMemo(
+    () => selectedEntries.filter(entryHasMarkdownSource).length,
+    [selectedEntries],
   )
   const hasMarkdownReaderSource = Boolean(
     detail?.markdown_source_file_id || detail?.source_file_type === 'markdown',
@@ -596,6 +619,44 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
     } catch (error: unknown) {
       alert('翻译失败: ' + (error instanceof Error ? error.message : String(error)))
       setTranslating(false)
+    }
+  }
+
+  async function handleWritingStyleAnalysis(ids: string[]) {
+    if (ids.length === 0 || styleAnalyzing) return
+    if (!apiKey) {
+      alert('\u8bf7\u5148\u5728\u8bbe\u7f6e\u4e2d\u914d\u7f6e DeepSeek API Key')
+      return
+    }
+    const selectedEntries = ids
+      .map((id) => entries.find((entry) => entry.id === id))
+      .filter((entry): entry is LibraryEntrySummary => Boolean(entry))
+    const analyzable = selectedEntries.filter(entryHasMarkdownSource)
+    if (selectedEntries.length > 0 && analyzable.length === 0) {
+      setBatchTagsMessage('\u672a\u5206\u6790\u7684\u8bba\u6587\u9700\u8981\u5148\u4f7f\u7528 PaddleOCR \u5c06 PDF \u8f6c\u6362\u4e3a Markdown\uff0c\u5e76\u628a Markdown \u539f\u6587\u6302\u8f7d/\u7ed1\u5b9a\u5230\u5bf9\u5e94\u6587\u732e\u3002')
+      return
+    }
+    if (analyzable.length < selectedEntries.length) {
+      const ok = confirm(`\u5c06\u5206\u6790 ${analyzable.length} \u7bc7\u5df2\u6302\u8f7d Markdown \u7684\u8bba\u6587\uff0c\u7f3a\u5c11 Markdown \u7684\u8bba\u6587\u4f1a\u5199\u5165\u201c\u672a\u5206\u6790\u8bba\u6587\u201d\u3002\u662f\u5426\u7ee7\u7eed\uff1f`)
+      if (!ok) return
+    }
+
+    setStyleAnalyzing(true)
+    setBatchTagsMessage('\u51c6\u5907\u539f\u6587')
+    try {
+      const response = await fetch('/api/library/writing-style/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_ids: ids, api_key: apiKey, analysis_mode: 'auto' }),
+      })
+      const data = await parseJsonOrThrow<{ filename: string; analyzed_count: number; skipped: { title: string }[] }>(response)
+      const skippedText = data.skipped?.length ? `\uff0c\u672a\u5206\u6790 ${data.skipped.length} \u7bc7` : ''
+      setBatchTagsMessage(`\u5199\u4f5c\u98ce\u683c\u5206\u6790\u5df2\u4fdd\u5b58\u5230\u5386\u53f2\u8bb0\u5f55\uff1a${data.filename}${skippedText}`)
+      if (selectedId) void loadDetail(selectedId)
+    } catch (error: unknown) {
+      setBatchTagsMessage(error instanceof Error ? error.message : '\u5199\u4f5c\u98ce\u683c\u5206\u6790\u5931\u8d25\u3002')
+    } finally {
+      setStyleAnalyzing(false)
     }
   }
 
@@ -1493,6 +1554,7 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
               </div>
             </div>
             {selectedIds.size > 0 && (
+              <>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <label className="min-w-[160px]">
                   <span className="sr-only">批量标签</span>
@@ -1542,6 +1604,18 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                   删除选中 ({selectedIds.size})
                 </button>
               </div>
+              <div className="mt-2 flex justify-end">
+                <button
+                  onClick={() => void handleWritingStyleAnalysis(Array.from(selectedIds))}
+                  disabled={styleAnalyzing || selectedMarkdownCount === 0}
+                  className="rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-700 hover:bg-teal-100 disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:opacity-100"
+                  title={selectedMarkdownCount === 0 ? '选中的论文没有可分析的 Markdown 原文' : `将分析 ${selectedMarkdownCount} 篇已挂载 Markdown 的论文`}
+                  type="button"
+                >
+                  {styleAnalyzing ? '分析中...' : '\u6279\u91cf\u98ce\u683c\u5206\u6790'}
+                </button>
+              </div>
+              </>
             )}
           </div>
           {batchTagsMessage && (
@@ -2011,6 +2085,15 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                   >
                     {saving ? '保存中...' : '保存元数据'}
                   </button>
+                  <button
+                    type="button"
+                    disabled={styleAnalyzing || !hasMarkdownReaderSource}
+                    className="rounded-lg border border-teal-300 bg-teal-50 px-4 py-2 text-sm font-medium text-teal-700 hover:bg-teal-100 disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:opacity-100"
+                    title={hasMarkdownReaderSource ? '分析这篇论文的写作风格' : '这篇论文没有可分析的 Markdown 原文'}
+                    onClick={() => void handleWritingStyleAnalysis([detail.id])}
+                  >
+                    {styleAnalyzing ? '分析中...' : '\u98ce\u683c\u5206\u6790'}
+                  </button>
                   {saveMessage && (
                     <span className={`text-sm ${saveMessage.includes('失败') || saveMessage.includes('错误') ? 'text-red-600' : 'text-emerald-600'}`}>
                       {saveMessage}
@@ -2199,7 +2282,23 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                               item.artifacts.map((artifact) => (
                                 <div
                                   key={artifact.id}
-                                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2"
+                                  role={artifact.filename.toLowerCase().endsWith('.md') ? 'button' : undefined}
+                                  tabIndex={artifact.filename.toLowerCase().endsWith('.md') ? 0 : undefined}
+                                  className={`flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 ${artifact.filename.toLowerCase().endsWith('.md') ? 'cursor-pointer hover:bg-teal-50' : ''}`}
+                                  onClick={() => {
+                                    if (!artifact.filename.toLowerCase().endsWith('.md')) return
+                                    openPreviewWithAuth(
+                                      `/api/history/${encodeURIComponent(artifact.filename)}/preview`,
+                                    ).catch((error) => alert(error.message))
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (!artifact.filename.toLowerCase().endsWith('.md')) return
+                                    if (event.key !== 'Enter' && event.key !== ' ') return
+                                    event.preventDefault()
+                                    openPreviewWithAuth(
+                                      `/api/history/${encodeURIComponent(artifact.filename)}/preview`,
+                                    ).catch((error) => alert(error.message))
+                                  }}
                                 >
                                   <div className="min-w-0">
                                     <div className="truncate text-sm text-gray-800">{artifact.filename}</div>
@@ -2208,18 +2307,35 @@ export default function LibraryTab({ apiKey }: { apiKey: string }) {
                                       <span>{formatTime(artifact.created_at)}</span>
                                     </div>
                                   </div>
-                                  <button
-                                    type="button"
-                                    className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
-                                    onClick={() =>
-                                      downloadWithAuth(
-                                        `/api/download/${encodeURIComponent(artifact.storage_path)}`,
-                                        artifact.filename,
-                                      ).catch((error) => alert(error.message))
-                                    }
-                                  >
-                                    下载
-                                  </button>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {artifact.filename.toLowerCase().endsWith('.md') && (
+                                      <button
+                                        type="button"
+                                        className="rounded-lg bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-700 hover:bg-teal-100"
+                                        onClick={(event) => {
+                                          event.stopPropagation()
+                                          openPreviewWithAuth(
+                                            `/api/history/${encodeURIComponent(artifact.filename)}/preview`,
+                                          ).catch((error) => alert(error.message))
+                                        }}
+                                      >
+                                        预览
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        downloadWithAuth(
+                                          `/api/download/${encodeURIComponent(artifact.storage_path)}`,
+                                          artifact.filename,
+                                        ).catch((error) => alert(error.message))
+                                      }}
+                                    >
+                                      下载
+                                    </button>
+                                  </div>
                                 </div>
                               ))
                             )}

@@ -27,6 +27,7 @@ PROMPT_TYPE_LABELS: dict[str, str] = {
     "journal_kb": "AI 助手顶刊名录",
     "card_note": "Markdown 卡片笔记",
     "ref_format": "参考文献格式",
+    "writing_style": "\u5199\u4f5c\u98ce\u683c\u5206\u6790",
 }
 
 PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
@@ -169,6 +170,36 @@ PROMPT_REGISTRY: dict[str, dict[str, dict[str, str]]] = {
         "generate_prompt": {
             "title": "参考文献生成",
             "file_path": "prompts/ref_format/generate_prompt.md",
+        },
+    },
+    "writing_style": {
+        "single_fulltext_analyzer": {
+            "title": "单篇全文：写法分析",
+            "file_path": "prompts/writing_style/single_fulltext_analyzer.md",
+        },
+        "single_imitation_advisor": {
+            "title": "单篇全文：模仿写作建议",
+            "file_path": "prompts/writing_style/single_imitation_advisor.md",
+        },
+        "single_report_writer": {
+            "title": "单篇全文：报告整理",
+            "file_path": "prompts/writing_style/single_report_writer.md",
+        },
+        "batch_section_analyzer": {
+            "title": "批量抽样：分节写法分析",
+            "file_path": "prompts/writing_style/batch_section_analyzer.md",
+        },
+        "batch_imitation_advisor": {
+            "title": "批量抽样：模仿写作建议",
+            "file_path": "prompts/writing_style/batch_imitation_advisor.md",
+        },
+        "batch_comparative_synthesizer": {
+            "title": "批量抽样：多篇风格对比",
+            "file_path": "prompts/writing_style/batch_comparative_synthesizer.md",
+        },
+        "batch_report_writer": {
+            "title": "批量抽样：报告整理",
+            "file_path": "prompts/writing_style/batch_report_writer.md",
         },
     },
 }

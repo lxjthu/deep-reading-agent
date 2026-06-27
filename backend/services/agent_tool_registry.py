@@ -84,7 +84,7 @@ AGENT_TOOLS = [
                 "entry_ids": {"type": "array", "items": {"type": "string"}},
                 "section_type": {"type": "string", "enum": ["", "introduction", "theory", "method", "general"]},
                 "limit_entries": {"type": "integer", "minimum": 1, "maximum": 20},
-                "max_sections_per_entry": {"type": "integer", "minimum": 1, "maximum": 8},
+                "max_sections_per_entry": {"type": "integer", "minimum": 1, "maximum": 12},
             },
             ["question"],
         ),

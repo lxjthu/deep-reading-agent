@@ -172,6 +172,25 @@ class HistoryRouterTests(unittest.TestCase):
         self.assertEqual({item["filename"] for item in body["filter"]}, {"alice_filter.xlsx"})
         self.assertEqual({item["filename"] for item in body["all"]}, {"alice_7step.md", "alice_filter.xlsx"})
 
+    def test_history_list_includes_writing_style_artifact(self) -> None:
+        alice_id = self.register("alice")
+        alice_headers = self.login_headers("alice")
+
+        self.create_artifact(
+            alice_id,
+            job_type="writing_style",
+            artifact_type="writing_style_md",
+            filename="writing_style.md",
+            content="# 写作风格分析".encode("utf-8"),
+        )
+
+        response = self.client.get("/api/history/", headers=alice_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual([item["filename"] for item in body["reading"]], ["writing_style.md"])
+        self.assertEqual(body["reading"][0]["type"], "写作风格分析")
+
+
     def test_admin_history_list_can_target_owner_user_id(self) -> None:
         alice_id = self.register("alice")
         self.register("admin_user")
