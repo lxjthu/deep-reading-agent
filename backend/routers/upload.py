@@ -19,6 +19,7 @@ from auth.dependencies import current_user
 from db import get_db
 from db.models import BibEntry, File, Job, User
 from db.utils import title_match_score
+from services.markdown_library_import import import_markdown_file_to_library
 from services.markdown_preview import render_markdown_preview_html
 from upload_storage import build_storage_path, get_user_upload_dir, resolve_storage_path
 
@@ -175,6 +176,11 @@ def build_upload_response_from_snapshot(
 async def bind_uploaded_file_to_existing_bib(db: AsyncSession, user_id: int, record: File) -> BibEntry | None:
     if record.file_type not in {"pdf", "markdown"}:
         return None
+
+    if record.file_type == "markdown":
+        imported = await import_markdown_file_to_library(db, owner_user_id=user_id, record=record)
+        if imported is not None:
+            return imported
 
     title = Path(record.original_name or "").stem
     matched = await find_matching_bib_entry(db, user_id, title)

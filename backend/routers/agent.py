@@ -980,7 +980,7 @@ async def _persist_inbox_upload(
         ).scalar_one_or_none()
 
         if existing is not None:
-            matched_bib = await bind_uploaded_file_to_existing_bib(db, user, existing)
+            matched_bib = await bind_uploaded_file_to_existing_bib(db, user.id, existing)
             await db.flush()
             logger.info(
                 "[inbox_upload] deduplicated: user_id=%s, batch_id=%s, filename=%s, existing_file_id=%s, matched_bib=%s",
