@@ -117,6 +117,30 @@ WRITING_STYLE_PATTERNS = (
     "argumentation style",
 )
 
+IDEA_LAB_PATTERNS = (
+    "研究选题",
+    "研究想法",
+    "研究问题",
+    "理论概念",
+    "理论构念",
+    "理论机制",
+    "机制假说",
+    "研究假设",
+    "识别策略",
+    "理论缺口",
+    "文献缺口",
+    "变量关系",
+    "经济管理",
+    "管理学",
+    "经济学",
+    "research idea",
+    "research question",
+    "theoretical construct",
+    "mechanism",
+    "hypothesis",
+    "identification strategy",
+    "research gap",
+)
 COMPARE_PATTERNS = (
     "综述",
     "比较",
@@ -242,6 +266,9 @@ ENTRY_ID_TOOLS = {
     "get_source_windows",
     "get_reading_context",
     "analyze_writing_style",
+    "extract_research_constructs",
+    "diagnose_research_gaps",
+    "generate_research_ideas",
     "search_cnki",
     "lookup_english_fulltext",
 }
@@ -595,6 +622,7 @@ def build_task_frame(message: str, state: dict[str, Any] | None) -> dict[str, An
     wants_execution = _contains_any(raw, EXECUTION_PATTERNS)
     wants_status = _contains_any(raw, STATUS_PATTERNS)
     wants_writing_style = _contains_any(raw, WRITING_STYLE_PATTERNS)
+    wants_idea_lab = _contains_any(raw, IDEA_LAB_PATTERNS)
     wants_compare = _contains_any(raw, COMPARE_PATTERNS)
     wants_analyze = _contains_any(raw, ANALYZE_PATTERNS)
     wants_count = _contains_any(raw, COUNT_PATTERNS)
@@ -611,6 +639,7 @@ def build_task_frame(message: str, state: dict[str, Any] | None) -> dict[str, An
         and not wants_count
         and not wants_execution
         and not wants_external
+        and not wants_idea_lab
     )
 
     if wants_writing_style:
@@ -629,6 +658,8 @@ def build_task_frame(message: str, state: dict[str, Any] | None) -> dict[str, An
         intent = "external_lookup"
     elif wants_compare:
         intent = "summarize_topic"
+    elif wants_idea_lab:
+        intent = "generate_research_ideas"
     elif continuation and has_result_set:
         intent = "continue_result_set"
     else:
@@ -639,15 +670,16 @@ def build_task_frame(message: str, state: dict[str, Any] | None) -> dict[str, An
         "raw_message": raw,
         "intent": intent,
         "continuation_ref": continuation or default_cache_followup,
-        "requires_local_search": intent in {"library_lookup", "library_count", "summarize_topic", "continue_result_set", "analyze_collection", "analyze_cached_collection", "writing_style_analysis"},
+        "requires_local_search": intent in {"library_lookup", "library_count", "summarize_topic", "continue_result_set", "analyze_collection", "analyze_cached_collection", "writing_style_analysis", "generate_research_ideas"},
         "requires_external_search": wants_external,
         "requires_write_proposal": intent == "start_job",
         "user_requested_external": wants_external,
-        "prefers_result_set_tools": continuation and intent in {"summarize_topic", "continue_result_set"},
+        "prefers_result_set_tools": (continuation and intent in {"summarize_topic", "continue_result_set"}) or intent == "generate_research_ideas",
         "force_full_analysis": force_full_analysis,
         "explicit_topic_shift": explicit_topic_shift,
         "has_analysis_cache": has_analysis_cache,
         "prefer_analysis_cache": default_cache_followup and intent == "analyze_cached_collection",
+        "prefers_idea_lab_tools": intent == "generate_research_ideas",
         "ambiguities": [],
     }
 
@@ -797,6 +829,12 @@ def build_runtime_system_prompts(
             "不要虚构作者、期刊或论文的原文写法。"
         )
 
+    if task_frame.get("prefers_idea_lab_tools"):
+        prompts.append(
+            "本轮是经济管理研究构思/理论机制/假设/识别策略场景。优先使用 "
+            "extract_research_constructs、diagnose_research_gaps、generate_research_ideas。"
+            "回答必须区分 P0 原文/题录证据、P1 用户笔记、P2 AI 笔记；不要把缺少证据的推断写成事实。"
+        )
     if not task_frame.get("user_requested_external"):
         prompts.append("本轮用户没有明确授权外部检索；除非用户明确要求 CNKI/全文/PDF/联网/网页检索，否则不要调用 external_read 工具。")
     return prompts
@@ -887,6 +925,9 @@ def normalize_tool_args(
     if name in {"research_search", "get_evidence_pack"} and not normalized.get("question"):
         normalized["question"] = task_frame.get("raw_message") or ""
 
+    if name in {"extract_research_constructs", "diagnose_research_gaps", "generate_research_ideas"}:
+        if not str(normalized.get("topic") or "").strip():
+            normalized["topic"] = task_frame.get("raw_message") or ""
     if name == "get_job_status":
         explicit_job_id = str(normalized.get("job_id") or "").strip()
         pending_proposal_id = str(((state or {}).get("pending_proposal") or {}).get("proposal_id") or "")
@@ -1355,3 +1396,5 @@ def summarize_state_for_ui(state: dict[str, Any] | None) -> dict[str, Any]:
             else None
         ),
     }
+
+

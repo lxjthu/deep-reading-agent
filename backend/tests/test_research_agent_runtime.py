@@ -102,6 +102,19 @@ class ResearchAgentRuntimeTests(unittest.TestCase):
         prompts = build_runtime_system_prompts(frame, {"status": "not_needed", "entries": []}, {})
         self.assertIn("analyze_writing_style", "\n".join(prompts))
 
+
+    def test_build_task_frame_detects_research_idea_intent(self) -> None:
+        frame = build_task_frame("基于这些文献帮我生成几个经济管理研究选题和机制假说", {})
+        self.assertEqual(frame["intent"], "generate_research_ideas")
+        self.assertTrue(frame["prefers_idea_lab_tools"])
+
+    def test_runtime_prompt_recommends_idea_lab_tools(self) -> None:
+        frame = build_task_frame("从这些论文里提取理论概念、机制和识别策略", {})
+        prompts = build_runtime_system_prompts(frame, {"status": "not_needed", "entries": []}, {})
+        combined = "\n".join(prompts)
+        self.assertIn("extract_research_constructs", combined)
+        self.assertIn("diagnose_research_gaps", combined)
+        self.assertIn("generate_research_ideas", combined)
     def test_build_task_frame_detects_count_intent(self) -> None:
         frame = build_task_frame("我库里一共有多少篇已经精读的论文？", {})
         self.assertEqual(frame["intent"], "library_count")
@@ -672,3 +685,4 @@ class ResearchAgentRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
