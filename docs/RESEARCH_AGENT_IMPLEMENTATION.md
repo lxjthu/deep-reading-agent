@@ -11,7 +11,7 @@
 
 - **不使用向量嵌入**，采用结构化 SQL + ILIKE 词汇匹配 + 分层评分
 - **证据分 P0/P1/P2/P3 四级**，按权威性排序后返回给 LLM
-- **工具注册表统一管理**，16 个工具通过 OpenAI-compatible function calling 调用
+- **工具注册表统一管理**，19 个工具通过 OpenAI-compatible function calling 调用
 - **写操作必须走 proposal**，LLM 不能直接执行写库或启动任务
 - **Runtime 开始接管跨轮承接**，已具备 TaskFrame、工作记忆、工具预算与批量分析缓存复用能力
 
@@ -19,7 +19,7 @@
 
 | 文件 | 职责 | 行数 |
 |------|------|------|
-| `backend/services/agent_tool_registry.py` | 工具注册表：AgentTool 数据类、16 个工具定义、OpenAI schema 生成 | 327 |
+| `backend/services/agent_tool_registry.py` | 工具注册表：AgentTool 数据类、19 个工具定义、OpenAI schema 生成 | 327 |
 | `backend/services/research_retrieval.py` | 分层检索引擎：查询解析、多表搜索、证据收集、评分排序、分页全量 | 725 |
 | `backend/services/agent_external_retrieval.py` | 外部检索工具：CNKI URL 生成、英文全文候选查找（只读不写库） | 156 |
 | `backend/services/research_agent_runtime.py` | Runtime 规划层：TaskFrame、Continuation Resolver、预算治理、工作记忆摘要 | 1200+ |
@@ -79,6 +79,25 @@ class AgentTool:
 | `scan_input_folder` | `scan_input_folder` | 只读扫描已上传的 inbox 批次，与文献库比对 | `topic`, `recursive`, `max_files`, `confidence_threshold` |
 | `get_job_status` | `get_job_status` | 查询任务状态和产物链接 | `job_id`(必填) |
 
+
+### Economics/Management Idea Lab Tools
+
+The research agent includes read-only tools for economics and management research ideation. These tools are designed for local evidence synthesis and do not run code, modify the database, or perform external search.
+
+| Tool | Permission | Purpose |
+|---|---|---|
+| `extract_research_constructs` | `read_local` | Extract theoretical constructs, mechanisms, variables, empirical-design hints, and source-backed evidence from selected literature. |
+| `diagnose_research_gaps` | `read_local` | Identify theory, mechanism, measurement, context, and causal-identification gaps from extracted constructs. |
+| `generate_research_ideas` | `read_local` | Generate structured research idea candidates with question, hypotheses, data strategy, contribution, risks, and evidence references. |
+
+Evidence discipline:
+
+- P0 evidence remains the strongest source: original text windows, title, abstract, DOI, metadata, and exact source evidence.
+- P1 evidence includes user notes, edits, annotations, and card notes.
+- P2 AI-generated reading notes may guide synthesis but cannot override P0/P1.
+- If a proposed idea depends on missing evidence, the tool must report it as a gap or risk.
+
+The idea-lab workflow is inspired by AI-Researcher's concept-decomposition pattern but is adapted to economics and management research. It does not import AI-Researcher's Docker execution, ML code agents, or ChromaDB memory.
 #### 写操作工具（`permission="propose_write"`，必须创建 proposal）
 
 | 工具名 | handler | 描述 | Schema 关键参数 |
@@ -549,3 +568,4 @@ Agent 读取以下表（全部按 `owner_user_id` 过滤）：
 - `python -m py_compile backend\routers\agent.py backend\routers\upload.py backend\tests\test_library.py`
 - `python -m unittest backend.tests.test_library`
 - 已手动 SCP 到 `/root/deep-reading-agent/backend/routers/agent.py` 并通过 `systemctl restart deepreading-api` 部署。
+
