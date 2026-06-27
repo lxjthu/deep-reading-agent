@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ BACKEND_DIR = PROJECT_ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from services.reading_candidate_analysis import analyze_reading_candidates  # noqa: E402
 from services.research_agent_runtime import (  # noqa: E402
     append_working_note,
     apply_execution_result_to_state,
@@ -272,6 +274,37 @@ class ResearchAgentRuntimeTests(unittest.TestCase):
         self.assertEqual(normalized["cluster_labels"], ["生成式人工智能 / GenAI"])
         self.assertEqual(normalized["reading_status"], "none")
         self.assertEqual(normalized["max_entries"], 0)
+
+    def test_normalize_analyze_candidates_does_not_filter_status_by_default(self) -> None:
+        frame = build_task_frame(
+            "围绕数智赋能乡村生态共富，分析我文献库里的全部生态产品价值实现文献",
+            {},
+        )
+        normalized = normalize_tool_args(
+            "analyze_reading_candidates",
+            {"topic": "", "query": "*"},
+            task_frame=frame,
+            resolved_context={},
+            state={},
+        )
+        self.assertEqual(normalized["topic"], frame["raw_message"])
+        self.assertEqual(normalized["query"], "*")
+        self.assertEqual(normalized.get("reading_status", ""), "")
+
+    def test_normalize_analyze_candidates_keeps_unread_filter_when_requested(self) -> None:
+        frame = build_task_frame("请分析未启动精读的生态产品价值实现文献", {})
+        normalized = normalize_tool_args(
+            "analyze_reading_candidates",
+            {"topic": "", "query": "*"},
+            task_frame=frame,
+            resolved_context={},
+            state={},
+        )
+        self.assertEqual(normalized["reading_status"], "none")
+
+    def test_analyze_reading_candidates_default_does_not_filter_status(self) -> None:
+        signature = inspect.signature(analyze_reading_candidates)
+        self.assertEqual(signature.parameters["reading_status"].default, "")
 
     def test_enforce_tool_policy_blocks_external_without_explicit_user_request(self) -> None:
         frame = build_task_frame("看看这些文献的主要结论", {})
@@ -707,5 +740,3 @@ class ResearchAgentRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

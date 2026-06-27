@@ -609,7 +609,7 @@ async def analyze_reading_candidates(
     *,
     owner_user_id: int,
     topic: str,
-    reading_status: str = "none",
+    reading_status: str = "",
     query: str = "*",
     batch_size: int = BATCH_SIZE_DEFAULT,
     max_entries: int = 1200,

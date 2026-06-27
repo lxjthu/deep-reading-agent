@@ -2304,7 +2304,7 @@ async def execute_tool(
             db,
             owner_user_id=user.id,
             topic=str(args.get("topic") or ""),
-            reading_status=str(args.get("reading_status") or "none"),
+            reading_status=str(args.get("reading_status") or ""),
             query=str(args.get("query") or "*"),
             batch_size=int(args.get("batch_size") or 100),
             max_entries=int(args.get("max_entries") or 1200),
@@ -2698,5 +2698,3 @@ async def agent_chat(
             yield sse_event("error", payload)
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
-
-
