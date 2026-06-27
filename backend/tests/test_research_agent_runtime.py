@@ -606,6 +606,28 @@ class ResearchAgentRuntimeTests(unittest.TestCase):
         self.assertEqual(ui_state["analysis_cache_summary"]["source_scope"], "analysis_cache_subset")
         self.assertEqual(ui_state["analysis_cache_summary"]["reused_from_cache_id"], "cache-1")
 
+
+    def test_update_state_after_tool_stores_last_idea_lab_result(self) -> None:
+        result = {
+            "status": "ready",
+            "topic": "digital capability",
+            "constructs": [{"construct_id": "construct_1", "name": "digital capability"}],
+            "gaps": [{"gap_id": "gap_1", "gap_type": "causal_identification"}],
+            "ideas": [{"idea_id": "idea_1", "title": "Idea"}],
+        }
+
+        updated = update_state_after_tool(
+            {},
+            name="generate_research_ideas",
+            args={"topic": "digital capability"},
+            result=result,
+        )
+        ui_state = summarize_state_for_ui(updated)
+
+        self.assertIn("last_idea_lab_result", updated)
+        self.assertEqual(updated["last_idea_lab_result"]["topic"], "digital capability")
+        self.assertEqual(updated["last_idea_lab_result"]["idea_count"], 1)
+        self.assertEqual(ui_state["last_idea_lab_result"]["gap_count"], 1)
     def test_build_auto_continue_prompt_reuses_same_user_request(self) -> None:
         prompt = build_auto_continue_prompt(
             task_frame={"raw_message": "帮我分析这些论文的写作风格", "intent": "writing_style_analysis"},
@@ -685,4 +707,5 @@ class ResearchAgentRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -1295,6 +1295,17 @@ def update_state_after_tool(
                 }
                 next_state["selected_entries"] = refs[:20]
 
+    if name in {"extract_research_constructs", "diagnose_research_gaps", "generate_research_ideas"} and isinstance(result, dict):
+        next_state["last_idea_lab_result"] = {
+            "tool": name,
+            "topic": result.get("topic") or args.get("topic"),
+            "construct_count": len(result.get("constructs") or []),
+            "gap_count": len(result.get("gaps") or []),
+            "idea_count": len(result.get("ideas") or []),
+            "constructs": (result.get("constructs") or [])[:10],
+            "gaps": (result.get("gaps") or [])[:10],
+            "ideas": (result.get("ideas") or [])[:10],
+        }
     if isinstance(result, dict) and result.get("proposal_id"):
         next_state["pending_proposal"] = {
             "proposal_id": result.get("proposal_id"),
@@ -1316,6 +1327,7 @@ def summarize_state_for_ui(state: dict[str, Any] | None) -> dict[str, Any]:
     last_scan = state.get("last_scan") or {}
     working_notes = state.get("working_notes") or []
     last_analysis_summary = state.get("last_analysis_summary") or {}
+    last_idea_lab_result = state.get("last_idea_lab_result") or {}
     analysis_cache = _analysis_cache(state)
     return {
         "active_task_frame": state.get("active_task_frame") or {},
@@ -1370,6 +1382,7 @@ def summarize_state_for_ui(state: dict[str, Any] | None) -> dict[str, Any]:
         }
         if last_analysis_summary
         else None,
+        "last_idea_lab_result": last_idea_lab_result if last_idea_lab_result else None,
         "analysis_cache_summary": {
             "cache_id": analysis_cache.get("cache_id"),
             "topic": analysis_cache.get("topic"),
@@ -1396,5 +1409,6 @@ def summarize_state_for_ui(state: dict[str, Any] | None) -> dict[str, Any]:
             else None
         ),
     }
+
 
 
