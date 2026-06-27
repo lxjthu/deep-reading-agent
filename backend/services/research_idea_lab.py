@@ -99,3 +99,81 @@ def extract_constructs_from_evidence(
         "constructs": constructs,
         "limitations": limitations,
     }
+
+def diagnose_research_gaps(*, construct_result: dict[str, Any], topic: str) -> dict[str, Any]:
+    """Diagnose conservative evidence gaps from construct notes."""
+    gaps: list[dict[str, Any]] = []
+    for construct in construct_result.get("constructs") or []:
+        evidence = construct.get("evidence") or []
+        empirical = construct.get("empirical_design") or {}
+        if not empirical.get("identification"):
+            gaps.append(
+                {
+                    "gap_id": f"gap_{len(gaps) + 1}",
+                    "gap_type": "causal_identification",
+                    "summary": f"{construct.get('name')}: causal identification is not yet explicit in the retrieved evidence.",
+                    "why_it_matters": "Economics and management claims need a credible design before the idea can become a research plan.",
+                    "supporting_evidence": evidence[:3],
+                    "needed_evidence": ["identification strategy evidence", "data source and variation source"],
+                    "confidence": "medium",
+                }
+            )
+        if construct.get("mechanisms") == []:
+            gaps.append(
+                {
+                    "gap_id": f"gap_{len(gaps) + 1}",
+                    "gap_type": "mechanism",
+                    "summary": f"{construct.get('name')}: mechanism chain is weak or absent.",
+                    "why_it_matters": "A clear mechanism supports theory contribution and testable hypotheses.",
+                    "supporting_evidence": evidence[:3],
+                    "needed_evidence": ["mechanism evidence", "mediator or moderator discussion"],
+                    "confidence": "medium",
+                }
+            )
+    return {"status": "ready", "topic": topic, "gaps": gaps, "limitations": construct_result.get("limitations") or []}
+
+
+def generate_research_ideas(
+    *,
+    construct_result: dict[str, Any],
+    gap_result: dict[str, Any],
+    max_ideas: int = 5,
+) -> dict[str, Any]:
+    """Generate structured economics/management idea candidates from constructs and gaps."""
+    constructs = construct_result.get("constructs") or []
+    gaps = gap_result.get("gaps") or []
+    ideas: list[dict[str, Any]] = []
+
+    for construct in constructs[: max(1, max_ideas)]:
+        name = construct.get("name") or "research construct"
+        evidence_refs: list[str] = []
+        for row in construct.get("evidence") or []:
+            entry_id = row.get("entry_id")
+            if entry_id and entry_id not in evidence_refs:
+                evidence_refs.append(entry_id)
+        related_gap = gaps[0] if gaps else {}
+        ideas.append(
+            {
+                "idea_id": f"idea_{len(ideas) + 1}",
+                "title": f"How does {name} shape economic or management outcomes?",
+                "research_question": f"How does {name} affect the focal outcome, and through which mechanism?",
+                "theory_base": [],
+                "mechanism_chain": [name] + list(construct.get("mechanisms") or []),
+                "hypotheses": [
+                    f"H1: {name} is associated with the focal economic or management outcome.",
+                    "H2: The relationship operates through the mechanism identified in the evidence set.",
+                ],
+                "data_strategy": {
+                    "sample": "",
+                    "variables": [name],
+                    "identification": "Use the evidence gaps to choose fixed effects, DID, IV, or another credible design.",
+                },
+                "contribution": ["theory contribution", "empirical design contribution"],
+                "risks": [related_gap.get("summary")] if related_gap else [],
+                "evidence_refs": evidence_refs,
+                "confidence": "medium" if evidence_refs else "low",
+            }
+        )
+
+    return {"status": "ready", "topic": construct_result.get("topic") or "", "ideas": ideas, "gaps": gaps}
+
