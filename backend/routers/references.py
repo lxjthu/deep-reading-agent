@@ -525,6 +525,13 @@ async def persist_trace_success(
                 if matched_id:
                     break
 
+            def _coerce_str(value):
+                if value is None:
+                    return None
+                if isinstance(value, str):
+                    return value
+                return str(value)
+
             record = BibReference(
                 id=str(uuid.uuid4()),
                 owner_user_id=user_id,
@@ -536,11 +543,11 @@ async def persist_trace_success(
                 year=reference.get("year"),
                 title=reference.get("title"),
                 journal=reference.get("journal"),
-                volume=reference.get("volume"),
-                issue=reference.get("issue"),
-                pages=reference.get("pages"),
-                doi=reference.get("doi"),
-                language=reference.get("language"),
+                volume=_coerce_str(reference.get("volume")),
+                issue=_coerce_str(reference.get("issue")),
+                pages=_coerce_str(reference.get("pages")),
+                doi=_coerce_str(reference.get("doi")),
+                language=_coerce_str(reference.get("language")),
                 dedup_key=reference.get("dedup_key"),
                 matched_bib_entry_id=matched_id,
                 match_method=match_method,
