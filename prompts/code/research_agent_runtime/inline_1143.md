@@ -1,0 +1,1 @@
+自动续跑 {value_1}/{value_2}：上一段已达到工具调用轮次上限，但用户请求尚未完成。请承接同一用户提示词继续完成，不要要求用户重复输入同一提示词。原始用户提示词：{value_3}。当前可复用结果集数量：{value_4}。优先使用已有工具结果、last_result_set、last_evidence_pack、analysis_cache 或 working_notes；不要重复调用相同工具和相同参数。如果证据已经足够，请直接给出最终回答。

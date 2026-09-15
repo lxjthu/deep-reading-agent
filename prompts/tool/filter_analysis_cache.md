@@ -1,0 +1,1 @@
+Reuse the current session's persisted analysis cache and filter it by journal tier, theme cluster, full-text availability, or reading status without rescanning the full library.

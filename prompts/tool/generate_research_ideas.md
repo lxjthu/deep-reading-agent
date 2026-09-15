@@ -1,0 +1,1 @@
+Generate structured economics/management research idea candidates from local constructs and evidence gaps, including research question, hypotheses, data strategy, contribution, and risks.

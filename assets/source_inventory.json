@@ -1,0 +1,3081 @@
+{
+  "schema_version": 1,
+  "registered_router_count": 21,
+  "registered_categories": 13,
+  "registered_slots": 59,
+  "agent_tool_count": 20,
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/users",
+      "registered_in_main": true,
+      "handler": "list_users",
+      "source": "backend/routers/admin.py",
+      "target_command": "online admin",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/users/{user_id}",
+      "registered_in_main": true,
+      "handler": "update_user",
+      "source": "backend/routers/admin.py",
+      "target_command": "online admin",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/invite_codes",
+      "registered_in_main": true,
+      "handler": "list_invite_codes",
+      "source": "backend/routers/admin.py",
+      "target_command": "online admin",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/invite_codes",
+      "registered_in_main": true,
+      "handler": "create_invite_code",
+      "source": "backend/routers/admin.py",
+      "target_command": "online admin",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/invite_codes/{invite_id}",
+      "registered_in_main": true,
+      "handler": "delete_invite_code",
+      "source": "backend/routers/admin.py",
+      "target_command": "online admin",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/settings",
+      "registered_in_main": true,
+      "handler": "get_agent_settings",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/settings",
+      "registered_in_main": true,
+      "handler": "update_agent_settings",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/provider-check",
+      "registered_in_main": true,
+      "handler": "check_agent_provider",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/tool-capabilities",
+      "registered_in_main": true,
+      "handler": "get_agent_tool_capabilities",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/inbox/upload-folder",
+      "registered_in_main": true,
+      "handler": "upload_agent_inbox_folder",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/sessions",
+      "registered_in_main": true,
+      "handler": "list_agent_sessions",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/sessions",
+      "registered_in_main": true,
+      "handler": "create_agent_session",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/sessions/{session_id}",
+      "registered_in_main": true,
+      "handler": "get_agent_session",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/agent/sessions/{session_id}/archive",
+      "registered_in_main": true,
+      "handler": "archive_agent_session",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/proposals/{proposal_id}/confirm",
+      "registered_in_main": true,
+      "handler": "confirm_agent_proposal",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/proposals/{proposal_id}/reject",
+      "registered_in_main": true,
+      "handler": "reject_agent_proposal",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/chat",
+      "registered_in_main": true,
+      "handler": "agent_chat",
+      "source": "backend/routers/agent.py",
+      "target_command": "research",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "registered_in_main": true,
+      "handler": "register",
+      "source": "backend/routers/auth.py",
+      "target_command": "online auth",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "registered_in_main": true,
+      "handler": "login",
+      "source": "backend/routers/auth.py",
+      "target_command": "online auth",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/refresh",
+      "registered_in_main": true,
+      "handler": "refresh_token",
+      "source": "backend/routers/auth.py",
+      "target_command": "online auth",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "registered_in_main": true,
+      "handler": "me",
+      "source": "backend/routers/auth.py",
+      "target_command": "online auth",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/change_password",
+      "registered_in_main": true,
+      "handler": "change_password",
+      "source": "backend/routers/auth.py",
+      "target_command": "online auth",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "registered_in_main": true,
+      "handler": "logout",
+      "source": "backend/routers/auth.py",
+      "target_command": "online auth",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cards/from-selection",
+      "registered_in_main": true,
+      "handler": "create_card_from_selection",
+      "source": "backend/routers/cards.py",
+      "target_command": "cards",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cards/from-qa",
+      "registered_in_main": true,
+      "handler": "create_card_from_qa",
+      "source": "backend/routers/cards.py",
+      "target_command": "cards",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cards",
+      "registered_in_main": true,
+      "handler": "list_cards",
+      "source": "backend/routers/cards.py",
+      "target_command": "cards",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cards/export/obsidian",
+      "registered_in_main": true,
+      "handler": "export_cards",
+      "source": "backend/routers/cards.py",
+      "target_command": "cards",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cards/{card_id}",
+      "registered_in_main": true,
+      "handler": "get_card",
+      "source": "backend/routers/cards.py",
+      "target_command": "cards",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/cards/{card_id}",
+      "registered_in_main": true,
+      "handler": "update_card",
+      "source": "backend/routers/cards.py",
+      "target_command": "cards",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/cards/{card_id}",
+      "registered_in_main": true,
+      "handler": "delete_card",
+      "source": "backend/routers/cards.py",
+      "target_command": "cards",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/compare/reading-data",
+      "registered_in_main": true,
+      "handler": "get_reading_data",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/compare/jobs/{job_id}/structured",
+      "registered_in_main": true,
+      "handler": "get_structured_reading",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/compare/analyze",
+      "registered_in_main": true,
+      "handler": "analyze_comparison",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/compare/analyze_long",
+      "registered_in_main": true,
+      "handler": "analyze_long_comparison",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/compare/synthesis",
+      "registered_in_main": true,
+      "handler": "synthesize_dimensions",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/compare/synthesis-stream",
+      "registered_in_main": true,
+      "handler": "synthesis_stream",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/compare/synthesis_long",
+      "registered_in_main": true,
+      "handler": "synthesize_long_dimensions",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/compare/reading-items/{item_id}/edit",
+      "registered_in_main": true,
+      "handler": "save_reading_item_edit",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/compare/reading-items/{item_id}/edit",
+      "registered_in_main": true,
+      "handler": "delete_reading_item_edit",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/compare/annotations",
+      "registered_in_main": true,
+      "handler": "create_annotation",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/compare/annotations",
+      "registered_in_main": true,
+      "handler": "list_annotations",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/compare/annotations/{ann_id}",
+      "registered_in_main": true,
+      "handler": "update_annotation",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/compare/annotations/{ann_id}",
+      "registered_in_main": true,
+      "handler": "delete_annotation",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/compare/ai-summary",
+      "registered_in_main": true,
+      "handler": "ai_summary",
+      "source": "backend/routers/compare.py",
+      "target_command": "compare / synthesize",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/data/export",
+      "registered_in_main": true,
+      "handler": "export_data",
+      "source": "backend/routers/data.py",
+      "target_command": "data",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/data/import/chunk/init",
+      "registered_in_main": true,
+      "handler": "import_chunk_init",
+      "source": "backend/routers/data.py",
+      "target_command": "data",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/data/import/chunk",
+      "registered_in_main": true,
+      "handler": "import_chunk_upload",
+      "source": "backend/routers/data.py",
+      "target_command": "data",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/data/import/chunk/complete",
+      "registered_in_main": true,
+      "handler": "import_chunk_complete",
+      "source": "backend/routers/data.py",
+      "target_command": "data",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/data/import",
+      "registered_in_main": true,
+      "handler": "import_data",
+      "source": "backend/routers/data.py",
+      "target_command": "data",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/data/import/start",
+      "registered_in_main": true,
+      "handler": "import_data_start",
+      "source": "backend/routers/data.py",
+      "target_command": "data",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/data/import/{job_id}/status",
+      "registered_in_main": true,
+      "handler": "import_data_status",
+      "source": "backend/routers/data.py",
+      "target_command": "data",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/deploy/",
+      "registered_in_main": true,
+      "handler": "deploy",
+      "source": "backend/routers/deploy.py",
+      "target_command": "online deploy",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/deploy/runtime",
+      "registered_in_main": true,
+      "handler": "runtime_info",
+      "source": "backend/routers/deploy.py",
+      "target_command": "online deploy",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/deploy/shutdown",
+      "registered_in_main": true,
+      "handler": "shutdown_app",
+      "source": "backend/routers/deploy.py",
+      "target_command": "online deploy",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dimensions/sets",
+      "registered_in_main": true,
+      "handler": "list_sets",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/sets",
+      "registered_in_main": true,
+      "handler": "create_set",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/dimensions/sets/{set_id}",
+      "registered_in_main": true,
+      "handler": "update_set",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/dimensions/sets/{set_id}/reading-availability",
+      "registered_in_main": true,
+      "handler": "update_reading_availability",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/dimensions/sets/{set_id}",
+      "registered_in_main": true,
+      "handler": "delete_set",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/dimensions/sets/{set_id}/share",
+      "registered_in_main": true,
+      "handler": "toggle_share",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dimensions/shared",
+      "registered_in_main": true,
+      "handler": "list_shared",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/shared/{set_id}/import",
+      "registered_in_main": true,
+      "handler": "import_shared",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/sets/{set_id}/activate",
+      "registered_in_main": true,
+      "handler": "activate_set",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/sets/{set_id}/reset",
+      "registered_in_main": true,
+      "handler": "reset_set",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/sets/{set_id}/clone",
+      "registered_in_main": true,
+      "handler": "clone_set",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dimensions/sets/{set_id}/items",
+      "registered_in_main": true,
+      "handler": "list_items",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/sets/{set_id}/items",
+      "registered_in_main": true,
+      "handler": "create_item",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/dimensions/sets/{set_id}/items/{item_id}",
+      "registered_in_main": true,
+      "handler": "update_item",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/dimensions/sets/{set_id}/items/{item_id}",
+      "registered_in_main": true,
+      "handler": "delete_item",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/sets/{set_id}/items/reorder",
+      "registered_in_main": true,
+      "handler": "reorder_items",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dimensions/templates",
+      "registered_in_main": true,
+      "handler": "list_templates",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dimensions/templates/{template_id}",
+      "registered_in_main": true,
+      "handler": "get_template_detail",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/templates/{template_id}/import",
+      "registered_in_main": true,
+      "handler": "import_template",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/generate",
+      "registered_in_main": true,
+      "handler": "generate_template",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/generate/save",
+      "registered_in_main": true,
+      "handler": "save_generated_template",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/import/preview",
+      "registered_in_main": true,
+      "handler": "preview_import",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dimensions/import/confirm",
+      "registered_in_main": true,
+      "handler": "confirm_import",
+      "source": "backend/routers/dimensions.py",
+      "target_command": "dimensions / templates",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/download/{file_path:path}",
+      "registered_in_main": true,
+      "handler": "download_file",
+      "source": "backend/routers/download.py",
+      "target_command": "artifacts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/feedback",
+      "registered_in_main": true,
+      "handler": "create_feedback",
+      "source": "backend/routers/feedback.py",
+      "target_command": "online feedback",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/feedback/my",
+      "registered_in_main": true,
+      "handler": "list_my_feedback",
+      "source": "backend/routers/feedback.py",
+      "target_command": "online feedback",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/feedback/admin",
+      "registered_in_main": true,
+      "handler": "admin_list_feedback",
+      "source": "backend/routers/feedback.py",
+      "target_command": "online feedback",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/feedback/admin/{feedback_id}",
+      "registered_in_main": true,
+      "handler": "admin_get_feedback",
+      "source": "backend/routers/feedback.py",
+      "target_command": "online feedback",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/feedback/admin/{feedback_id}",
+      "registered_in_main": true,
+      "handler": "admin_update_feedback",
+      "source": "backend/routers/feedback.py",
+      "target_command": "online feedback",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/feedback/admin/{feedback_id}/events",
+      "registered_in_main": true,
+      "handler": "admin_add_feedback_event",
+      "source": "backend/routers/feedback.py",
+      "target_command": "online feedback",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/filter/start",
+      "registered_in_main": true,
+      "handler": "start_filter",
+      "source": "backend/routers/filter.py",
+      "target_command": "filter",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/filter/task/{task_id}/status",
+      "registered_in_main": true,
+      "handler": "get_task_status",
+      "source": "backend/routers/filter.py",
+      "target_command": "filter",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/filter/task/{task_id}/cancel",
+      "registered_in_main": true,
+      "handler": "cancel_task",
+      "source": "backend/routers/filter.py",
+      "target_command": "filter",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/filter/direct-import",
+      "registered_in_main": true,
+      "handler": "direct_import",
+      "source": "backend/routers/filter.py",
+      "target_command": "filter",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/history/",
+      "registered_in_main": true,
+      "handler": "list_history",
+      "source": "backend/routers/history.py",
+      "target_command": "jobs",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/history/{filename}/preview",
+      "registered_in_main": true,
+      "handler": "preview_file",
+      "source": "backend/routers/history.py",
+      "target_command": "jobs",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/history/{filename}",
+      "registered_in_main": true,
+      "handler": "delete_file",
+      "source": "backend/routers/history.py",
+      "target_command": "jobs",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/history/synthesis/",
+      "registered_in_main": true,
+      "handler": "list_synthesis",
+      "source": "backend/routers/history.py",
+      "target_command": "jobs",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/history/synthesis/",
+      "registered_in_main": true,
+      "handler": "save_synthesis",
+      "source": "backend/routers/history.py",
+      "target_command": "jobs",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/history/library-chat/",
+      "registered_in_main": true,
+      "handler": "list_library_chat",
+      "source": "backend/routers/history.py",
+      "target_command": "jobs",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/history/library-chat/",
+      "registered_in_main": true,
+      "handler": "save_library_chat_report",
+      "source": "backend/routers/history.py",
+      "target_command": "jobs",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/library/tags",
+      "registered_in_main": true,
+      "handler": "list_tags",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/batch-delete",
+      "registered_in_main": true,
+      "handler": "batch_delete_entries",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/batch-tags",
+      "registered_in_main": true,
+      "handler": "batch_update_tags",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/library/entries",
+      "registered_in_main": true,
+      "handler": "list_entries",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/library/entries/page",
+      "registered_in_main": true,
+      "handler": "list_entries_page",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/by-ids",
+      "registered_in_main": true,
+      "handler": "list_entries_by_ids",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/library/entries/{entry_id}",
+      "registered_in_main": true,
+      "handler": "get_entry_detail",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/library/entries/{entry_id}",
+      "registered_in_main": true,
+      "handler": "update_entry",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/{entry_id}/markdown",
+      "registered_in_main": true,
+      "handler": "upload_entry_markdown",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/{entry_id}/attachments",
+      "registered_in_main": true,
+      "handler": "upload_attachment",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/library/entries/{entry_id}/attachments",
+      "registered_in_main": true,
+      "handler": "list_attachments",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/library/entries/{entry_id}/attachments/{attachment_id}",
+      "registered_in_main": true,
+      "handler": "update_attachment",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/library/entries/{entry_id}/attachments/{attachment_id}",
+      "registered_in_main": true,
+      "handler": "delete_attachment",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/{entry_id}/fulltext-search",
+      "registered_in_main": true,
+      "handler": "search_entry_fulltext",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/library/entries/{entry_id}/reader",
+      "registered_in_main": true,
+      "handler": "get_entry_reader",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/library/ai-comments/{comment_id}",
+      "registered_in_main": true,
+      "handler": "update_ai_comment",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/library/ai-comments/{comment_id}",
+      "registered_in_main": true,
+      "handler": "delete_ai_comment",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/writing-style/analyze",
+      "registered_in_main": true,
+      "handler": "analyze_writing_style_endpoint",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/batch-translate-abstracts",
+      "registered_in_main": true,
+      "handler": "batch_translate_abstracts",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/library/translate-job/{job_id}/status",
+      "registered_in_main": true,
+      "handler": "get_translate_job_status",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/{entry_id}/match-online",
+      "registered_in_main": true,
+      "handler": "match_online",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/{entry_id}/apply-match",
+      "registered_in_main": true,
+      "handler": "apply_match",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/entries/{entry_id}/wos-search",
+      "registered_in_main": true,
+      "handler": "wos_search",
+      "source": "backend/routers/library.py",
+      "target_command": "library / metadata",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/chat",
+      "registered_in_main": true,
+      "handler": "library_chat",
+      "source": "backend/routers/library_chat.py",
+      "target_command": "online library_chat",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "POST",
+      "path": "/api/library/chat/comments",
+      "registered_in_main": true,
+      "handler": "save_library_chat_comments",
+      "source": "backend/routers/library_chat.py",
+      "target_command": "online library_chat",
+      "phase": "D",
+      "dependency": "website-auth-and-server",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "optional-online"
+    },
+    {
+      "method": "GET",
+      "path": "/api/prompts/catalog",
+      "registered_in_main": true,
+      "handler": "prompt_catalog",
+      "source": "backend/routers/prompts.py",
+      "target_command": "prompts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/prompts/item",
+      "registered_in_main": true,
+      "handler": "get_prompt_item",
+      "source": "backend/routers/prompts.py",
+      "target_command": "prompts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/prompts/my",
+      "registered_in_main": true,
+      "handler": "save_my_prompt",
+      "source": "backend/routers/prompts.py",
+      "target_command": "prompts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/prompts/my",
+      "registered_in_main": true,
+      "handler": "reset_my_prompt",
+      "source": "backend/routers/prompts.py",
+      "target_command": "prompts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/prompts/system",
+      "registered_in_main": true,
+      "handler": "save_system_prompt",
+      "source": "backend/routers/prompts.py",
+      "target_command": "prompts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/prompts/",
+      "registered_in_main": true,
+      "handler": "get_prompt",
+      "source": "backend/routers/prompts.py",
+      "target_command": "prompts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/prompts/",
+      "registered_in_main": true,
+      "handler": "update_prompt",
+      "source": "backend/routers/prompts.py",
+      "target_command": "prompts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/prompts/list",
+      "registered_in_main": true,
+      "handler": "list_prompts",
+      "source": "backend/routers/prompts.py",
+      "target_command": "prompts",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reading/check-conflict",
+      "registered_in_main": true,
+      "handler": "check_conflict",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reading/long/start",
+      "registered_in_main": true,
+      "handler": "start_long_context",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reading/quant/start",
+      "registered_in_main": true,
+      "handler": "start_quant",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reading/qual/start",
+      "registered_in_main": true,
+      "handler": "start_qual",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reading/batch/check-conflict",
+      "registered_in_main": true,
+      "handler": "batch_check_conflict",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reading/batch/start",
+      "registered_in_main": true,
+      "handler": "start_batch_reading",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reading/batch/{batch_id}/status",
+      "registered_in_main": true,
+      "handler": "get_batch_status",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reading/task/{task_id}/status",
+      "registered_in_main": true,
+      "handler": "get_task_status",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reading/task/{task_id}/cancel",
+      "registered_in_main": true,
+      "handler": "cancel_task",
+      "source": "backend/routers/reading.py",
+      "target_command": "read / batch",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ref-format/presets",
+      "registered_in_main": true,
+      "handler": "list_presets",
+      "source": "backend/routers/ref_format.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ref-format/presets",
+      "registered_in_main": true,
+      "handler": "create_preset",
+      "source": "backend/routers/ref_format.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ref-format/presets/{preset_id}",
+      "registered_in_main": true,
+      "handler": "update_preset",
+      "source": "backend/routers/ref_format.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ref-format/presets/{preset_id}",
+      "registered_in_main": true,
+      "handler": "delete_preset",
+      "source": "backend/routers/ref_format.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ref-format/analyze",
+      "registered_in_main": true,
+      "handler": "analyze_format",
+      "source": "backend/routers/ref_format.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ref-format/generate",
+      "registered_in_main": true,
+      "handler": "generate_reference_list",
+      "source": "backend/routers/ref_format.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/references/entries",
+      "registered_in_main": true,
+      "handler": "list_reference_trace_entries",
+      "source": "backend/routers/references.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/references/entries/{entry_id}/trace",
+      "registered_in_main": true,
+      "handler": "start_reference_trace",
+      "source": "backend/routers/references.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/references/task/{task_id}/status",
+      "registered_in_main": true,
+      "handler": "get_reference_task_status",
+      "source": "backend/routers/references.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/references/entries/{entry_id}/summary",
+      "registered_in_main": true,
+      "handler": "get_reference_trace_summary",
+      "source": "backend/routers/references.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/references/entries/{entry_id}/references",
+      "registered_in_main": true,
+      "handler": "list_references_for_entry",
+      "source": "backend/routers/references.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/references/references/{reference_id}/citations",
+      "registered_in_main": true,
+      "handler": "list_reference_citations",
+      "source": "backend/routers/references.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/references/references/{reference_id}/import",
+      "registered_in_main": true,
+      "handler": "import_reference_to_library",
+      "source": "backend/routers/references.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/references/references/{reference_id}",
+      "registered_in_main": true,
+      "handler": "update_reference",
+      "source": "backend/routers/references.py",
+      "target_command": "references",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/source-qa/ask",
+      "registered_in_main": true,
+      "handler": "ask_source_question",
+      "source": "backend/routers/source_qa.py",
+      "target_command": "qa",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/source-qa/source",
+      "registered_in_main": true,
+      "handler": "get_source_excerpt",
+      "source": "backend/routers/source_qa.py",
+      "target_command": "qa",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/translation/translatable",
+      "registered_in_main": true,
+      "handler": "list_translatable",
+      "source": "backend/routers/translation.py",
+      "target_command": "translate",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/translation/bind-upload",
+      "registered_in_main": true,
+      "handler": "bind_translation_upload",
+      "source": "backend/routers/translation.py",
+      "target_command": "translate",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/translation/start",
+      "registered_in_main": true,
+      "handler": "start_translation",
+      "source": "backend/routers/translation.py",
+      "target_command": "translate",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/translation/artifacts/{bib_entry_id}",
+      "registered_in_main": true,
+      "handler": "get_translation_artifacts",
+      "source": "backend/routers/translation.py",
+      "target_command": "translate",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/translation/{job_id}/status",
+      "registered_in_main": true,
+      "handler": "get_translation_status",
+      "source": "backend/routers/translation.py",
+      "target_command": "translate",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/translation/{job_id}/result",
+      "registered_in_main": true,
+      "handler": "get_translation_result",
+      "source": "backend/routers/translation.py",
+      "target_command": "translate",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/translation/cancel/{job_id}",
+      "registered_in_main": true,
+      "handler": "cancel_translation",
+      "source": "backend/routers/translation.py",
+      "target_command": "translate",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/translation/artifacts",
+      "registered_in_main": true,
+      "handler": "delete_translation_artifacts",
+      "source": "backend/routers/translation.py",
+      "target_command": "translate",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/upload/",
+      "registered_in_main": true,
+      "handler": "upload_file",
+      "source": "backend/routers/upload.py",
+      "target_command": "ingest",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/upload/{file_id}/info",
+      "registered_in_main": true,
+      "handler": "get_file_info",
+      "source": "backend/routers/upload.py",
+      "target_command": "ingest",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/upload/{file_id}/preview",
+      "registered_in_main": true,
+      "handler": "preview_source_file",
+      "source": "backend/routers/upload.py",
+      "target_command": "ingest",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/upload/{file_id}/download",
+      "registered_in_main": true,
+      "handler": "download_source_file",
+      "source": "backend/routers/upload.py",
+      "target_command": "ingest",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/upload/{file_id}",
+      "registered_in_main": true,
+      "handler": "delete_file",
+      "source": "backend/routers/upload.py",
+      "target_command": "ingest",
+      "phase": "B/C",
+      "dependency": "local-workspace; model where applicable",
+      "validation": "not-validated-by-resource-migration",
+      "scope": "local-equivalence-requires-command-validation"
+    }
+  ],
+  "agent_tools": [
+    {
+      "name": "research_search",
+      "description": "Search the user's tiered literature knowledge base across metadata, abstracts, user notes, edited reading notes, AI reading notes, cards, annotations, references, and source windows.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include_source_text": {
+            "type": "boolean"
+          },
+          "include_user_notes": {
+            "type": "boolean"
+          },
+          "include_ai_notes": {
+            "type": "boolean"
+          },
+          "limit_entries": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Max entries to search. 0 = search all entries."
+          },
+          "limit_evidence_per_entry": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "question"
+        ]
+      },
+      "target_command": "research evidence",
+      "prompt_id": "tool.research_search",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "analyze_writing_style",
+      "description": "Retrieve local original Markdown passages for writing-style analysis of an author, journal, paper, introduction, theory section, methods section, or argument structure.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "author_or_journal": {
+            "type": "string"
+          },
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "section_type": {
+            "type": "string",
+            "enum": [
+              "",
+              "introduction",
+              "theory",
+              "method",
+              "general"
+            ]
+          },
+          "limit_entries": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "max_sections_per_entry": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          }
+        },
+        "required": [
+          "question"
+        ]
+      },
+      "target_command": "writing-style",
+      "prompt_id": "tool.analyze_writing_style",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "get_evidence_pack",
+      "description": "Return P0/P1/P2 evidence packs for selected entries and a research question.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include_source_text": {
+            "type": "boolean"
+          },
+          "include_user_notes": {
+            "type": "boolean"
+          },
+          "include_ai_notes": {
+            "type": "boolean"
+          },
+          "limit_entries": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Max entries to search. 0 = search all entries."
+          },
+          "limit_evidence_per_entry": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "question"
+        ]
+      },
+      "target_command": "research evidence",
+      "prompt_id": "tool.get_evidence_pack",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "get_source_windows",
+      "description": "Fetch local original Markdown source text windows for selected bibliography entries.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "question": {
+            "type": "string"
+          },
+          "max_windows_per_entry": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "entry_ids"
+        ]
+      },
+      "target_command": "research evidence",
+      "prompt_id": "tool.get_source_windows",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "search_cnki",
+      "description": "Build CNKI title-search URLs for selected Chinese bibliography entries or provided titles. Returns a batch of URLs that the frontend can open in new browser tabs.",
+      "permission": "external_read",
+      "consent_required": true,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "titles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "target_command": "search cnki",
+      "prompt_id": "tool.search_cnki",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "lookup_english_fulltext",
+      "description": "Look up English full-text candidates through existing OpenAlex, Unpaywall, Semantic Scholar, Google PDF, and working-paper search helpers. Does not attach PDFs or write to the database.",
+      "permission": "external_read",
+      "consent_required": true,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_entries": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "entry_ids"
+        ]
+      },
+      "target_command": "search fulltext",
+      "prompt_id": "tool.lookup_english_fulltext",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "search_library",
+      "description": "Search the user's bibliography library by title, abstract, journal, keyword, or tag. Use limit=1000 when listing or scanning the library broadly; do not use 50 as a default.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "reading_status": {
+            "type": "string",
+            "enum": [
+              "",
+              "none",
+              "has_pdf",
+              "reading",
+              "read"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        }
+      },
+      "target_command": "library search",
+      "prompt_id": "tool.search_library",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "count_library",
+      "description": "Count matching bibliography entries in the user's library without listing all titles. Use this for questions about how many papers/items exist under current filters.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "reading_status": {
+            "type": "string",
+            "enum": [
+              "",
+              "none",
+              "has_pdf",
+              "reading",
+              "read"
+            ]
+          }
+        }
+      },
+      "target_command": "library list",
+      "prompt_id": "tool.count_library",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "analyze_reading_candidates",
+      "description": "Analyze a large collection of library papers in batches, write structured working notes, and recommend which papers should be prioritized for deep reading.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "reading_status": {
+            "type": "string",
+            "enum": [
+              "",
+              "none",
+              "has_pdf",
+              "reading",
+              "read"
+            ]
+          },
+          "batch_size": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 200
+          },
+          "max_entries": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "target_command": "research prioritize",
+      "prompt_id": "tool.analyze_reading_candidates",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "filter_analysis_cache",
+      "description": "Reuse the current session's persisted analysis cache and filter it by journal tier, theme cluster, full-text availability, or reading status without rescanning the full library.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "journal_tier_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cluster_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "require_fulltext": {
+            "type": "boolean"
+          },
+          "reading_status": {
+            "type": "string",
+            "enum": [
+              "",
+              "none",
+              "has_pdf",
+              "reading",
+              "read"
+            ]
+          },
+          "max_entries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000,
+            "description": "0 = keep all filtered entries."
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "target_command": "filter",
+      "prompt_id": "tool.filter_analysis_cache",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "extract_research_constructs",
+      "description": "Extract economics/management research constructs, mechanisms, variables, and empirical design hints from local evidence packs or selected bibliography entries.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_constructs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "target_command": "research constructs",
+      "prompt_id": "tool.extract_research_constructs",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "diagnose_research_gaps",
+      "description": "Diagnose theory, mechanism, measurement, context, and causal-identification gaps from previously extracted economics/management constructs.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_constructs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "target_command": "research gaps",
+      "prompt_id": "tool.diagnose_research_gaps",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "generate_research_ideas",
+      "description": "Generate structured economics/management research idea candidates from local constructs and evidence gaps, including research question, hypotheses, data strategy, contribution, and risks.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_ideas": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "target_command": "research ideas",
+      "prompt_id": "tool.generate_research_ideas",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "get_entry_detail",
+      "description": "Get metadata, source file id, and recent workflow timeline for a bibliography entry.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "target_command": "library show",
+      "prompt_id": "tool.get_entry_detail",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "get_reading_context",
+      "description": "Fetch structured deep-reading sections for selected entries so the assistant can compare or synthesize them.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "long",
+              "quant",
+              "qual"
+            ]
+          },
+          "max_chars_per_item": {
+            "type": "integer",
+            "minimum": 300,
+            "maximum": 8000
+          }
+        },
+        "required": [
+          "entry_ids"
+        ]
+      },
+      "target_command": "library show",
+      "prompt_id": "tool.get_reading_context",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "start_reading",
+      "description": "Start a long, quantitative 7-step, or qualitative 4-step reading job for one PDF/Markdown file.",
+      "permission": "propose_write",
+      "consent_required": false,
+      "proposal_required": true,
+      "writes_database": true,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "long",
+              "quant",
+              "qual"
+            ]
+          },
+          "file_id": {
+            "type": "string"
+          },
+          "entry_id": {
+            "type": "string"
+          },
+          "analysis_dims": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "custom_question": {
+            "type": "string"
+          },
+          "extraction_method": {
+            "type": "string",
+            "enum": [
+              "full",
+              "smart",
+              "first_pages"
+            ]
+          },
+          "conflict_resolution": {
+            "type": "string",
+            "enum": [
+              "check",
+              "overwrite",
+              "new",
+              "incremental",
+              "skip"
+            ]
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "target_command": "read",
+      "prompt_id": "tool.start_reading",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "start_batch_reading",
+      "description": "Start reading jobs for multiple file ids.",
+      "permission": "propose_write",
+      "consent_required": false,
+      "proposal_required": true,
+      "writes_database": true,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "long",
+              "quant",
+              "qual"
+            ]
+          },
+          "file_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "analysis_dims": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "custom_question": {
+            "type": "string"
+          },
+          "extraction_method": {
+            "type": "string",
+            "enum": [
+              "full",
+              "smart",
+              "first_pages"
+            ]
+          },
+          "conflict_resolution": {
+            "type": "string",
+            "enum": [
+              "check",
+              "overwrite",
+              "new",
+              "incremental",
+              "skip"
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "file_ids"
+        ]
+      },
+      "target_command": "batch",
+      "prompt_id": "tool.start_batch_reading",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "scan_input_folder",
+      "description": "Read-only scan of the user's uploaded AI assistant inbox batch and compare it with the user's library. Use this when the user asks to see, list, inspect, or tabulate papers. Use offset to continue the next batch after settling working notes. This never imports files and never starts reading jobs.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "max_files": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "confidence_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "target_command": "ingest folder",
+      "prompt_id": "tool.scan_input_folder",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "import_folder_and_start_reading",
+      "description": "Scan the user's uploaded AI assistant inbox batch, select papers related to a topic, and start batch reading jobs. Use only when the user explicitly asks to start/run/batch read/analyze.",
+      "permission": "propose_write",
+      "consent_required": false,
+      "proposal_required": true,
+      "writes_database": true,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "quant",
+              "qual",
+              "long"
+            ]
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "max_files": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "confidence_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "conflict_resolution": {
+            "type": "string",
+            "enum": [
+              "check",
+              "overwrite",
+              "new",
+              "incremental",
+              "skip"
+            ]
+          },
+          "analysis_dims": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "custom_question": {
+            "type": "string"
+          },
+          "extraction_method": {
+            "type": "string",
+            "enum": [
+              "full",
+              "smart",
+              "first_pages"
+            ]
+          }
+        },
+        "required": [
+          "topic",
+          "mode"
+        ]
+      },
+      "target_command": "batch",
+      "prompt_id": "tool.import_folder_and_start_reading",
+      "validation": "mapping-only"
+    },
+    {
+      "name": "get_job_status",
+      "description": "Get status and artifact links for a reading or synthesis job.",
+      "permission": "read_local",
+      "consent_required": false,
+      "proposal_required": false,
+      "writes_database": false,
+      "uses_internet": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      },
+      "target_command": "jobs status",
+      "prompt_id": "tool.get_job_status",
+      "validation": "mapping-only"
+    }
+  ],
+  "code_prompts": [
+    {
+      "source": "backend/services/abstract_translator.py",
+      "line": 12,
+      "symbol": "_SYSTEM_PROMPT",
+      "prompt_id": "code.abstract_translator._system_prompt",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/ai_template_generator.py",
+      "line": 17,
+      "symbol": "META_PROMPT_DEFAULT",
+      "prompt_id": "code.ai_template_generator.meta_prompt_default",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/ai_template_generator.py",
+      "line": 75,
+      "symbol": "SYSTEM_ROLE_DEFAULT",
+      "prompt_id": "code.ai_template_generator.system_role_default",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/deepseek_refs.py",
+      "line": 40,
+      "symbol": "PROMPT_EXTRACT",
+      "prompt_id": "code.deepseek_refs.prompt_extract",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/deepseek_refs.py",
+      "line": 95,
+      "symbol": "PROMPT_CITE",
+      "prompt_id": "code.deepseek_refs.prompt_cite",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/pdf_metadata_llm.py",
+      "line": 21,
+      "symbol": "PROMPT",
+      "prompt_id": "code.pdf_metadata_llm.prompt",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/reading_source_evidence.py",
+      "line": 13,
+      "prompt_id": "code.reading_source_evidence.inline_13",
+      "expressions": {
+        "value_1": "SOURCE_EVIDENCE_BLOCK_START",
+        "value_2": "SOURCE_EVIDENCE_BLOCK_END"
+      },
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "source": "backend/services/ref_format_service.py",
+      "line": 13,
+      "symbol": "ANALYZE_PROMPT",
+      "prompt_id": "code.ref_format_service.analyze_prompt",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/ref_format_service.py",
+      "line": 32,
+      "symbol": "GENERATE_PROMPT",
+      "prompt_id": "code.ref_format_service.generate_prompt",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/research_agent_runtime.py",
+      "line": 1143,
+      "prompt_id": "code.research_agent_runtime.inline_1143",
+      "expressions": {
+        "value_1": "pass_index",
+        "value_2": "max_passes",
+        "value_3": "raw_message",
+        "value_4": "result_count"
+      },
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "source": "backend/services/research_idea_lab.py",
+      "line": 114,
+      "prompt_id": "code.research_idea_lab.inline_114",
+      "expressions": {
+        "value_1": "construct.get('name')"
+      },
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "source": "backend/services/source_qa.py",
+      "line": 19,
+      "symbol": "SOURCE_GUARD",
+      "prompt_id": "code.source_qa.source_guard",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/source_qa.py",
+      "line": 39,
+      "symbol": "ANSWER_FORMAT",
+      "prompt_id": "code.source_qa.answer_format",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/services/source_qa.py",
+      "line": 40,
+      "symbol": "VERIFY_FORMAT",
+      "prompt_id": "code.source_qa.verify_format",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/routers/compare.py",
+      "line": 54,
+      "symbol": "SYNTHESIS_SYSTEM_PROMPT_DEFAULT",
+      "prompt_id": "code.compare.synthesis_system_prompt_default",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/routers/compare.py",
+      "line": 1074,
+      "symbol": "SYSTEM_PROMPT_DEFAULT",
+      "prompt_id": "code.compare.system_prompt_default",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "backend/routers/dimensions.py",
+      "line": 936,
+      "prompt_id": "code.dimensions.inline_936",
+      "expressions": {
+        "value_1": "file_upload.filename if file_upload else file_id"
+      },
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "source": "backend/routers/history.py",
+      "line": 216,
+      "prompt_id": "code.history.inline_216",
+      "expressions": {
+        "value_1": "filename",
+        "value_2": "filename",
+        "value_3": "filename"
+      },
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "source": "backend/routers/metadata_extractor.py",
+      "line": 30,
+      "prompt_id": "code.metadata_extractor.inline_30",
+      "expressions": {
+        "value_1": "paper_text[:3000]"
+      },
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "source": "new_architecture/conversation_engine.py",
+      "line": 50,
+      "symbol": "SYSTEM_PROMPT",
+      "prompt_id": "code.conversation_engine.system_prompt",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 57,
+      "symbol": "GLOSSARY_SYSTEM",
+      "prompt_id": "code.translation_pipeline.glossary_system",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 62,
+      "symbol": "GLOSSARY_USER_TMPL",
+      "prompt_id": "code.translation_pipeline.glossary_user_tmpl",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 85,
+      "symbol": "RESTATE_SYSTEM",
+      "prompt_id": "code.translation_pipeline.restate_system",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 90,
+      "symbol": "RESTATE_USER_TMPL",
+      "prompt_id": "code.translation_pipeline.restate_user_tmpl",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 110,
+      "symbol": "PDF_FULLTEXT_GLOSSARY_SYSTEM",
+      "prompt_id": "code.translation_pipeline.pdf_fulltext_glossary_system",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 115,
+      "symbol": "PDF_FULLTEXT_GLOSSARY_USER_TMPL",
+      "prompt_id": "code.translation_pipeline.pdf_fulltext_glossary_user_tmpl",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 131,
+      "symbol": "PDF_FULLTEXT_RESTATE_SYSTEM",
+      "prompt_id": "code.translation_pipeline.pdf_fulltext_restate_system",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 136,
+      "symbol": "PDF_FULLTEXT_RESTATE_USER_TMPL",
+      "prompt_id": "code.translation_pipeline.pdf_fulltext_restate_user_tmpl",
+      "status": "literal-migrated"
+    },
+    {
+      "source": "translation_pipeline.py",
+      "line": 281,
+      "symbol": "_DETECT_PROMPT",
+      "prompt_id": "code.translation_pipeline._detect_prompt",
+      "status": "literal-migrated"
+    }
+  ],
+  "limitations": [
+    "Database system/user overrides not exported.",
+    "Dynamic extracted templates preserve source fragments but require explicit expression binding before execution.",
+    "Mappings do not prove command parity or website administration implementation."
+  ]
+}

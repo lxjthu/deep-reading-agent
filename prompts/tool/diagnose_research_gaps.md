@@ -1,0 +1,1 @@
+Diagnose theory, mechanism, measurement, context, and causal-identification gaps from previously extracted economics/management constructs.

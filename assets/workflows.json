@@ -1,0 +1,1001 @@
+{
+  "schema_version": 1,
+  "workflows": {
+    "read.quant": {
+      "history": "all_completed_turns",
+      "steps": [
+        {
+          "id": "step_1",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "quant.step_1",
+            "reading.evidence"
+          ],
+          "depends_on": [],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "step_2",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "quant.step_2",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "step_1"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "step_3",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "quant.step_3",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "step_1",
+            "step_2"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "step_4",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "quant.step_4",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "step_1",
+            "step_2",
+            "step_3"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "step_5",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "quant.step_5",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "step_1",
+            "step_2",
+            "step_3",
+            "step_4"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "step_6",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "quant.step_6",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "step_1",
+            "step_2",
+            "step_3",
+            "step_4",
+            "step_5"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "step_7",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "quant.step_7",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "step_1",
+            "step_2",
+            "step_3",
+            "step_4",
+            "step_5",
+            "step_6"
+          ],
+          "variables": [],
+          "output": "markdown"
+        }
+      ]
+    },
+    "read.qual": {
+      "history": "all_completed_turns",
+      "steps": [
+        {
+          "id": "L1",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "qual.L1",
+            "reading.evidence"
+          ],
+          "depends_on": [],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "L2",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "qual.L2",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "L1"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "L3",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "qual.L3",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "L1",
+            "L2"
+          ],
+          "variables": [
+            "genre"
+          ],
+          "output": "markdown"
+        },
+        {
+          "id": "L4",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "qual.L4",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "L1",
+            "L2",
+            "L3"
+          ],
+          "variables": [],
+          "output": "markdown"
+        }
+      ]
+    },
+    "read.long": {
+      "history": "all_completed_turns",
+      "steps": [
+        {
+          "id": "overview",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.overview",
+            "dimension_questions.overview",
+            "reading.evidence"
+          ],
+          "depends_on": [],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "theory",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.theory",
+            "dimension_questions.theory",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "methodology",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.methodology",
+            "dimension_questions.methodology",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "data_source",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.data_source",
+            "dimension_questions.data_source",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "variable_measurement",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.variable_measurement",
+            "dimension_questions.variable_measurement",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology",
+            "data_source"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "identification_assumptions",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.identification_assumptions",
+            "dimension_questions.identification_assumptions",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology",
+            "data_source",
+            "variable_measurement"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "results",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.results",
+            "dimension_questions.results",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology",
+            "data_source",
+            "variable_measurement",
+            "identification_assumptions"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "mechanism",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.mechanism",
+            "dimension_questions.mechanism",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology",
+            "data_source",
+            "variable_measurement",
+            "identification_assumptions",
+            "results"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "robustness",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.robustness",
+            "dimension_questions.robustness",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology",
+            "data_source",
+            "variable_measurement",
+            "identification_assumptions",
+            "results",
+            "mechanism"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "external_validity",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.external_validity",
+            "dimension_questions.external_validity",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology",
+            "data_source",
+            "variable_measurement",
+            "identification_assumptions",
+            "results",
+            "mechanism",
+            "robustness"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "contributions_limitations",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.contributions_limitations",
+            "dimension_questions.contributions_limitations",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology",
+            "data_source",
+            "variable_measurement",
+            "identification_assumptions",
+            "results",
+            "mechanism",
+            "robustness",
+            "external_validity"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "writing_quality",
+          "system": [
+            "code.conversation_engine.system_prompt"
+          ],
+          "user": [
+            "long.writing_quality",
+            "dimension_questions.writing_quality",
+            "reading.evidence"
+          ],
+          "depends_on": [
+            "overview",
+            "theory",
+            "methodology",
+            "data_source",
+            "variable_measurement",
+            "identification_assumptions",
+            "results",
+            "mechanism",
+            "robustness",
+            "external_validity",
+            "contributions_limitations"
+          ],
+          "variables": [],
+          "output": "markdown"
+        }
+      ]
+    },
+    "filter.explorer": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "filter",
+          "system": [],
+          "user": [
+            "filter.explorer"
+          ],
+          "depends_on": [],
+          "variables": [
+            "abstract",
+            "authors",
+            "journal",
+            "title",
+            "topic",
+            "year"
+          ],
+          "output": "json"
+        }
+      ]
+    },
+    "filter.reviewer": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "filter",
+          "system": [],
+          "user": [
+            "filter.reviewer"
+          ],
+          "depends_on": [],
+          "variables": [
+            "abstract",
+            "authors",
+            "journal",
+            "title",
+            "topic",
+            "year"
+          ],
+          "output": "json"
+        }
+      ]
+    },
+    "filter.empiricist": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "filter",
+          "system": [],
+          "user": [
+            "filter.empiricist"
+          ],
+          "depends_on": [],
+          "variables": [
+            "abstract",
+            "authors",
+            "journal",
+            "title",
+            "topic",
+            "year"
+          ],
+          "output": "json"
+        }
+      ]
+    },
+    "translate.pdf-fulltext": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "glossary",
+          "system": [
+            "code.translation_pipeline.pdf_fulltext_glossary_system"
+          ],
+          "user": [
+            "code.translation_pipeline.pdf_fulltext_glossary_user_tmpl"
+          ],
+          "depends_on": [],
+          "variables": [
+            "full_text"
+          ],
+          "output": "markdown"
+        },
+        {
+          "id": "translation",
+          "system": [
+            "code.translation_pipeline.pdf_fulltext_restate_system"
+          ],
+          "user": [
+            "code.translation_pipeline.pdf_fulltext_restate_user_tmpl"
+          ],
+          "depends_on": [
+            "glossary"
+          ],
+          "variables": [
+            "full_text",
+            "glossary"
+          ],
+          "output": "markdown"
+        }
+      ]
+    },
+    "translate.md-chunks": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "glossary",
+          "system": [
+            "code.translation_pipeline.glossary_system"
+          ],
+          "user": [
+            "translation.glossary"
+          ],
+          "depends_on": [],
+          "variables": [
+            "abstract",
+            "introduction",
+            "title"
+          ],
+          "output": "markdown"
+        },
+        {
+          "id": "translation",
+          "system": [
+            "code.translation_pipeline.restate_system"
+          ],
+          "user": [
+            "translation.restate"
+          ],
+          "depends_on": [
+            "glossary"
+          ],
+          "variables": [
+            "chunk",
+            "glossary"
+          ],
+          "output": "markdown"
+        }
+      ]
+    },
+    "translate.abstract": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "translation",
+          "system": [
+            "code.abstract_translator._system_prompt"
+          ],
+          "user": [
+            "translation.abstract_user"
+          ],
+          "depends_on": [],
+          "variables": [
+            "abstract"
+          ],
+          "output": "markdown"
+        }
+      ]
+    },
+    "references.extract": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "references",
+          "system": [
+            "code.deepseek_refs.prompt_extract"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "json"
+        }
+      ]
+    },
+    "references.trace": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "references",
+          "system": [
+            "code.deepseek_refs.prompt_extract"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "json"
+        },
+        {
+          "id": "citations",
+          "system": [
+            "code.deepseek_refs.prompt_cite"
+          ],
+          "user": [],
+          "depends_on": [
+            "references"
+          ],
+          "variables": [],
+          "output": "json"
+        }
+      ]
+    },
+    "references.style-analyze": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "result",
+          "system": [
+            "ref_format.analyze_prompt"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "json"
+        }
+      ]
+    },
+    "references.format": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "result",
+          "system": [
+            "ref_format.generate_prompt"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "json"
+        }
+      ]
+    },
+    "qa": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "answer",
+          "system": [
+            "library_chat.source_followup_answer",
+            "qa.fixed_priority",
+            "code.source_qa.source_guard",
+            "code.source_qa.answer_format"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "json"
+        },
+        {
+          "id": "verify",
+          "system": [
+            "library_chat.source_followup_verify",
+            "qa.fixed_priority",
+            "code.source_qa.source_guard",
+            "code.source_qa.verify_format"
+          ],
+          "user": [],
+          "depends_on": [
+            "answer"
+          ],
+          "variables": [],
+          "output": "json"
+        }
+      ]
+    },
+    "cards.create": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "card",
+          "system": [
+            "card_note.atomic_card_writer"
+          ],
+          "user": [
+            "card_note.atomic_card_writer_user"
+          ],
+          "depends_on": [],
+          "variables": [
+            "context_after",
+            "context_before",
+            "metadata",
+            "selected_text",
+            "source_version",
+            "user_prompt"
+          ],
+          "output": "json"
+        }
+      ]
+    },
+    "writing-style.single": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "single_fulltext_analyzer",
+          "system": [
+            "writing_style.single_fulltext_analyzer"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "single_imitation_advisor",
+          "system": [
+            "writing_style.single_imitation_advisor"
+          ],
+          "user": [],
+          "depends_on": [
+            "single_fulltext_analyzer"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "single_report_writer",
+          "system": [
+            "writing_style.single_report_writer"
+          ],
+          "user": [],
+          "depends_on": [
+            "single_fulltext_analyzer",
+            "single_imitation_advisor"
+          ],
+          "variables": [],
+          "output": "markdown"
+        }
+      ]
+    },
+    "writing-style.batch": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "batch_section_analyzer",
+          "system": [
+            "writing_style.batch_section_analyzer"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "batch_imitation_advisor",
+          "system": [
+            "writing_style.batch_imitation_advisor"
+          ],
+          "user": [],
+          "depends_on": [
+            "batch_section_analyzer"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "batch_comparative_synthesizer",
+          "system": [
+            "writing_style.batch_comparative_synthesizer"
+          ],
+          "user": [],
+          "depends_on": [
+            "batch_section_analyzer",
+            "batch_imitation_advisor"
+          ],
+          "variables": [],
+          "output": "markdown"
+        },
+        {
+          "id": "batch_report_writer",
+          "system": [
+            "writing_style.batch_report_writer"
+          ],
+          "user": [],
+          "depends_on": [
+            "batch_section_analyzer",
+            "batch_imitation_advisor",
+            "batch_comparative_synthesizer"
+          ],
+          "variables": [],
+          "output": "markdown"
+        }
+      ]
+    },
+    "compare": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "comparison",
+          "system": [
+            "synthesis.compare_system_role"
+          ],
+          "user": [
+            "synthesis.long_multi_prompt"
+          ],
+          "depends_on": [],
+          "variables": [
+            "dim_count",
+            "dimensions",
+            "n"
+          ],
+          "output": "markdown"
+        }
+      ]
+    },
+    "synthesize": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "synthesis",
+          "system": [
+            "synthesis.system_role"
+          ],
+          "user": [
+            "synthesis.dimension_prompt"
+          ],
+          "depends_on": [],
+          "variables": [
+            "dim_label"
+          ],
+          "output": "markdown"
+        }
+      ]
+    },
+    "templates.generate": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "template",
+          "system": [
+            "ai_template.system_role"
+          ],
+          "user": [
+            "ai_template.meta_prompt"
+          ],
+          "depends_on": [],
+          "variables": [
+            "dim_count",
+            "paper_text"
+          ],
+          "output": "json"
+        }
+      ]
+    },
+    "metadata.extract": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "metadata",
+          "system": [
+            "code.pdf_metadata_llm.prompt"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [
+            "dois",
+            "filename",
+            "page_1",
+            "page_2",
+            "page_3"
+          ],
+          "output": "json"
+        }
+      ]
+    },
+    "library.query_parser": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "result",
+          "system": [
+            "library_chat.query_parser"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "json"
+        }
+      ]
+    },
+    "library.report_writer": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "result",
+          "system": [
+            "library_chat.report_writer"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "markdown"
+        }
+      ]
+    },
+    "library.paper_comment_writer": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "result",
+          "system": [
+            "library_chat.paper_comment_writer"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "json"
+        }
+      ]
+    },
+    "library.tag_target_selector": {
+      "history": "explicit_dependencies",
+      "steps": [
+        {
+          "id": "result",
+          "system": [
+            "library_chat.tag_target_selector"
+          ],
+          "user": [],
+          "depends_on": [],
+          "variables": [],
+          "output": "json"
+        }
+      ]
+    },
+    "markdown.clean": {
+      "history": "all_completed_turns",
+      "steps": [
+        {
+          "id": "boundaries",
+          "system": [],
+          "user": [
+            "markdown_cleanup.boundaries"
+          ],
+          "depends_on": [],
+          "output": "json"
+        },
+        {
+          "id": "headings",
+          "system": [],
+          "user": [
+            "markdown_cleanup.headings"
+          ],
+          "depends_on": [],
+          "output": "json"
+        },
+        {
+          "id": "verify",
+          "system": [],
+          "user": [
+            "markdown_cleanup.verify"
+          ],
+          "depends_on": [],
+          "output": "json"
+        }
+      ]
+    }
+  }
+}

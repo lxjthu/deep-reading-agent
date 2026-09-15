@@ -1,0 +1,1578 @@
+{
+  "schema_version": 1,
+  "registered_categories": 13,
+  "registered_slots": 59,
+  "online_overrides": "not-exported-not-migrated",
+  "prompts": [
+    {
+      "id": "quant.step_1",
+      "path": "quant/step_1.md",
+      "variables": [],
+      "source": "prompts/quant_analysis/step_1_overview.md",
+      "source_hash": "df4558d908c034ea8a47079045d5f2d49cfdfa7f64e8e4c51f7deb4af41d1267",
+      "body_hash": "df4558d908c034ea8a47079045d5f2d49cfdfa7f64e8e4c51f7deb4af41d1267",
+      "version": "source-df4558d908c0",
+      "status": "migrated"
+    },
+    {
+      "id": "quant.step_2",
+      "path": "quant/step_2.md",
+      "variables": [],
+      "source": "prompts/quant_analysis/step_2_theory.md",
+      "source_hash": "84f18a83b0c7ec019ebd3f76cf4580be56829753eb5ffb0895f74c85714d7a2c",
+      "body_hash": "84f18a83b0c7ec019ebd3f76cf4580be56829753eb5ffb0895f74c85714d7a2c",
+      "version": "source-84f18a83b0c7",
+      "status": "migrated"
+    },
+    {
+      "id": "quant.step_3",
+      "path": "quant/step_3.md",
+      "variables": [],
+      "source": "prompts/quant_analysis/step_3_data.md",
+      "source_hash": "42ad84d65a4f8e690a64df4e73d8783b203919193e12837a8724471221f1a82e",
+      "body_hash": "42ad84d65a4f8e690a64df4e73d8783b203919193e12837a8724471221f1a82e",
+      "version": "source-42ad84d65a4f",
+      "status": "migrated"
+    },
+    {
+      "id": "quant.step_4",
+      "path": "quant/step_4.md",
+      "variables": [],
+      "source": "prompts/quant_analysis/step_4_vars.md",
+      "source_hash": "82f8ab5d3f48b66cf21f3e8ac96fe0e25ee70d060cca993191cc96ea493fecdb",
+      "body_hash": "82f8ab5d3f48b66cf21f3e8ac96fe0e25ee70d060cca993191cc96ea493fecdb",
+      "version": "source-82f8ab5d3f48",
+      "status": "migrated"
+    },
+    {
+      "id": "quant.step_5",
+      "path": "quant/step_5.md",
+      "variables": [],
+      "source": "prompts/quant_analysis/step_5_identification.md",
+      "source_hash": "df7ce5d67d4d124ffcc438150bb0f04467e49fef49d86c8d88a046dcff437dfc",
+      "body_hash": "df7ce5d67d4d124ffcc438150bb0f04467e49fef49d86c8d88a046dcff437dfc",
+      "version": "source-df7ce5d67d4d",
+      "status": "migrated"
+    },
+    {
+      "id": "quant.step_6",
+      "path": "quant/step_6.md",
+      "variables": [],
+      "source": "prompts/quant_analysis/step_6_results.md",
+      "source_hash": "52b1f5bb7ef654a157ca2de0dd52a846d78c597044e6127c6b2856be627e1d47",
+      "body_hash": "52b1f5bb7ef654a157ca2de0dd52a846d78c597044e6127c6b2856be627e1d47",
+      "version": "source-52b1f5bb7ef6",
+      "status": "migrated"
+    },
+    {
+      "id": "quant.step_7",
+      "path": "quant/step_7.md",
+      "variables": [],
+      "source": "prompts/quant_analysis/step_7_critique.md",
+      "source_hash": "e55e0269b2990456675a4e0c42975a5aa1a796e44a0efa538d605ef56020bd83",
+      "body_hash": "e55e0269b2990456675a4e0c42975a5aa1a796e44a0efa538d605ef56020bd83",
+      "version": "source-e55e0269b299",
+      "status": "migrated"
+    },
+    {
+      "id": "qual.L1",
+      "path": "qual/L1.md",
+      "variables": [],
+      "source": "prompts/qual_analysis/L1_Context_Prompt.md",
+      "source_hash": "2e18d6165bc40054ef2d3401961b347750b5733eb67005601424bba43abfec18",
+      "body_hash": "2e18d6165bc40054ef2d3401961b347750b5733eb67005601424bba43abfec18",
+      "version": "source-2e18d6165bc4",
+      "status": "migrated"
+    },
+    {
+      "id": "qual.L2",
+      "path": "qual/L2.md",
+      "variables": [],
+      "source": "prompts/qual_analysis/L2_Theory_Prompt.md",
+      "source_hash": "0abfd9f93a96a5382591edf968c428f3f851ecfd8a93778cae7cb67133645dbd",
+      "body_hash": "0abfd9f93a96a5382591edf968c428f3f851ecfd8a93778cae7cb67133645dbd",
+      "version": "source-0abfd9f93a96",
+      "status": "migrated"
+    },
+    {
+      "id": "qual.L3",
+      "path": "qual/L3.md",
+      "variables": [
+        "genre"
+      ],
+      "source": "prompts/qual_analysis/L3_Logic_Prompt.md",
+      "source_hash": "67280fb2b85a9db381049d3c40fefad32696b97e28bc894349e3a2c36c1b3640",
+      "body_hash": "67280fb2b85a9db381049d3c40fefad32696b97e28bc894349e3a2c36c1b3640",
+      "version": "source-67280fb2b85a",
+      "status": "migrated"
+    },
+    {
+      "id": "qual.L4",
+      "path": "qual/L4.md",
+      "variables": [],
+      "source": "prompts/qual_analysis/L4_Value_Prompt.md",
+      "source_hash": "9ed712f0d30bb9246d566080edf33c19724778ad60473df3d1ed7c9165869338",
+      "body_hash": "9ed712f0d30bb9246d566080edf33c19724778ad60473df3d1ed7c9165869338",
+      "version": "source-9ed712f0d30b",
+      "status": "migrated"
+    },
+    {
+      "id": "long.overview",
+      "path": "long/overview.md",
+      "variables": [],
+      "source": "prompts/long/overview.md",
+      "source_hash": "b3b7bbb6f96a62c573b1667e2ebf9a0c69f8cd5f4df44cd253cdc655dd7b4418",
+      "body_hash": "b3b7bbb6f96a62c573b1667e2ebf9a0c69f8cd5f4df44cd253cdc655dd7b4418",
+      "version": "source-b3b7bbb6f96a",
+      "status": "migrated"
+    },
+    {
+      "id": "long.theory",
+      "path": "long/theory.md",
+      "variables": [],
+      "source": "prompts/long/theory.md",
+      "source_hash": "d14e559fa4cf9dd9e76ab2924ae41cc6fce85fc82284d3c1a815f7871e2849c1",
+      "body_hash": "d14e559fa4cf9dd9e76ab2924ae41cc6fce85fc82284d3c1a815f7871e2849c1",
+      "version": "source-d14e559fa4cf",
+      "status": "migrated"
+    },
+    {
+      "id": "long.methodology",
+      "path": "long/methodology.md",
+      "variables": [],
+      "source": "prompts/long/methodology.md",
+      "source_hash": "25ed681e8bed8d342211ec2663b77b63903d4c81380fd3ecfa3301bdbc680ed9",
+      "body_hash": "25ed681e8bed8d342211ec2663b77b63903d4c81380fd3ecfa3301bdbc680ed9",
+      "version": "source-25ed681e8bed",
+      "status": "migrated"
+    },
+    {
+      "id": "long.data_source",
+      "path": "long/data_source.md",
+      "variables": [],
+      "source": "prompts/long/data_source.md",
+      "source_hash": "f6132e8f4d17558ae81a8c167a184c58afdb49cad071e2215bd28fac5e07959d",
+      "body_hash": "f6132e8f4d17558ae81a8c167a184c58afdb49cad071e2215bd28fac5e07959d",
+      "version": "source-f6132e8f4d17",
+      "status": "migrated"
+    },
+    {
+      "id": "long.variable_measurement",
+      "path": "long/variable_measurement.md",
+      "variables": [],
+      "source": "prompts/long/variable_measurement.md",
+      "source_hash": "2e3f42583baf1dc413f3d2050e59ef68b772edf709e13c190b0700a32843e5df",
+      "body_hash": "2e3f42583baf1dc413f3d2050e59ef68b772edf709e13c190b0700a32843e5df",
+      "version": "source-2e3f42583baf",
+      "status": "migrated"
+    },
+    {
+      "id": "long.identification_assumptions",
+      "path": "long/identification_assumptions.md",
+      "variables": [],
+      "source": "prompts/long/identification_assumptions.md",
+      "source_hash": "cd989b3d6d7d63c1e5cf15e7604d65a8b81e6898b3db368b7be0e1284b7501ff",
+      "body_hash": "cd989b3d6d7d63c1e5cf15e7604d65a8b81e6898b3db368b7be0e1284b7501ff",
+      "version": "source-cd989b3d6d7d",
+      "status": "migrated"
+    },
+    {
+      "id": "long.results",
+      "path": "long/results.md",
+      "variables": [],
+      "source": "prompts/long/results.md",
+      "source_hash": "9a0abb7532111edfff9a5744c69a8009316ba0797a7d4fc0a86d5bc0959d1096",
+      "body_hash": "9a0abb7532111edfff9a5744c69a8009316ba0797a7d4fc0a86d5bc0959d1096",
+      "version": "source-9a0abb753211",
+      "status": "migrated"
+    },
+    {
+      "id": "long.mechanism",
+      "path": "long/mechanism.md",
+      "variables": [],
+      "source": "prompts/long/mechanism.md",
+      "source_hash": "4e781fc4bf08b4101df19bb4d848bc67583797a058394b155cfc7dbfe6e30eb9",
+      "body_hash": "4e781fc4bf08b4101df19bb4d848bc67583797a058394b155cfc7dbfe6e30eb9",
+      "version": "source-4e781fc4bf08",
+      "status": "migrated"
+    },
+    {
+      "id": "long.robustness",
+      "path": "long/robustness.md",
+      "variables": [],
+      "source": "prompts/long/robustness.md",
+      "source_hash": "00442d655ff898f729025447e2034d39c4226890ef650d2d8ac5f08e9c1c0516",
+      "body_hash": "00442d655ff898f729025447e2034d39c4226890ef650d2d8ac5f08e9c1c0516",
+      "version": "source-00442d655ff8",
+      "status": "migrated"
+    },
+    {
+      "id": "long.external_validity",
+      "path": "long/external_validity.md",
+      "variables": [],
+      "source": "prompts/long/external_validity.md",
+      "source_hash": "87c1a198f1af5031953e4f37cd69b6bf7c5c70de4af0aeed5a81ca2e3d294624",
+      "body_hash": "87c1a198f1af5031953e4f37cd69b6bf7c5c70de4af0aeed5a81ca2e3d294624",
+      "version": "source-87c1a198f1af",
+      "status": "migrated"
+    },
+    {
+      "id": "long.contributions_limitations",
+      "path": "long/contributions_limitations.md",
+      "variables": [],
+      "source": "prompts/long/contributions_limitations.md",
+      "source_hash": "ce527c56a6576b211347d80060234366e3b3c52f270863119b188bccf90a5081",
+      "body_hash": "ce527c56a6576b211347d80060234366e3b3c52f270863119b188bccf90a5081",
+      "version": "source-ce527c56a657",
+      "status": "migrated"
+    },
+    {
+      "id": "long.writing_quality",
+      "path": "long/writing_quality.md",
+      "variables": [],
+      "source": "prompts/long/writing_quality.md",
+      "source_hash": "29cd6db749b18fbfd6d15373b3328ec9e79dc65d89640b95d5555bcfa6982c12",
+      "body_hash": "29cd6db749b18fbfd6d15373b3328ec9e79dc65d89640b95d5555bcfa6982c12",
+      "version": "source-29cd6db749b1",
+      "status": "migrated"
+    },
+    {
+      "id": "long.custom",
+      "path": "long/custom.md",
+      "variables": [],
+      "source": "prompts/long/custom.md",
+      "source_hash": "64dbebee16fd64593b72b5c4678392e90c8320d89cc860217a3316aaa715475d",
+      "body_hash": "64dbebee16fd64593b72b5c4678392e90c8320d89cc860217a3316aaa715475d",
+      "version": "source-64dbebee16fd",
+      "status": "migrated"
+    },
+    {
+      "id": "filter.explorer",
+      "path": "filter/explorer.md",
+      "variables": [
+        "abstract",
+        "authors",
+        "journal",
+        "title",
+        "topic",
+        "year"
+      ],
+      "source": "prompts/literature_filter/explorer.md",
+      "source_hash": "62ac6c0036f40b54e3a74cad27763382ef4589a1c70a0811c086b1bf6331c523",
+      "body_hash": "62ac6c0036f40b54e3a74cad27763382ef4589a1c70a0811c086b1bf6331c523",
+      "version": "source-62ac6c0036f4",
+      "status": "migrated"
+    },
+    {
+      "id": "filter.reviewer",
+      "path": "filter/reviewer.md",
+      "variables": [
+        "abstract",
+        "authors",
+        "journal",
+        "title",
+        "topic",
+        "year"
+      ],
+      "source": "prompts/literature_filter/reviewer.md",
+      "source_hash": "06f293785ccecaf3b71f5df0fee4f795dbfea2e0c6adbc74b980f6fe37efff02",
+      "body_hash": "06f293785ccecaf3b71f5df0fee4f795dbfea2e0c6adbc74b980f6fe37efff02",
+      "version": "source-06f293785cce",
+      "status": "migrated"
+    },
+    {
+      "id": "filter.empiricist",
+      "path": "filter/empiricist.md",
+      "variables": [
+        "abstract",
+        "authors",
+        "journal",
+        "title",
+        "topic",
+        "year"
+      ],
+      "source": "prompts/literature_filter/empiricist.md",
+      "source_hash": "71cbad8d635437d47f76506e291125c43c911b5768e234885b243b88ff9dd539",
+      "body_hash": "71cbad8d635437d47f76506e291125c43c911b5768e234885b243b88ff9dd539",
+      "version": "source-71cbad8d6354",
+      "status": "migrated"
+    },
+    {
+      "id": "compare.ai_summary",
+      "path": "compare/ai_summary.md",
+      "variables": [
+        "selected_text"
+      ],
+      "source": "prompts/compare/ai_summary.md",
+      "source_hash": "b80a96515b9e2817925e1aea5c1cf04982b27f8b7c359041e28bf4ded565086a",
+      "body_hash": "b80a96515b9e2817925e1aea5c1cf04982b27f8b7c359041e28bf4ded565086a",
+      "version": "source-b80a96515b9e",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.system_role",
+      "path": "synthesis/system_role.md",
+      "variables": [],
+      "source": "prompts/synthesis/system_role.md",
+      "source_hash": "b0a8318617673ab17f0207e9343e6b71cd2e0bf3f3b2e3e0fa624c9aae93dc48",
+      "body_hash": "514f92f80aff3761f5eaa2f52c0f6e9e214150bfee242c5e2caf355081adb539",
+      "version": "source-514f92f80aff",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.compare_system_role",
+      "path": "synthesis/compare_system_role.md",
+      "variables": [],
+      "source": "prompts/synthesis/compare_system_role.md",
+      "source_hash": "428ff036d0f78cb9855508b8dfaf89d588562eac30ec17e6ba8f011b2bfc80e2",
+      "body_hash": "78d142fa2908da32ef2969f85612db207f106a9cd3730c94922260a44eedd85a",
+      "version": "source-78d142fa2908",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.dimension_prompt",
+      "path": "synthesis/dimension_prompt.md",
+      "variables": [
+        "dim_label"
+      ],
+      "source": "prompts/synthesis/dimension_prompt.md",
+      "source_hash": "85355bd1bbb363f4ecefb1fba24e8bf80b1da5e3c592c27e75e73aa8bdd0e14b",
+      "body_hash": "97c8c8404434a77bad120cad780428b078b45aa478d0b7cd04fb0deb9cb3b0fd",
+      "version": "source-97c8c8404434",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.single_prompt",
+      "path": "synthesis/single_prompt.md",
+      "variables": [
+        "label",
+        "n"
+      ],
+      "source": "prompts/synthesis/single_prompt.md",
+      "source_hash": "9187253183624a64b7f53a6cb04d70fea9999e6e1ff7d5a2b478df5929d1c3ee",
+      "body_hash": "17edec5ab79e40aa1276be842ba737f15208b7f82947190f20e93bf1049aac0d",
+      "version": "source-17edec5ab79e",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.multi_prompt",
+      "path": "synthesis/multi_prompt.md",
+      "variables": [
+        "label",
+        "n",
+        "sub_count",
+        "sub_questions_list"
+      ],
+      "source": "prompts/synthesis/multi_prompt.md",
+      "source_hash": "4f546a95b01219b22b11db5ea60deac8b55ee0b6c80d0af3a940406bc3852627",
+      "body_hash": "df4cffeedf114cf8c0932a645c07681b9bba43257693f30e84ba517c7b90326d",
+      "version": "source-df4cffeedf11",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.cross_dim_prompt",
+      "path": "synthesis/cross_dim_prompt.md",
+      "variables": [
+        "n",
+        "step_count",
+        "step_list"
+      ],
+      "source": "prompts/synthesis/cross_dim_prompt.md",
+      "source_hash": "833620258706d6918418dabcf563e702d0ee873be9c84214481d0e4ac1bc9c31",
+      "body_hash": "f7c1fb26106d2a5163a3d45bf7b97abcdae8eb738c33e452642ee44bcc6508c7",
+      "version": "source-f7c1fb26106d",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.long_single_prompt",
+      "path": "synthesis/long_single_prompt.md",
+      "variables": [
+        "dimension",
+        "n"
+      ],
+      "source": "prompts/synthesis/long_single_prompt.md",
+      "source_hash": "3d46ff687eb91b20d42cbfa6e1a9c12ebca30bf0fe2e6570534c18621a279393",
+      "body_hash": "33511a0fa37caa770ad76f483bdb6fbf299370472a87d20b29be86bf7f1040a9",
+      "version": "source-33511a0fa37c",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.long_multi_prompt",
+      "path": "synthesis/long_multi_prompt.md",
+      "variables": [
+        "dim_count",
+        "dimensions",
+        "n"
+      ],
+      "source": "prompts/synthesis/long_multi_prompt.md",
+      "source_hash": "7c03cdf70dfffc88bbdd507f8f5344c32127f0373ab90c28a3e7dc3ebfae4f81",
+      "body_hash": "c039e52567f353848ee165258f223995b355ddf730e85036b23d96aee2e8f727",
+      "version": "source-c039e52567f3",
+      "status": "migrated"
+    },
+    {
+      "id": "ai_template.meta_prompt",
+      "path": "ai_template/meta_prompt.md",
+      "variables": [
+        "dim_count",
+        "paper_text"
+      ],
+      "source": "prompts/ai_template/meta_prompt.md",
+      "source_hash": "64706dc58eb4913329c600ef3e5de7ea583f5e7fddc770cebb432c287a8db76f",
+      "body_hash": "432e68c351bfc46a947b11d6b27baf1d0623b12cd9650cfcbc4beb51fc5209ec",
+      "version": "source-432e68c351bf",
+      "status": "migrated",
+      "unescape_double_braces": true
+    },
+    {
+      "id": "ai_template.system_role",
+      "path": "ai_template/system_role.md",
+      "variables": [],
+      "source": "prompts/ai_template/system_role.md",
+      "source_hash": "8ff78fc3f3aab43497505c00b5e22457945df0bdc6e370b71c749c9ebf7bcf02",
+      "body_hash": "7abcf1dbed8f0aa4d50cb6e34de4b1ddd79b2db5222cc045be935dc16bcae2f5",
+      "version": "source-7abcf1dbed8f",
+      "status": "migrated"
+    },
+    {
+      "id": "translation.glossary",
+      "path": "translation/glossary.md",
+      "variables": [
+        "abstract",
+        "introduction",
+        "title"
+      ],
+      "source": "prompts/translation/glossary.md",
+      "source_hash": "a0e606628319273588366a8bd370cdbf0d7eaa3e85669cd2073beb9ded2331a0",
+      "body_hash": "ffbf206cbc259c9454d5cf0306f0824221d8dcff6cf96372dbb93fdcdc2899bc",
+      "version": "source-ffbf206cbc25",
+      "status": "migrated"
+    },
+    {
+      "id": "translation.restate",
+      "path": "translation/restate.md",
+      "variables": [
+        "chunk",
+        "glossary"
+      ],
+      "source": "prompts/translation/restate.md",
+      "source_hash": "438beda176d8902e905e66da0ce7fdd9625fab1eccf2ff2dc607c5e90427259b",
+      "body_hash": "09e5df098cc2e4f0b8eca7edba8afcfa0289bc70272172dd8ce42dd57530d9e0",
+      "version": "source-09e5df098cc2",
+      "status": "migrated"
+    },
+    {
+      "id": "library_chat.source_followup_query",
+      "path": "library_chat/source_followup_query.md",
+      "variables": [],
+      "source": "prompts/library_chat/source_followup_query.md",
+      "source_hash": "fe3bf91b50cb3925a3bf47cb1928716138c730c9f888ed25b03917714b3a0dcc",
+      "body_hash": "fe3bf91b50cb3925a3bf47cb1928716138c730c9f888ed25b03917714b3a0dcc",
+      "version": "source-fe3bf91b50cb",
+      "status": "migrated"
+    },
+    {
+      "id": "library_chat.source_followup_answer",
+      "path": "library_chat/source_followup_answer.md",
+      "variables": [],
+      "source": "prompts/library_chat/source_followup_answer.md",
+      "source_hash": "33fb29ec708f8ee1dfa1ebe61de10a98d26ca40c8e8774bab2f90a4ed7f94869",
+      "body_hash": "33fb29ec708f8ee1dfa1ebe61de10a98d26ca40c8e8774bab2f90a4ed7f94869",
+      "version": "source-33fb29ec708f",
+      "status": "migrated"
+    },
+    {
+      "id": "library_chat.source_followup_verify",
+      "path": "library_chat/source_followup_verify.md",
+      "variables": [],
+      "source": "prompts/library_chat/source_followup_verify.md",
+      "source_hash": "f47e2cff1529c3c757ce21133807bcdabbe6d548dca878b5d952302b69a97731",
+      "body_hash": "f47e2cff1529c3c757ce21133807bcdabbe6d548dca878b5d952302b69a97731",
+      "version": "source-f47e2cff1529",
+      "status": "migrated"
+    },
+    {
+      "id": "library_chat.query_parser",
+      "path": "library_chat/query_parser.md",
+      "variables": [],
+      "source": "prompts/library_chat/query_parser.md",
+      "source_hash": "ac23cee7a3ecdd5a0b727971948043600577419dea4bd707e80ab426f0827503",
+      "body_hash": "149c11d590cf31381c8c35aca1aff5d41fbcb3f4a3d938941800ecf7b78dfc1b",
+      "version": "source-149c11d590cf",
+      "status": "migrated"
+    },
+    {
+      "id": "library_chat.report_writer",
+      "path": "library_chat/report_writer.md",
+      "variables": [],
+      "source": "prompts/library_chat/report_writer.md",
+      "source_hash": "0e5b26db4b92471787161ec188135548c345c6fcb29e443eff9c7c4378e7568e",
+      "body_hash": "bfbac84f81274af958a04565a6b8586dd3f59ba2eedcac98ef4bfdae28697e2c",
+      "version": "source-bfbac84f8127",
+      "status": "migrated"
+    },
+    {
+      "id": "library_chat.tag_target_selector",
+      "path": "library_chat/tag_target_selector.md",
+      "variables": [],
+      "source": "prompts/library_chat/tag_target_selector.md",
+      "source_hash": "2d9f80332f41de45210186bd4db7c523788de661016d49fddc188554259847b0",
+      "body_hash": "f620a9045125d92f4ba3e1848a2b568c5ff828e1b36fa37bf4fdf429cac409a9",
+      "version": "source-f620a9045125",
+      "status": "migrated"
+    },
+    {
+      "id": "library_chat.paper_comment_writer",
+      "path": "library_chat/paper_comment_writer.md",
+      "variables": [],
+      "source": "prompts/library_chat/paper_comment_writer.md",
+      "source_hash": "b93dd490b94b36e8eaf0ebd5611e51475c466f74ba4df18796df9592cee60c27",
+      "body_hash": "cd18079b6ab5867698c464312018a5efb8060453b5140c63b5afe6400ce722fe",
+      "version": "source-cd18079b6ab5",
+      "status": "migrated"
+    },
+    {
+      "id": "journal_kb.top_tier_registry",
+      "path": "journal_kb/top_tier_registry.md",
+      "variables": [],
+      "source": "prompts/journal_kb/top_tier_registry.md",
+      "source_hash": "ecfc5d8806648581737fb2d7a7ab1f497d8c5948075b82e405f6a6a4b5043e2c",
+      "body_hash": "ecfc5d8806648581737fb2d7a7ab1f497d8c5948075b82e405f6a6a4b5043e2c",
+      "version": "source-ecfc5d880664",
+      "status": "migrated"
+    },
+    {
+      "id": "card_note.atomic_card_writer",
+      "path": "card_note/atomic_card_writer.md",
+      "variables": [],
+      "source": "prompts/card_note/atomic_card_writer.md",
+      "source_hash": "e228a2d101d3d1946f69a88819c05dd934b78a1f91338d4731ec774763dbd032",
+      "body_hash": "64da35d670f22302e82f4f0083b6511da528cdb927bbba8c73db76a13710d3ba",
+      "version": "source-64da35d670f2",
+      "status": "migrated"
+    },
+    {
+      "id": "card_note.atomic_card_writer_user",
+      "path": "card_note/atomic_card_writer_user.md",
+      "variables": [
+        "context_after",
+        "context_before",
+        "metadata",
+        "selected_text",
+        "source_version",
+        "user_prompt"
+      ],
+      "source": "prompts/card_note/atomic_card_writer_user.md",
+      "source_hash": "73fcad6f46e1cc3a47eee8b82234dd16cf4ca27f3b3f48798548c7631fb01f33",
+      "body_hash": "6eb1779c56750711157fa606a76bf7fd2992e920f8746cd961b58c1eee525e38",
+      "version": "source-6eb1779c5675",
+      "status": "migrated"
+    },
+    {
+      "id": "ref_format.analyze_prompt",
+      "path": "ref_format/analyze_prompt.md",
+      "variables": [],
+      "source": "backend/prompts/ref_format/analyze_prompt.md",
+      "source_hash": "2b0db5967cd31c044666d17d209f3c7371f236ceed3a68968936c2a4ed193401",
+      "body_hash": "6d00921a7c7e55cff47242f90e6451ef9f5ca645a138125fb86ad60753174d29",
+      "version": "source-6d00921a7c7e",
+      "status": "migrated"
+    },
+    {
+      "id": "ref_format.generate_prompt",
+      "path": "ref_format/generate_prompt.md",
+      "variables": [],
+      "source": "backend/prompts/ref_format/generate_prompt.md",
+      "source_hash": "c934b4f18af03171f2545493b40fe3d01777802978709eb5531cee5c998058ac",
+      "body_hash": "e3f3ad10ff9aa36b6978f1cbb2820024bc0ddd31ff542a729c737bf5b9946073",
+      "version": "source-e3f3ad10ff9a",
+      "status": "migrated"
+    },
+    {
+      "id": "writing_style.single_fulltext_analyzer",
+      "path": "writing_style/single_fulltext_analyzer.md",
+      "variables": [],
+      "source": "prompts/writing_style/single_fulltext_analyzer.md",
+      "source_hash": "c8361d9a63f149bd49da445055ccd67d087cbd33108b2056662fce5249d8db7a",
+      "body_hash": "810cd4493abdace39e91c5a8f14a1bd9d17c1f2b5c5a7db3c9a2ea2dcdce5a80",
+      "version": "source-810cd4493abd",
+      "status": "migrated"
+    },
+    {
+      "id": "writing_style.single_imitation_advisor",
+      "path": "writing_style/single_imitation_advisor.md",
+      "variables": [],
+      "source": "prompts/writing_style/single_imitation_advisor.md",
+      "source_hash": "df7710e64ef6a8ec85fe6d362b7a0694d3d4e0420d841e1e89e298b047acd968",
+      "body_hash": "325d2aeb71c745213c34da8561c89cda1d26b677ce0099111006a0735120f141",
+      "version": "source-325d2aeb71c7",
+      "status": "migrated"
+    },
+    {
+      "id": "writing_style.single_report_writer",
+      "path": "writing_style/single_report_writer.md",
+      "variables": [],
+      "source": "prompts/writing_style/single_report_writer.md",
+      "source_hash": "91dfe719aebf2579174a101d350d78745f1b60abee2c191dc3f50641415b3ce0",
+      "body_hash": "9f937a5f4e7799b3da2f14dfd9705f1af1f92103ea242d9c8329d26bd0ba10e1",
+      "version": "source-9f937a5f4e77",
+      "status": "migrated"
+    },
+    {
+      "id": "writing_style.batch_section_analyzer",
+      "path": "writing_style/batch_section_analyzer.md",
+      "variables": [],
+      "source": "prompts/writing_style/batch_section_analyzer.md",
+      "source_hash": "92deecc61ab58bc0305195c3b23d1298720bac24a0cf37393ad261d9dfecc5e4",
+      "body_hash": "3c0a2dc9b9cee652dff17d65e3140da848280a8a53b86d814075fb7aa60aac4e",
+      "version": "source-3c0a2dc9b9ce",
+      "status": "migrated"
+    },
+    {
+      "id": "writing_style.batch_imitation_advisor",
+      "path": "writing_style/batch_imitation_advisor.md",
+      "variables": [],
+      "source": "prompts/writing_style/batch_imitation_advisor.md",
+      "source_hash": "be0b5c425a179ee1cb3353eda8b8a78781deb7e0003b80706c20f5a8f424b265",
+      "body_hash": "f938e56f493ccc65d9e59e14e2bf854aa04b7254f075c91ee17f591c6fd72188",
+      "version": "source-f938e56f493c",
+      "status": "migrated"
+    },
+    {
+      "id": "writing_style.batch_comparative_synthesizer",
+      "path": "writing_style/batch_comparative_synthesizer.md",
+      "variables": [],
+      "source": "prompts/writing_style/batch_comparative_synthesizer.md",
+      "source_hash": "58677210784faccc89607228f48fc716fa1c155e42812e3d0449d6ed857db530",
+      "body_hash": "85fde9fae7136a837397402b8a14e48a70f6d94a8d27723326bc3866d16b3335",
+      "version": "source-85fde9fae713",
+      "status": "migrated"
+    },
+    {
+      "id": "writing_style.batch_report_writer",
+      "path": "writing_style/batch_report_writer.md",
+      "variables": [],
+      "source": "prompts/writing_style/batch_report_writer.md",
+      "source_hash": "5b770bd80471b67da328a2274073a2e9850c5d7e8f206a5cf7ce4a82fa6f90a7",
+      "body_hash": "262246299f22203557512c3c0062e15e1375ad2bc26be0582a07b270d3e91cd9",
+      "version": "source-262246299f22",
+      "status": "migrated"
+    },
+    {
+      "id": "unregistered.prompts.writing_style.comparative_synthesizer",
+      "path": "unregistered/prompts/writing_style/comparative_synthesizer.md",
+      "variables": [],
+      "source": "prompts/writing_style/comparative_synthesizer.md",
+      "source_hash": "2d5754520ca6e52ec87dfcb22db4c0b5108f3e9e8c1cfd05f12a279476232e35",
+      "body_hash": "cf7e067d5275026e1512a8b5afcfa7b5de5ce8c1bed7356914294fc6da881867",
+      "version": "source-cf7e067d5275",
+      "status": "unregistered-retained-not-default"
+    },
+    {
+      "id": "unregistered.prompts.writing_style.imitation_advisor",
+      "path": "unregistered/prompts/writing_style/imitation_advisor.md",
+      "variables": [],
+      "source": "prompts/writing_style/imitation_advisor.md",
+      "source_hash": "5ca64ecc725adcfd084729bd575291c3e7e640ed6837b37ba4a344a58d771c62",
+      "body_hash": "b5c6e9e37d84d321a1f90cee500b38a16dc72f2e7d4439cc7a247735abde8cd3",
+      "version": "source-b5c6e9e37d84",
+      "status": "unregistered-retained-not-default"
+    },
+    {
+      "id": "unregistered.prompts.writing_style.report_writer",
+      "path": "unregistered/prompts/writing_style/report_writer.md",
+      "variables": [],
+      "source": "prompts/writing_style/report_writer.md",
+      "source_hash": "6977d2e42705c54dfce54076db478475068f92ab38c31e1964efd7bbdd1e8c96",
+      "body_hash": "6977d2e42705c54dfce54076db478475068f92ab38c31e1964efd7bbdd1e8c96",
+      "version": "source-6977d2e42705",
+      "status": "unregistered-retained-not-default"
+    },
+    {
+      "id": "unregistered.prompts.writing_style.section_analyzer",
+      "path": "unregistered/prompts/writing_style/section_analyzer.md",
+      "variables": [],
+      "source": "prompts/writing_style/section_analyzer.md",
+      "source_hash": "0be38302b1ab8fda1c87bd3533255cae29b1cb053404defb6dd9e98895b45b0f",
+      "body_hash": "0be38302b1ab8fda1c87bd3533255cae29b1cb053404defb6dd9e98895b45b0f",
+      "version": "source-0be38302b1ab",
+      "status": "unregistered-retained-not-default"
+    },
+    {
+      "id": "code.abstract_translator._system_prompt",
+      "path": "code/abstract_translator/_system_prompt.md",
+      "variables": [],
+      "source": "backend/services/abstract_translator.py#_SYSTEM_PROMPT:12",
+      "source_hash": "447907fb9510afcad3d08bc5956181b8b9642f4b2e84b5007bf3c3dbb3533160",
+      "body_hash": "2648849fd56755c5177ca2fc616771fba91f83b390617faa612e2b08dac6fb37",
+      "version": "source-2648849fd567",
+      "status": "migrated"
+    },
+    {
+      "id": "code.ai_template_generator.meta_prompt_default",
+      "path": "code/ai_template_generator/meta_prompt_default.md",
+      "variables": [
+        "dim_count",
+        "paper_text"
+      ],
+      "source": "backend/services/ai_template_generator.py#META_PROMPT_DEFAULT:17",
+      "source_hash": "c11abacc96edea57a8951f7178321f65c65ed0f2a0b16838ef7a2c30dca626bf",
+      "body_hash": "ee2168695000325af2f0e31eddb18b77f0b762a48a39e8136d9b8e69b48dd7e7",
+      "version": "source-ee2168695000",
+      "status": "migrated"
+    },
+    {
+      "id": "code.ai_template_generator.system_role_default",
+      "path": "code/ai_template_generator/system_role_default.md",
+      "variables": [],
+      "source": "backend/services/ai_template_generator.py#SYSTEM_ROLE_DEFAULT:75",
+      "source_hash": "c11abacc96edea57a8951f7178321f65c65ed0f2a0b16838ef7a2c30dca626bf",
+      "body_hash": "34f753d6e2af524de4484fff955bb2366007c2207ea16e9253a41ccbfd5ac649",
+      "version": "source-34f753d6e2af",
+      "status": "migrated"
+    },
+    {
+      "id": "code.deepseek_refs.prompt_extract",
+      "path": "code/deepseek_refs/prompt_extract.md",
+      "variables": [],
+      "source": "backend/services/deepseek_refs.py#PROMPT_EXTRACT:40",
+      "source_hash": "f8bed4ecd24399f71490683b6d071a8f6ceeb4504b85909d10dd270b6b760b27",
+      "body_hash": "8cc3a065a286180b43dac53ff9b34fd788a8c6a96e3bccc445b2a11b8e942c7f",
+      "version": "source-8cc3a065a286",
+      "status": "migrated"
+    },
+    {
+      "id": "code.deepseek_refs.prompt_cite",
+      "path": "code/deepseek_refs/prompt_cite.md",
+      "variables": [],
+      "source": "backend/services/deepseek_refs.py#PROMPT_CITE:95",
+      "source_hash": "f8bed4ecd24399f71490683b6d071a8f6ceeb4504b85909d10dd270b6b760b27",
+      "body_hash": "f90262f0bb066c2cf773dacc24ad6bdabbffbc6cb07adae49d3b304197c7ebf0",
+      "version": "source-f90262f0bb06",
+      "status": "migrated"
+    },
+    {
+      "id": "code.pdf_metadata_llm.prompt",
+      "path": "code/pdf_metadata_llm/prompt.md",
+      "variables": [
+        "dois",
+        "filename",
+        "page_1",
+        "page_2",
+        "page_3"
+      ],
+      "source": "backend/services/pdf_metadata_llm.py#PROMPT:21",
+      "source_hash": "e2504ded18942e83bf7de6f237ede556d55dd0125174d8b52010eda5194e623e",
+      "body_hash": "e851f44551e7cc40c7ab5381b381c83a151f01f58492d2ba839cd7f18c3a8556",
+      "version": "source-e851f44551e7",
+      "status": "migrated",
+      "unescape_double_braces": true
+    },
+    {
+      "id": "code.reading_source_evidence.inline_13",
+      "path": "code/reading_source_evidence/inline_13.md",
+      "variables": [
+        "value_1",
+        "value_2"
+      ],
+      "source": "backend/services/reading_source_evidence.py#line:13",
+      "source_hash": "974b49d70a0978dd1a2829755fa9eb23fd7e9912c1c8cc949c9e5ccad75943fb",
+      "body_hash": "c0069784ac01c1353f9f07d00ebf82f0122c31f290708507da11a5fc4520402e",
+      "version": "source-c0069784ac01",
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "id": "code.ref_format_service.analyze_prompt",
+      "path": "code/ref_format_service/analyze_prompt.md",
+      "variables": [],
+      "source": "backend/services/ref_format_service.py#ANALYZE_PROMPT:13",
+      "source_hash": "8fc284ea4ca0fe553dc2ef481c990c7f536efd358e4764137a6358b04c9f66de",
+      "body_hash": "0c37301f876f974b0568d767ef954b5181da9273edb6ee03d2f979de772233fb",
+      "version": "source-0c37301f876f",
+      "status": "migrated"
+    },
+    {
+      "id": "code.ref_format_service.generate_prompt",
+      "path": "code/ref_format_service/generate_prompt.md",
+      "variables": [],
+      "source": "backend/services/ref_format_service.py#GENERATE_PROMPT:32",
+      "source_hash": "8fc284ea4ca0fe553dc2ef481c990c7f536efd358e4764137a6358b04c9f66de",
+      "body_hash": "4594180e2d948149cf4dc48f7e89fe5eca9b11c8fbbdef4ef87dbaf9ffaf22df",
+      "version": "source-4594180e2d94",
+      "status": "migrated"
+    },
+    {
+      "id": "code.research_agent_runtime.inline_1143",
+      "path": "code/research_agent_runtime/inline_1143.md",
+      "variables": [
+        "value_1",
+        "value_2",
+        "value_3",
+        "value_4"
+      ],
+      "source": "backend/services/research_agent_runtime.py#line:1143",
+      "source_hash": "7586d7aa35fd0236160cb4b83719d5b15e3f8ce04f08dba9294e4cde9d2934d3",
+      "body_hash": "d80b023d5cc9bb740c47f98b33f6143e9d80c0fcf66e697c9bba8128fcf6b3fe",
+      "version": "source-d80b023d5cc9",
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "id": "code.research_idea_lab.inline_114",
+      "path": "code/research_idea_lab/inline_114.md",
+      "variables": [
+        "value_1"
+      ],
+      "source": "backend/services/research_idea_lab.py#line:114",
+      "source_hash": "4b51f73f189160e9afee9458e86cf27c333703ad20c27c568cc231773d02129f",
+      "body_hash": "7a4edd6f81267afc7a4656ec3493797054ea5842b1be2502913a63a07cd792cb",
+      "version": "source-7a4edd6f8126",
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "id": "code.source_qa.source_guard",
+      "path": "code/source_qa/source_guard.md",
+      "variables": [],
+      "source": "backend/services/source_qa.py#SOURCE_GUARD:19",
+      "source_hash": "f204d5a0d8ccc01120a0ef6293af69fd78e21f5188a179004aa376df60465e8e",
+      "body_hash": "f238186530868e82abb52c1ed29881a6cc718e283201f47a2244adcf0c330155",
+      "version": "source-f23818653086",
+      "status": "migrated"
+    },
+    {
+      "id": "code.source_qa.answer_format",
+      "path": "code/source_qa/answer_format.md",
+      "variables": [],
+      "source": "backend/services/source_qa.py#ANSWER_FORMAT:39",
+      "source_hash": "f204d5a0d8ccc01120a0ef6293af69fd78e21f5188a179004aa376df60465e8e",
+      "body_hash": "76690d5e6ee56f7acbbde6892d90862733d9082ea6004103ec8091bebe602957",
+      "version": "source-76690d5e6ee5",
+      "status": "migrated"
+    },
+    {
+      "id": "code.source_qa.verify_format",
+      "path": "code/source_qa/verify_format.md",
+      "variables": [],
+      "source": "backend/services/source_qa.py#VERIFY_FORMAT:40",
+      "source_hash": "f204d5a0d8ccc01120a0ef6293af69fd78e21f5188a179004aa376df60465e8e",
+      "body_hash": "3b78fe57def860634d11f356dd61f9e6a27b339ef8a817a23ca0a09cce238c4b",
+      "version": "source-3b78fe57def8",
+      "status": "migrated"
+    },
+    {
+      "id": "code.compare.synthesis_system_prompt_default",
+      "path": "code/compare/synthesis_system_prompt_default.md",
+      "variables": [],
+      "source": "backend/routers/compare.py#SYNTHESIS_SYSTEM_PROMPT_DEFAULT:54",
+      "source_hash": "b5996c060583de9670bf7955d20986c918725dd4f14f57c80f05e5c06d1c73f3",
+      "body_hash": "514f92f80aff3761f5eaa2f52c0f6e9e214150bfee242c5e2caf355081adb539",
+      "version": "source-514f92f80aff",
+      "status": "migrated"
+    },
+    {
+      "id": "code.compare.system_prompt_default",
+      "path": "code/compare/system_prompt_default.md",
+      "variables": [],
+      "source": "backend/routers/compare.py#SYSTEM_PROMPT_DEFAULT:1074",
+      "source_hash": "b5996c060583de9670bf7955d20986c918725dd4f14f57c80f05e5c06d1c73f3",
+      "body_hash": "492450b2fa2e53bb4c1948aa7ea88b4fe23f3c60b0eb27b7bb2cfd48dbb7f205",
+      "version": "source-492450b2fa2e",
+      "status": "migrated"
+    },
+    {
+      "id": "code.dimensions.inline_936",
+      "path": "code/dimensions/inline_936.md",
+      "variables": [
+        "value_1"
+      ],
+      "source": "backend/routers/dimensions.py#line:936",
+      "source_hash": "c6918910615d04f0e41c3f5e8498dc48dcf4e33907ae29ea23f4dc5c7ec15d81",
+      "body_hash": "4a1661fcd25ed5518a4e5707c9968ed2949ddddf87ac1cff5ec1866e6b59fe8b",
+      "version": "source-4a1661fcd25e",
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "id": "code.history.inline_216",
+      "path": "code/history/inline_216.md",
+      "variables": [
+        "value_1",
+        "value_2",
+        "value_3"
+      ],
+      "source": "backend/routers/history.py#line:216",
+      "source_hash": "db2bbbd742aa730e4a23bd626492f888614a821dc8f5703c3c1bbe46d5a71f9f",
+      "body_hash": "5eb9757d33124b43d4a0068aa314051fa84fcd67b09d70fcdcb0dffe2cac2157",
+      "version": "source-5eb9757d3312",
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "id": "code.metadata_extractor.inline_30",
+      "path": "code/metadata_extractor/inline_30.md",
+      "variables": [
+        "value_1"
+      ],
+      "source": "backend/routers/metadata_extractor.py#line:30",
+      "source_hash": "db0ff5337aa3f3e32595bf191f5a49affd1ede7bf42836107d794f28b9d75f38",
+      "body_hash": "a044e2882fc8ac757722ea8b953f958c7acd768fb3ccabc6c5706c34e8ffa558",
+      "version": "source-a044e2882fc8",
+      "status": "dynamic-extracted-review-required"
+    },
+    {
+      "id": "code.conversation_engine.system_prompt",
+      "path": "code/conversation_engine/system_prompt.md",
+      "variables": [],
+      "source": "new_architecture/conversation_engine.py#SYSTEM_PROMPT:50",
+      "source_hash": "3ea4e044e7d007cab21d589c4b3cd87c28f945bfee34cf64a692047ce8fa3fa2",
+      "body_hash": "efe3fe8dca01ecc1a83184c72a2eaac11bb26308d19502cb66edb0e30b694a35",
+      "version": "source-efe3fe8dca01",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline.glossary_system",
+      "path": "code/translation_pipeline/glossary_system.md",
+      "variables": [],
+      "source": "translation_pipeline.py#GLOSSARY_SYSTEM:57",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "fdcdf458e9fa04a32539e7cf044c6f2654598470d03e775ff75e0ee3bd404d7f",
+      "version": "source-fdcdf458e9fa",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline.glossary_user_tmpl",
+      "path": "code/translation_pipeline/glossary_user_tmpl.md",
+      "variables": [
+        "abstract",
+        "introduction",
+        "title"
+      ],
+      "source": "translation_pipeline.py#GLOSSARY_USER_TMPL:62",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "26586710c15177e5aea39a1b21413644ae59d43827906714334e1d50fc7f56c0",
+      "version": "source-26586710c151",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline.restate_system",
+      "path": "code/translation_pipeline/restate_system.md",
+      "variables": [],
+      "source": "translation_pipeline.py#RESTATE_SYSTEM:85",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "08390b831024af962db3c367aff0578f5d4ac03a1d1106e76d9ae6171c44de54",
+      "version": "source-08390b831024",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline.restate_user_tmpl",
+      "path": "code/translation_pipeline/restate_user_tmpl.md",
+      "variables": [
+        "chunk",
+        "glossary"
+      ],
+      "source": "translation_pipeline.py#RESTATE_USER_TMPL:90",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "177cdbf9801821fcb5f2daea6ff4af075f7f3989e37662d4c180ffc2f814a1b1",
+      "version": "source-177cdbf98018",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline.pdf_fulltext_glossary_system",
+      "path": "code/translation_pipeline/pdf_fulltext_glossary_system.md",
+      "variables": [],
+      "source": "translation_pipeline.py#PDF_FULLTEXT_GLOSSARY_SYSTEM:110",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "834a0dcab20fa4d462123cd869a1c286c10ab47f5b6f0cebbfec3219bf06bc78",
+      "version": "source-834a0dcab20f",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline.pdf_fulltext_glossary_user_tmpl",
+      "path": "code/translation_pipeline/pdf_fulltext_glossary_user_tmpl.md",
+      "variables": [
+        "full_text"
+      ],
+      "source": "translation_pipeline.py#PDF_FULLTEXT_GLOSSARY_USER_TMPL:115",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "a102f3c1465320cf1e1dfe0fb89a9d6158579fa78331c7d7a1956509301fa23a",
+      "version": "source-a102f3c14653",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline.pdf_fulltext_restate_system",
+      "path": "code/translation_pipeline/pdf_fulltext_restate_system.md",
+      "variables": [],
+      "source": "translation_pipeline.py#PDF_FULLTEXT_RESTATE_SYSTEM:131",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "c6904251f7d6ea0008063217c28624fce4edd633402430dec2be46cd7ceabb11",
+      "version": "source-c6904251f7d6",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline.pdf_fulltext_restate_user_tmpl",
+      "path": "code/translation_pipeline/pdf_fulltext_restate_user_tmpl.md",
+      "variables": [
+        "full_text",
+        "glossary"
+      ],
+      "source": "translation_pipeline.py#PDF_FULLTEXT_RESTATE_USER_TMPL:136",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "81863c8516460b79167ca5e188310b1be156ddeb2b372adde0f39ff23a5a6274",
+      "version": "source-81863c851646",
+      "status": "migrated"
+    },
+    {
+      "id": "code.translation_pipeline._detect_prompt",
+      "path": "code/translation_pipeline/_detect_prompt.md",
+      "variables": [
+        "preview"
+      ],
+      "source": "translation_pipeline.py#_DETECT_PROMPT:281",
+      "source_hash": "e047906d5369e9c7893aacd658dc062666ebbd60ecfea2f6f7b5f6abf2068fdb",
+      "body_hash": "8ae1e07a337f5f52b75b873d2100cc263864ea05aacdca73a4af55d5ff41c8e8",
+      "version": "source-8ae1e07a337f",
+      "status": "migrated"
+    },
+    {
+      "id": "reading.evidence",
+      "path": "reading/evidence.md",
+      "variables": [],
+      "source": "backend/services/reading_source_evidence.py#SOURCE_EVIDENCE_INSTRUCTION",
+      "source_hash": "974b49d70a0978dd1a2829755fa9eb23fd7e9912c1c8cc949c9e5ccad75943fb",
+      "body_hash": "6bd55f78d52ada142cd98f85eac8942d705deb190c3d015687365cd2b70355f8",
+      "version": "source-6bd55f78d52a",
+      "status": "migrated"
+    },
+    {
+      "id": "translation.abstract_user",
+      "path": "translation/abstract_user.md",
+      "variables": [
+        "abstract"
+      ],
+      "source": "backend/services/abstract_translator.py#_translate_one.user",
+      "source_hash": "447907fb9510afcad3d08bc5956181b8b9642f4b2e84b5007bf3c3dbb3533160",
+      "body_hash": "77de4dfb228f9db096ba5c10eb4da60188c6973dd8ad0cbe9776f6f84bd0c8dd",
+      "version": "source-77de4dfb228f",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.overview",
+      "path": "dimension/overview.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#overview",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "a5c3acfc97cb7bcc27aabc981cb19d5b0b3606f0eee08d1eba79501b563c57ec",
+      "version": "source-a5c3acfc97cb",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.overview",
+      "path": "dimension_questions/overview.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#overview.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "7c8d85a15cee8c9a61e0788a45864805941dbe147af8864f3c631c73b3e22000",
+      "version": "source-7c8d85a15cee",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.theory",
+      "path": "dimension/theory.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#theory",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "f2473a5c7dc3fe7f7fe2183b67333ced155ed49746ffc1d0009029f1ea00e815",
+      "version": "source-f2473a5c7dc3",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.theory",
+      "path": "dimension_questions/theory.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#theory.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "09b238685f523f07a34e207b1243c1342a9175ae689f8c9680234e8b68cb2ed2",
+      "version": "source-09b238685f52",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.methodology",
+      "path": "dimension/methodology.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#methodology",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "699393f9b5164ed0ffdcad26fbc6deca95899d5368165b57638563032f2336a3",
+      "version": "source-699393f9b516",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.methodology",
+      "path": "dimension_questions/methodology.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#methodology.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "f9cdb88e34d14a57c5376e8d51fb8fb462807232e27858f529c9d8b516feded2",
+      "version": "source-f9cdb88e34d1",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.data_source",
+      "path": "dimension/data_source.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#data_source",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "85d753b6ef9a73b37e2431f9bfefec97ca54f26962694fd52f77f7c0830b1ada",
+      "version": "source-85d753b6ef9a",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.data_source",
+      "path": "dimension_questions/data_source.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#data_source.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "e7090a5b996b3790f34570dc468fd52fc634787f200da06f4b70cb6cfd1cd7fd",
+      "version": "source-e7090a5b996b",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.variable_measurement",
+      "path": "dimension/variable_measurement.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#variable_measurement",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "bf281ee62cfbfca3f0608d0358b77a78c430d194274c590a2fee839dc2b60f15",
+      "version": "source-bf281ee62cfb",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.variable_measurement",
+      "path": "dimension_questions/variable_measurement.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#variable_measurement.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "14a1822f4bd46c7782b2f71386afcbe5913052a0d74afec1e09e366d8c86301d",
+      "version": "source-14a1822f4bd4",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.identification_assumptions",
+      "path": "dimension/identification_assumptions.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#identification_assumptions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "f467139313e2a4199dd8500b6048417fa9c380e9d04cd2a6357bd1197faa2b33",
+      "version": "source-f467139313e2",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.identification_assumptions",
+      "path": "dimension_questions/identification_assumptions.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#identification_assumptions.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "f6ac18213969bdbc8cd43cbf7316db1019a238dc89cdcbb8a1d5da82b44a5c62",
+      "version": "source-f6ac18213969",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.results",
+      "path": "dimension/results.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#results",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "ee937bd0bb694141d40658d71420f0b5bacefd9457291d9412f89c395195662b",
+      "version": "source-ee937bd0bb69",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.results",
+      "path": "dimension_questions/results.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#results.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "7cac6e784a722b1d137da187fc51e4e81191ded3571af6635899c95bed6f8974",
+      "version": "source-7cac6e784a72",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.mechanism",
+      "path": "dimension/mechanism.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#mechanism",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "0fa6a6efd9ec5a30f2a23fda708135399ddb6f4f49dfba51c8ffc15d84047534",
+      "version": "source-0fa6a6efd9ec",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.mechanism",
+      "path": "dimension_questions/mechanism.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#mechanism.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "30c6e22942317213b152d033e2813c3f11a1fbe7c1d09b1f5f7934d1dc3a323e",
+      "version": "source-30c6e2294231",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.robustness",
+      "path": "dimension/robustness.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#robustness",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "209dffb3403a75297bc966673567b60e3309681bee081fd66eaa50f23c9fcefa",
+      "version": "source-209dffb3403a",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.robustness",
+      "path": "dimension_questions/robustness.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#robustness.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "7793201f1b271f551d1bfd471aeedc4b71c4a66e82ec62ad53c40ae380968179",
+      "version": "source-7793201f1b27",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.external_validity",
+      "path": "dimension/external_validity.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#external_validity",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "10ce115c9eda8a45553710c4b67ce0d850d4ed6a078e7ad6be4bced9198958f6",
+      "version": "source-10ce115c9eda",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.external_validity",
+      "path": "dimension_questions/external_validity.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#external_validity.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "d9ad93544c22cccac27b2a829f47287c74a6b56078efbdc969b23d94898a31e7",
+      "version": "source-d9ad93544c22",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.contributions_limitations",
+      "path": "dimension/contributions_limitations.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#contributions_limitations",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "10d79f215bd97207879ced9a9e22823839fcbf63edcf1364df9fa1d74fcbb7e5",
+      "version": "source-10d79f215bd9",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.contributions_limitations",
+      "path": "dimension_questions/contributions_limitations.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#contributions_limitations.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "17e3138d9a8f48935e45d34b589d7f085588c3d47d524f99531ad14a799ba6a7",
+      "version": "source-17e3138d9a8f",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.writing_quality",
+      "path": "dimension/writing_quality.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#writing_quality",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "d6097c195be9bb3c64ef94610c0155ecab9eacfb28fc1d6d9b06ae29845e05e9",
+      "version": "source-d6097c195be9",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.writing_quality",
+      "path": "dimension_questions/writing_quality.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#writing_quality.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "f8dab9ea0817a11eaa6c0ff0a1c0f9cb488fa39614e7256aa95bb163f9b2cd05",
+      "version": "source-f8dab9ea0817",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension.custom",
+      "path": "dimension/custom.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#custom",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "922335ab674af56bd79d75c7d0d0ac79f14afec3c58dc794274294e8ae0c34b1",
+      "version": "source-922335ab674a",
+      "status": "migrated"
+    },
+    {
+      "id": "dimension_questions.custom",
+      "path": "dimension_questions/custom.md",
+      "variables": [],
+      "source": "new_architecture/analysis_dimensions.py#custom.default_questions",
+      "source_hash": "32bb360f512055ba498bc20948a26d297ab117bd80a31f564b05cab230c69d04",
+      "body_hash": "7ff8ea9bb51752841c8047d2fda51c92e5f697deccd9bebb936cedb2a423876c",
+      "version": "source-7ff8ea9bb517",
+      "status": "migrated"
+    },
+    {
+      "id": "qa.fixed_priority",
+      "path": "qa/fixed_priority.md",
+      "variables": [],
+      "source": "backend/services/source_qa.py#answer/verify composition",
+      "source_hash": "f204d5a0d8ccc01120a0ef6293af69fd78e21f5188a179004aa376df60465e8e",
+      "body_hash": "45168a8243b5ad1c992daf98020a4f62b1edc545636ed5ff9b42c3e5659c2b05",
+      "version": "source-45168a8243b5",
+      "status": "migrated"
+    },
+    {
+      "id": "synthesis.secondary_ref_check",
+      "path": "synthesis/secondary_ref_check.md",
+      "variables": [
+        "secondary_candidates",
+        "synthesis_body"
+      ],
+      "source": "backend/routers/compare.py#_build_secondary_ref_check_prompt:705",
+      "source_hash": "b5996c060583de9670bf7955d20986c918725dd4f14f57c80f05e5c06d1c73f3",
+      "body_hash": "a343606efe6e9a1bcba149a4d6ea63cba0cfb7df38e861c780d6fda8f71413c1",
+      "version": "source-a343606efe6e",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.research_search",
+      "path": "tool/research_search.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#research_search",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "c44228f5efb93eb9a5984407e33203ae3f66620bc7692cb005a21208be34fee7",
+      "version": "source-c44228f5efb9",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.analyze_writing_style",
+      "path": "tool/analyze_writing_style.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#analyze_writing_style",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "160e6b8e38f99e9825b6408c08e52e4fbc71618dc25dd1d999a3fe31cd7b53b8",
+      "version": "source-160e6b8e38f9",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.get_evidence_pack",
+      "path": "tool/get_evidence_pack.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#get_evidence_pack",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "031bf372cfb751b79c1fc5bae3c00fd2f27900c4d03d8921136ab360882b9380",
+      "version": "source-031bf372cfb7",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.get_source_windows",
+      "path": "tool/get_source_windows.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#get_source_windows",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "9ff1a7bc293f1a5e4b5dff323a5d1562b827d3870917c6a6341534715c6149b6",
+      "version": "source-9ff1a7bc293f",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.search_cnki",
+      "path": "tool/search_cnki.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#search_cnki",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "e863c62083d15c16590674eaa90606f1d1026b3c1ec7354799c305fa27976529",
+      "version": "source-e863c62083d1",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.lookup_english_fulltext",
+      "path": "tool/lookup_english_fulltext.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#lookup_english_fulltext",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "aa610dd6dac030ed465485b2169d7e018767cd73320f2a85d4e0b28af5943340",
+      "version": "source-aa610dd6dac0",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.search_library",
+      "path": "tool/search_library.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#search_library",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "d8eed8a12a123512317cd6bcb89ca72190c95fd0b5ccdde42349dddf4eb69717",
+      "version": "source-d8eed8a12a12",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.count_library",
+      "path": "tool/count_library.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#count_library",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "e0831f4de73ed8677013196947e8219aaa82f1607d755e254825113455aab930",
+      "version": "source-e0831f4de73e",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.analyze_reading_candidates",
+      "path": "tool/analyze_reading_candidates.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#analyze_reading_candidates",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "f1954b3e3adada3acf78f577f3c0721f354e6444db21f8660a24f4eed6e4f0bd",
+      "version": "source-f1954b3e3ada",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.filter_analysis_cache",
+      "path": "tool/filter_analysis_cache.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#filter_analysis_cache",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "3bb8f475edd78762ee3e36e78822395a519cf033a05a294aeddee5260cb60eea",
+      "version": "source-3bb8f475edd7",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.extract_research_constructs",
+      "path": "tool/extract_research_constructs.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#extract_research_constructs",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "1b6b7fc35dd1662daa46a4d4288930aa578ad0b7f27f3ace9422a75b14acb33e",
+      "version": "source-1b6b7fc35dd1",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.diagnose_research_gaps",
+      "path": "tool/diagnose_research_gaps.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#diagnose_research_gaps",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "49ca3591a7a41888c3d38d2e29e0f9838d34ed285693ea73a35b8e52ee4175cb",
+      "version": "source-49ca3591a7a4",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.generate_research_ideas",
+      "path": "tool/generate_research_ideas.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#generate_research_ideas",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "f45daf59f2e0a8fa99d278369968f019834a6160bea36974c7f32f56c5a759f5",
+      "version": "source-f45daf59f2e0",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.get_entry_detail",
+      "path": "tool/get_entry_detail.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#get_entry_detail",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "9f1c154d84dfbcfffd401a5c8f953face99a411fe52e982a16861102150c3034",
+      "version": "source-9f1c154d84df",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.get_reading_context",
+      "path": "tool/get_reading_context.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#get_reading_context",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "b18827dccd9974644eabb66d87653135d459f002f15004f6bdb24b628378a09d",
+      "version": "source-b18827dccd99",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.start_reading",
+      "path": "tool/start_reading.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#start_reading",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "3ff3e74a71d3a883e4e8c2c46b6e6edae9a2596f1f2b47a99be8cda06dfe5646",
+      "version": "source-3ff3e74a71d3",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.start_batch_reading",
+      "path": "tool/start_batch_reading.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#start_batch_reading",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "0db70c193cf4d9e4f63059b5876b95d7b4529839f596c3cfa7c569d4ec4c2356",
+      "version": "source-0db70c193cf4",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.scan_input_folder",
+      "path": "tool/scan_input_folder.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#scan_input_folder",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "43bba1a05d45907c269c88393efaad39007f65a16dbebb0c5c022a3c0d7d6cb8",
+      "version": "source-43bba1a05d45",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.import_folder_and_start_reading",
+      "path": "tool/import_folder_and_start_reading.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#import_folder_and_start_reading",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "a9344fc32abf997def75276e55212f7c2377386b82a1388594e67842998f7855",
+      "version": "source-a9344fc32abf",
+      "status": "migrated"
+    },
+    {
+      "id": "tool.get_job_status",
+      "path": "tool/get_job_status.md",
+      "variables": [],
+      "source": "backend/services/agent_tool_registry.py#get_job_status",
+      "source_hash": "4e19d58582229221c8f9dd6aa9d11261b0b3a008e089269c4febc2425ca70849",
+      "body_hash": "cba6c2905e19dc9eea0de941f87ce9eb9644bccc3e08a54dffd96651a6f46a02",
+      "version": "source-cba6c2905e19",
+      "status": "migrated"
+    },
+    {
+      "id": "markdown_cleanup.boundaries",
+      "path": "markdown_cleanup/cleanup_boundaries.md",
+      "variables": [
+        "boundary_context_json",
+        "document_profile_json",
+        "protected_blocks_json"
+      ],
+      "source": "skill-local:DEEP_READING_LOCAL_READER_AND_MARKDOWN_CLEANUP_PLAN_20260913",
+      "version": 1,
+      "body_hash": "bd077dc43535439e6b63bbc15ed90cc12ed37fe033fa751f3d0792f6e84223ab",
+      "status": "implemented"
+    },
+    {
+      "id": "markdown_cleanup.headings",
+      "path": "markdown_cleanup/cleanup_headings.md",
+      "variables": [
+        "heading_candidates_json",
+        "heading_context_json",
+        "structure_constraints_json"
+      ],
+      "source": "skill-local:DEEP_READING_LOCAL_READER_AND_MARKDOWN_CLEANUP_PLAN_20260913",
+      "version": 1,
+      "body_hash": "01de8818fb601d11bf88a97390d6a30259ae5d7dd2671b81b45b13eca30a78a4",
+      "status": "implemented"
+    },
+    {
+      "id": "markdown_cleanup.verify",
+      "path": "markdown_cleanup/cleanup_verify.md",
+      "variables": [
+        "changes_with_context_json",
+        "deterministic_checks_json",
+        "source_mapping_summary_json"
+      ],
+      "source": "skill-local:DEEP_READING_LOCAL_READER_AND_MARKDOWN_CLEANUP_PLAN_20260913",
+      "version": 1,
+      "body_hash": "d7c56b9da8adec1e4c2521daa08f201963a1a27555f9bc4f7ac17f93b52f4cb8",
+      "status": "implemented"
+    }
+  ]
+}

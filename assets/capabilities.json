@@ -1,0 +1,2969 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-09-12",
+  "purpose": "Implementation coverage and bounded verification snapshot, not a completed implementation report or user acceptance",
+  "status": "runnable_candidate_pending_user_acceptance",
+  "entrypoint": "scripts/dra.py",
+  "evidence_paths": "Package-relative unless prefixed .tmp/; .tmp evidence lives only in development repository and is intentionally not distributed.",
+  "source_baseline": {
+    "registered_categories": 13,
+    "registered_slots": 59,
+    "agent_tool_count": 20,
+    "workflow_count": 25,
+    "prompt_resource_count": 142,
+    "source_inventory": "assets/source_inventory.json",
+    "workflows_sha256": "50e2710bc9261e32d1a8945c5820c4bbd5c42ae8900557cdafd3bda9552a89d5"
+  },
+  "validation_rules": [
+    "Endpoint/tool association is a source map, never proof of behavioral parity.",
+    "Offline parsing, mock calls, real model runs, real OCR/retrieval, migration and user acceptance are separate.",
+    "Historical completed runs do not validate newer code/prompts or factual quality.",
+    "No user acceptance is recorded.",
+    "No keys, user paper text, original absolute source paths or databases are included in this file."
+  ],
+  "capabilities": [
+    {
+      "id": "ingest",
+      "title": "导入与正文解析",
+      "implementation": "implemented_local",
+      "commands": [
+        "ingest file/folder",
+        "extract"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "POST",
+            "path": "/api/upload/",
+            "handler": "upload_file",
+            "source": "backend/routers/upload.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/upload/{file_id}/info",
+            "handler": "get_file_info",
+            "source": "backend/routers/upload.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/upload/{file_id}/preview",
+            "handler": "preview_source_file",
+            "source": "backend/routers/upload.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/upload/{file_id}/download",
+            "handler": "download_source_file",
+            "source": "backend/routers/upload.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/upload/{file_id}",
+            "handler": "delete_file",
+            "source": "backend/routers/upload.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": [
+          {
+            "name": "scan_input_folder",
+            "target_command": "ingest folder"
+          }
+        ]
+      },
+      "workflow_ids": [],
+      "prompt_ids": [],
+      "input": [
+        "PDF/Markdown papers; CNKI/WoS TXT; explicit workspace; reviewed exclusions when necessary"
+      ],
+      "output": [
+        "immutable source copy, extraction JSON/Markdown, evidence offsets, bibliography index, warnings"
+      ],
+      "validation": {
+        "offline": {
+          "status": "real_files_prepared",
+          "evidence": [
+            ".tmp/deep-reading-skill-tests/acceptance-v4/material-manifest.json",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/acceptance-summary.json"
+          ],
+          "note": "12 input files: 8 PDFs + 1 paper Markdown + 2 bibliography TXT + 1 excluded source description; 544 parsed records. Prepared artifacts, not user acceptance."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_md_evidence_offsets_and_dedup",
+            "tests/test_runtime.py#test_empty_and_source_sidecar",
+            "tests/test_runtime.py#test_two_column_reading_order_and_image_only"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_applicable",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "english_one_page_executed_with_recognition_error",
+          "evidence": [
+            ".tmp/deep-reading-skill-tests/ocr/ocr-result.json",
+            ".tmp/deep-reading-skill-tests/source-review.json"
+          ]
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Source-description .source.md is excluded; extracted text remains subject to layout/source review.",
+        "English local OCR checked on one image-only derived page; Chinese OCR and remote OCR not verified."
+      ]
+    },
+    {
+      "id": "filter",
+      "title": "题录筛选",
+      "implementation": "implemented_local",
+      "commands": [
+        "filter --mode explorer/reviewer/empiricist",
+        "batch --task filter.explorer"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "POST",
+            "path": "/api/filter/start",
+            "handler": "start_filter",
+            "source": "backend/routers/filter.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/filter/task/{task_id}/status",
+            "handler": "get_task_status",
+            "source": "backend/routers/filter.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/filter/task/{task_id}/cancel",
+            "handler": "cancel_task",
+            "source": "backend/routers/filter.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/filter/direct-import",
+            "handler": "direct_import",
+            "source": "backend/routers/filter.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": [
+          {
+            "name": "filter_analysis_cache",
+            "target_command": "filter"
+          },
+          {
+            "name": "start_batch_reading",
+            "target_command": "batch"
+          },
+          {
+            "name": "import_folder_and_start_reading",
+            "target_command": "batch"
+          }
+        ]
+      },
+      "workflow_ids": [
+        "filter.explorer",
+        "filter.reviewer",
+        "filter.empiricist"
+      ],
+      "prompt_ids": [
+        "filter.empiricist",
+        "filter.explorer",
+        "filter.reviewer"
+      ],
+      "input": [
+        "one selected bibliography entry with metadata/abstract; topic"
+      ],
+      "output": [
+        "score 1..10 and reason JSON; versioned artifact"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_filter_schema"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_model": {
+          "status": "completed",
+          "current_revision": "workflow_binding_executed",
+          "evidence": [
+            ".tmp/deep-reading-skill-tests/acceptance-v4/runs/accept-deepseek-filter-explorer/result.json"
+          ],
+          "quality_accepted": false
+        }
+      },
+      "gaps": [
+        "One representative record executed; other filtering modes remain offline-validated. No bulk 544-record model call."
+      ]
+    },
+    {
+      "id": "reading",
+      "title": "三种多轮精读",
+      "implementation": "implemented_local",
+      "commands": [
+        "read --mode quant/qual/long"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "POST",
+            "path": "/api/reading/check-conflict",
+            "handler": "check_conflict",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/long/start",
+            "handler": "start_long_context",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/quant/start",
+            "handler": "start_quant",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/qual/start",
+            "handler": "start_qual",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/batch/check-conflict",
+            "handler": "batch_check_conflict",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/batch/start",
+            "handler": "start_batch_reading",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/reading/batch/{batch_id}/status",
+            "handler": "get_batch_status",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/reading/task/{task_id}/status",
+            "handler": "get_task_status",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/task/{task_id}/cancel",
+            "handler": "cancel_task",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": [
+          {
+            "name": "start_reading",
+            "target_command": "read"
+          }
+        ]
+      },
+      "workflow_ids": [
+        "read.quant",
+        "read.qual",
+        "read.long"
+      ],
+      "prompt_ids": [
+        "code.conversation_engine.system_prompt",
+        "dimension_questions.contributions_limitations",
+        "dimension_questions.data_source",
+        "dimension_questions.external_validity",
+        "dimension_questions.identification_assumptions",
+        "dimension_questions.mechanism",
+        "dimension_questions.methodology",
+        "dimension_questions.overview",
+        "dimension_questions.results",
+        "dimension_questions.robustness",
+        "dimension_questions.theory",
+        "dimension_questions.variable_measurement",
+        "dimension_questions.writing_quality",
+        "long.contributions_limitations",
+        "long.data_source",
+        "long.external_validity",
+        "long.identification_assumptions",
+        "long.mechanism",
+        "long.methodology",
+        "long.overview",
+        "long.results",
+        "long.robustness",
+        "long.theory",
+        "long.variable_measurement",
+        "long.writing_quality",
+        "qual.L1",
+        "qual.L2",
+        "qual.L3",
+        "qual.L4",
+        "quant.step_1",
+        "quant.step_2",
+        "quant.step_3",
+        "quant.step_4",
+        "quant.step_5",
+        "quant.step_6",
+        "quant.step_7",
+        "reading.evidence"
+      ],
+      "input": [
+        "one fulltext document; optional long dimensions"
+      ],
+      "output": [
+        "7/4/12 default steps, conversation history, checkpoints, source-evidence locations, Markdown"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_read_steps_and_history",
+            "tests/test_runtime.py#test_qual_and_long",
+            "tests/test_runtime.py#test_overlimit"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "historical_sample_runs_available_latest_changes_not_revalidated",
+          "evidence": [
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v2/runs/accept-deepseek-read-long/state.json",
+              "task": "read.long",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            },
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v2/runs/accept-deepseek-read-qual/state.json",
+              "task": "read.qual",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            },
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v2/runs/accept-deepseek-read-quant/state.json",
+              "task": "read.quant",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            },
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v4/runs/accept-deepseek-read-qual/state.json",
+              "task": "read.qual",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            }
+          ]
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Historical read.long live sample selected overview/methodology only; it does not establish live completion of all 12 dimensions.",
+        "Evidence locations and execution success do not establish factual correctness."
+      ]
+    },
+    {
+      "id": "batch_jobs",
+      "title": "批量、取消与失败恢复",
+      "implementation": "implemented_local",
+      "commands": [
+        "batch",
+        "jobs list/status/cancel/resume"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/history/",
+            "handler": "list_history",
+            "source": "backend/routers/history.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/history/{filename}/preview",
+            "handler": "preview_file",
+            "source": "backend/routers/history.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/history/{filename}",
+            "handler": "delete_file",
+            "source": "backend/routers/history.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/history/synthesis/",
+            "handler": "list_synthesis",
+            "source": "backend/routers/history.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/history/synthesis/",
+            "handler": "save_synthesis",
+            "source": "backend/routers/history.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/history/library-chat/",
+            "handler": "list_library_chat",
+            "source": "backend/routers/history.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/history/library-chat/",
+            "handler": "save_library_chat_report",
+            "source": "backend/routers/history.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/check-conflict",
+            "handler": "check_conflict",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/long/start",
+            "handler": "start_long_context",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/quant/start",
+            "handler": "start_quant",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/qual/start",
+            "handler": "start_qual",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/batch/check-conflict",
+            "handler": "batch_check_conflict",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/batch/start",
+            "handler": "start_batch_reading",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/reading/batch/{batch_id}/status",
+            "handler": "get_batch_status",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/reading/task/{task_id}/status",
+            "handler": "get_task_status",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/reading/task/{task_id}/cancel",
+            "handler": "cancel_task",
+            "source": "backend/routers/reading.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": [
+          {
+            "name": "start_batch_reading",
+            "target_command": "batch"
+          },
+          {
+            "name": "import_folder_and_start_reading",
+            "target_command": "batch"
+          },
+          {
+            "name": "get_job_status",
+            "target_command": "jobs status"
+          }
+        ]
+      },
+      "workflow_ids": [],
+      "prompt_ids": [],
+      "input": [
+        "selected entry IDs, task, explicit limit; run ID and same provider for resume"
+      ],
+      "output": [
+        "per-paper outcomes, durable steps/state, preserved completed steps"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py"
+          ],
+          "note": "Source presence is not execution acceptance."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_resume_no_duplicate_calls",
+            "tests/test_runtime.py#test_resume_prompt_change_rejected",
+            "tests/test_runtime.py#test_translation_resume_order_above_nine",
+            "tests/test_runtime.py#test_cancel_then_explicit_resume"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_applicable",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Durable serial batch manifest and per-step resume tested with simulated failure; no distributed scheduler or real-provider interruption acceptance."
+      ]
+    },
+    {
+      "id": "translation",
+      "title": "全文与摘要翻译",
+      "implementation": "implemented_local",
+      "commands": [
+        "translate --mode pdf-fulltext/md-chunks/abstract"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/translation/translatable",
+            "handler": "list_translatable",
+            "source": "backend/routers/translation.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/translation/bind-upload",
+            "handler": "bind_translation_upload",
+            "source": "backend/routers/translation.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/translation/start",
+            "handler": "start_translation",
+            "source": "backend/routers/translation.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/translation/artifacts/{bib_entry_id}",
+            "handler": "get_translation_artifacts",
+            "source": "backend/routers/translation.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/translation/{job_id}/status",
+            "handler": "get_translation_status",
+            "source": "backend/routers/translation.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/translation/{job_id}/result",
+            "handler": "get_translation_result",
+            "source": "backend/routers/translation.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/translation/cancel/{job_id}",
+            "handler": "cancel_translation",
+            "source": "backend/routers/translation.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/translation/artifacts",
+            "handler": "delete_translation_artifacts",
+            "source": "backend/routers/translation.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [
+        "translate.pdf-fulltext",
+        "translate.md-chunks",
+        "translate.abstract"
+      ],
+      "prompt_ids": [
+        "code.abstract_translator._system_prompt",
+        "code.translation_pipeline.glossary_system",
+        "code.translation_pipeline.pdf_fulltext_glossary_system",
+        "code.translation_pipeline.pdf_fulltext_glossary_user_tmpl",
+        "code.translation_pipeline.pdf_fulltext_restate_system",
+        "code.translation_pipeline.pdf_fulltext_restate_user_tmpl",
+        "code.translation_pipeline.restate_system",
+        "translation.abstract_user",
+        "translation.glossary",
+        "translation.restate"
+      ],
+      "input": [
+        "one fulltext document or known metadata abstract"
+      ],
+      "output": [
+        "glossary and translation steps, chunk ranges, quality checks, Markdown"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_translation_chunk_coverage",
+            "tests/test_runtime.py#test_translation_resume_order_above_nine"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "historical_sample_runs_available_latest_changes_not_revalidated",
+          "evidence": [
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v2/runs/accept-deepseek-translate-md-chunks/state.json",
+              "task": "translate.md-chunks",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            }
+          ]
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Real sample exists for md-chunks only; pdf-fulltext and abstract real execution not established.",
+        "Deterministic length/paragraph chunking replaces original section-level detection; translation completeness requires source review."
+      ]
+    },
+    {
+      "id": "references",
+      "title": "参考文献提取与引用追踪",
+      "implementation": "implemented_local",
+      "commands": [
+        "references extract/trace"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/references/entries",
+            "handler": "list_reference_trace_entries",
+            "source": "backend/routers/references.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/references/entries/{entry_id}/trace",
+            "handler": "start_reference_trace",
+            "source": "backend/routers/references.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/references/task/{task_id}/status",
+            "handler": "get_reference_task_status",
+            "source": "backend/routers/references.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/references/entries/{entry_id}/summary",
+            "handler": "get_reference_trace_summary",
+            "source": "backend/routers/references.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/references/entries/{entry_id}/references",
+            "handler": "list_references_for_entry",
+            "source": "backend/routers/references.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/references/references/{reference_id}/citations",
+            "handler": "list_reference_citations",
+            "source": "backend/routers/references.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/references/references/{reference_id}/import",
+            "handler": "import_reference_to_library",
+            "source": "backend/routers/references.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/references/references/{reference_id}",
+            "handler": "update_reference",
+            "source": "backend/routers/references.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [
+        "references.extract",
+        "references.trace"
+      ],
+      "prompt_ids": [
+        "code.deepseek_refs.prompt_cite",
+        "code.deepseek_refs.prompt_extract"
+      ],
+      "input": [
+        "one original fulltext document"
+      ],
+      "output": [
+        "structured references, citation traces and checked quotations"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_trace_rejects_fabricated_reference_or_quote",
+            "tests/test_runtime.py#test_required_json_schemas_reject_empty"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_model": {
+          "status": "completed",
+          "current_revision": "workflow_binding_executed",
+          "evidence": [
+            ".tmp/deep-reading-skill-tests/acceptance-v4/runs/accept-deepseek-references-extract/result.json"
+          ],
+          "quality_accepted": false
+        }
+      },
+      "gaps": [
+        "Extraction executed on one real paper; citation tracing has simulated validation only."
+      ]
+    },
+    {
+      "id": "reference_format",
+      "title": "参考文献格式与预设",
+      "implementation": "implemented_local",
+      "commands": [
+        "references style-analyze/format/presets"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/ref-format/presets",
+            "handler": "list_presets",
+            "source": "backend/routers/ref_format.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/ref-format/presets",
+            "handler": "create_preset",
+            "source": "backend/routers/ref_format.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/ref-format/presets/{preset_id}",
+            "handler": "update_preset",
+            "source": "backend/routers/ref_format.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/ref-format/presets/{preset_id}",
+            "handler": "delete_preset",
+            "source": "backend/routers/ref_format.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/ref-format/analyze",
+            "handler": "analyze_format",
+            "source": "backend/routers/ref_format.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/ref-format/generate",
+            "handler": "generate_reference_list",
+            "source": "backend/routers/ref_format.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [
+        "references.style-analyze",
+        "references.format"
+      ],
+      "prompt_ids": [
+        "ref_format.analyze_prompt",
+        "ref_format.generate_prompt"
+      ],
+      "input": [
+        "source reference text or selected bibliography entries; nonempty rules; optional preset JSON"
+      ],
+      "output": [
+        "format analysis, formatted references JSON, local preset files"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_refs_missing_rules_fails_before_model",
+            "tests/test_runtime.py#test_required_json_schemas_reject_empty"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "No real format-generation or preset-roundtrip evidence located."
+      ]
+    },
+    {
+      "id": "metadata_library",
+      "title": "元数据与文献库",
+      "implementation": "implemented_local",
+      "commands": [
+        "metadata extract/match/apply",
+        "library list/show/search/edit/tags/attachments/delete"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/library/tags",
+            "handler": "list_tags",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/batch-delete",
+            "handler": "batch_delete_entries",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/batch-tags",
+            "handler": "batch_update_tags",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries",
+            "handler": "list_entries",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries/page",
+            "handler": "list_entries_page",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/by-ids",
+            "handler": "list_entries_by_ids",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries/{entry_id}",
+            "handler": "get_entry_detail",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/library/entries/{entry_id}",
+            "handler": "update_entry",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/markdown",
+            "handler": "upload_entry_markdown",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/attachments",
+            "handler": "upload_attachment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries/{entry_id}/attachments",
+            "handler": "list_attachments",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/library/entries/{entry_id}/attachments/{attachment_id}",
+            "handler": "update_attachment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/library/entries/{entry_id}/attachments/{attachment_id}",
+            "handler": "delete_attachment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/fulltext-search",
+            "handler": "search_entry_fulltext",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries/{entry_id}/reader",
+            "handler": "get_entry_reader",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/library/ai-comments/{comment_id}",
+            "handler": "update_ai_comment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/library/ai-comments/{comment_id}",
+            "handler": "delete_ai_comment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/writing-style/analyze",
+            "handler": "analyze_writing_style_endpoint",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/batch-translate-abstracts",
+            "handler": "batch_translate_abstracts",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/translate-job/{job_id}/status",
+            "handler": "get_translate_job_status",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/match-online",
+            "handler": "match_online",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/apply-match",
+            "handler": "apply_match",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/wos-search",
+            "handler": "wos_search",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": [
+          {
+            "name": "search_library",
+            "target_command": "library search"
+          },
+          {
+            "name": "count_library",
+            "target_command": "library list"
+          },
+          {
+            "name": "get_entry_detail",
+            "target_command": "library show"
+          },
+          {
+            "name": "get_reading_context",
+            "target_command": "library show"
+          }
+        ]
+      },
+      "workflow_ids": [
+        "metadata.extract"
+      ],
+      "prompt_ids": [
+        "code.pdf_metadata_llm.prompt"
+      ],
+      "input": [
+        "documents, bibliography index, explicit metadata edits"
+      ],
+      "output": [
+        "match suggestions, metadata candidate, local index and edit-history artifacts"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_required_json_schemas_reject_empty",
+            "tests/test_runtime.py#test_user_artifact_protected"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Website query/filtering UI and all library endpoints are not independently reproduced.",
+        "Attachments command exposes recorded links; soft-delete flag semantics require user review."
+      ]
+    },
+    {
+      "id": "library_assistant",
+      "title": "文献库助手",
+      "implementation": "implemented_local",
+      "commands": [
+        "library ask/report/comment",
+        "plan --task library.tag_target_selector"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/library/tags",
+            "handler": "list_tags",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/batch-delete",
+            "handler": "batch_delete_entries",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/batch-tags",
+            "handler": "batch_update_tags",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries",
+            "handler": "list_entries",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries/page",
+            "handler": "list_entries_page",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/by-ids",
+            "handler": "list_entries_by_ids",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries/{entry_id}",
+            "handler": "get_entry_detail",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/library/entries/{entry_id}",
+            "handler": "update_entry",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/markdown",
+            "handler": "upload_entry_markdown",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/attachments",
+            "handler": "upload_attachment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries/{entry_id}/attachments",
+            "handler": "list_attachments",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/library/entries/{entry_id}/attachments/{attachment_id}",
+            "handler": "update_attachment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/library/entries/{entry_id}/attachments/{attachment_id}",
+            "handler": "delete_attachment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/fulltext-search",
+            "handler": "search_entry_fulltext",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/entries/{entry_id}/reader",
+            "handler": "get_entry_reader",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/library/ai-comments/{comment_id}",
+            "handler": "update_ai_comment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/library/ai-comments/{comment_id}",
+            "handler": "delete_ai_comment",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/writing-style/analyze",
+            "handler": "analyze_writing_style_endpoint",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/batch-translate-abstracts",
+            "handler": "batch_translate_abstracts",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/library/translate-job/{job_id}/status",
+            "handler": "get_translate_job_status",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/match-online",
+            "handler": "match_online",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/apply-match",
+            "handler": "apply_match",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/library/entries/{entry_id}/wos-search",
+            "handler": "wos_search",
+            "source": "backend/routers/library.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": [
+          {
+            "name": "search_library",
+            "target_command": "library search"
+          },
+          {
+            "name": "count_library",
+            "target_command": "library list"
+          },
+          {
+            "name": "get_entry_detail",
+            "target_command": "library show"
+          },
+          {
+            "name": "get_reading_context",
+            "target_command": "library show"
+          }
+        ]
+      },
+      "workflow_ids": [
+        "library.query_parser",
+        "library.report_writer",
+        "library.paper_comment_writer",
+        "library.tag_target_selector"
+      ],
+      "prompt_ids": [
+        "library_chat.paper_comment_writer",
+        "library_chat.query_parser",
+        "library_chat.report_writer",
+        "library_chat.tag_target_selector"
+      ],
+      "input": [
+        "selected entries and question"
+      ],
+      "output": [
+        "query candidate/report/comment/target-selector output"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_models": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Query candidates are not arbitrary database execution.",
+        "Tag-target selector is a prepared workflow; no automatic proposal adoption equivalence claimed.",
+        "No real assistant workflow sample located."
+      ]
+    },
+    {
+      "id": "source_qa",
+      "title": "原文问答与追问",
+      "implementation": "implemented_local",
+      "commands": [
+        "qa --question ...",
+        "qa --continue-run ..."
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "POST",
+            "path": "/api/source-qa/ask",
+            "handler": "ask_source_question",
+            "source": "backend/routers/source_qa.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/source-qa/source",
+            "handler": "get_source_excerpt",
+            "source": "backend/routers/source_qa.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [
+        "qa"
+      ],
+      "prompt_ids": [
+        "code.source_qa.answer_format",
+        "code.source_qa.source_guard",
+        "code.source_qa.verify_format",
+        "library_chat.source_followup_answer",
+        "library_chat.source_followup_verify",
+        "qa.fixed_priority"
+      ],
+      "input": [
+        "one or more source documents, question, optional earlier QA run and selection"
+      ],
+      "output": [
+        "claims, evidence IDs, verification, at most one correction/reverification, answer artifact"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_qa_invented_id_rejected",
+            "tests/test_runtime.py#test_qa_verification_withholds",
+            "tests/test_runtime.py#test_qa_accepted_skips_correction"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "historical_sample_runs_available_latest_changes_not_revalidated",
+          "evidence": [
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/live-small/runs/qa-deepseek-01/state.json",
+              "task": "qa",
+              "status": "failed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            },
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/live-small/runs/qa-deepseek-02/state.json",
+              "task": "qa",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            },
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/live-small/runs/qa-deepseek-03/state.json",
+              "task": "qa",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            },
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/live-small/runs/qa-mimo-01/state.json",
+              "task": "qa",
+              "status": "failed",
+              "provider": "mimo",
+              "model": "mimo-v2.5-pro",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            }
+          ]
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_model": {
+          "status": "updated_prompt_bindings_executed",
+          "evidence": [
+            ".tmp/deep-reading-skill-tests/live-small/runs/qa-deepseek-03/result.json"
+          ],
+          "quality_accepted": false
+        }
+      },
+      "gaps": [
+        "Local keyword retrieval replaces original optional model query expansion; no external retrieval implied.",
+        "One bounded correction is triggered by unsupported claims; malformed JSON stops with retained invalid response. Source review still found unsupported expansion in a model-verified answer."
+      ]
+    },
+    {
+      "id": "cards",
+      "title": "阅读卡片与用户编辑",
+      "implementation": "implemented_local",
+      "commands": [
+        "cards create/from-qa/list/edit/export"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "POST",
+            "path": "/api/cards/from-selection",
+            "handler": "create_card_from_selection",
+            "source": "backend/routers/cards.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/cards/from-qa",
+            "handler": "create_card_from_qa",
+            "source": "backend/routers/cards.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/cards",
+            "handler": "list_cards",
+            "source": "backend/routers/cards.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/cards/export/obsidian",
+            "handler": "export_cards",
+            "source": "backend/routers/cards.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/cards/{card_id}",
+            "handler": "get_card",
+            "source": "backend/routers/cards.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/cards/{card_id}",
+            "handler": "update_card",
+            "source": "backend/routers/cards.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/cards/{card_id}",
+            "handler": "delete_card",
+            "source": "backend/routers/cards.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [
+        "cards.create"
+      ],
+      "prompt_ids": [
+        "card_note.atomic_card_writer",
+        "card_note.atomic_card_writer_user"
+      ],
+      "input": [
+        "selected original text or completed QA, context and source metadata"
+      ],
+      "output": [
+        "card JSON/Markdown, independent user versions, exported files"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_user_artifact_protected",
+            "tests/test_runtime.py#test_json_braces_preserved"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "historical_sample_runs_available_latest_changes_not_revalidated",
+          "evidence": [
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v2/runs/accept-deepseek-cards-create/state.json",
+              "task": "cards.create",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            }
+          ]
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Creation live sample does not establish edit/export/from-qa CLI acceptance."
+      ]
+    },
+    {
+      "id": "comparison_synthesis",
+      "title": "对比与综述",
+      "implementation": "implemented_local",
+      "commands": [
+        "compare",
+        "synthesize"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/compare/reading-data",
+            "handler": "get_reading_data",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/compare/jobs/{job_id}/structured",
+            "handler": "get_structured_reading",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/compare/analyze",
+            "handler": "analyze_comparison",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/compare/analyze_long",
+            "handler": "analyze_long_comparison",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/compare/synthesis",
+            "handler": "synthesize_dimensions",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/compare/synthesis-stream",
+            "handler": "synthesis_stream",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/compare/synthesis_long",
+            "handler": "synthesize_long_dimensions",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/compare/reading-items/{item_id}/edit",
+            "handler": "save_reading_item_edit",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/compare/reading-items/{item_id}/edit",
+            "handler": "delete_reading_item_edit",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/compare/annotations",
+            "handler": "create_annotation",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/compare/annotations",
+            "handler": "list_annotations",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/compare/annotations/{ann_id}",
+            "handler": "update_annotation",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/compare/annotations/{ann_id}",
+            "handler": "delete_annotation",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/compare/ai-summary",
+            "handler": "ai_summary",
+            "source": "backend/routers/compare.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [
+        "compare",
+        "synthesize"
+      ],
+      "prompt_ids": [
+        "synthesis.compare_system_role",
+        "synthesis.dimension_prompt",
+        "synthesis.long_multi_prompt",
+        "synthesis.system_role"
+      ],
+      "input": [
+        "at least two source documents; dimensions/topic; optional structured secondary_references"
+      ],
+      "output": [
+        "comparative Markdown; synthesis; optional selected secondary references"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_secondary_references_check"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "historical_sample_runs_available_latest_changes_not_revalidated",
+          "evidence": [
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v2/runs/accept-deepseek-synthesize/state.json",
+              "task": "synthesize",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            },
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v4/runs/accept-deepseek-synthesize/state.json",
+              "task": "synthesize",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            }
+          ]
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Real synthesis samples predate optional secondary-reference verification.",
+        "No automatic complete GB/T 7714 bibliography assembly or all website compare modes claimed.",
+        "Cross-paper evidence and scholarly conclusions still require source/user review."
+      ]
+    },
+    {
+      "id": "writing_style",
+      "title": "写作风格与模仿建议",
+      "implementation": "implemented_local",
+      "commands": [
+        "writing-style --mode single/batch"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [],
+        "agent_tools": [
+          {
+            "name": "analyze_writing_style",
+            "target_command": "writing-style"
+          }
+        ]
+      },
+      "workflow_ids": [
+        "writing-style.single",
+        "writing-style.batch"
+      ],
+      "prompt_ids": [
+        "writing_style.batch_comparative_synthesizer",
+        "writing_style.batch_imitation_advisor",
+        "writing_style.batch_report_writer",
+        "writing_style.batch_section_analyzer",
+        "writing_style.single_fulltext_analyzer",
+        "writing_style.single_imitation_advisor",
+        "writing_style.single_report_writer"
+      ],
+      "input": [
+        "single fulltext or multiple papers"
+      ],
+      "output": [
+        "per-paper analysis, imitation advice, batch comparison, report artifact"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_batch_style_individual_inputs"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "historical_sample_runs_available_latest_changes_not_revalidated",
+          "evidence": [
+            {
+              "repository_relative_path": ".tmp/deep-reading-skill-tests/acceptance-v2/runs/accept-deepseek-writing-style-single/state.json",
+              "task": "writing-style.single",
+              "status": "completed",
+              "provider": "deepseek",
+              "model": "deepseek-v4-flash",
+              "current_revision": "not_established",
+              "quality_acceptance": "not_established"
+            }
+          ]
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_model": {
+          "status": "completed",
+          "current_revision": "workflow_binding_executed",
+          "evidence": [
+            ".tmp/deep-reading-skill-tests/acceptance-v4/runs/accept-deepseek-writing-style-batch/result.json"
+          ],
+          "quality_accepted": false
+        }
+      },
+      "gaps": [
+        "Latest batch pipeline executed on two papers; generated writing advice requires user review."
+      ]
+    },
+    {
+      "id": "research",
+      "title": "研究构思与会话证据",
+      "implementation": "implemented_local",
+      "commands": [
+        "research evidence/prioritize/constructs/gaps/ideas/session"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/agent/settings",
+            "handler": "get_agent_settings",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/agent/settings",
+            "handler": "update_agent_settings",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/agent/provider-check",
+            "handler": "check_agent_provider",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/agent/tool-capabilities",
+            "handler": "get_agent_tool_capabilities",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/agent/inbox/upload-folder",
+            "handler": "upload_agent_inbox_folder",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/agent/sessions",
+            "handler": "list_agent_sessions",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/agent/sessions",
+            "handler": "create_agent_session",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/agent/sessions/{session_id}",
+            "handler": "get_agent_session",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/agent/sessions/{session_id}/archive",
+            "handler": "archive_agent_session",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/agent/proposals/{proposal_id}/confirm",
+            "handler": "confirm_agent_proposal",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/agent/proposals/{proposal_id}/reject",
+            "handler": "reject_agent_proposal",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/agent/chat",
+            "handler": "agent_chat",
+            "source": "backend/routers/agent.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": [
+          {
+            "name": "research_search",
+            "target_command": "research evidence"
+          },
+          {
+            "name": "get_evidence_pack",
+            "target_command": "research evidence"
+          },
+          {
+            "name": "get_source_windows",
+            "target_command": "research evidence"
+          },
+          {
+            "name": "analyze_reading_candidates",
+            "target_command": "research prioritize"
+          },
+          {
+            "name": "extract_research_constructs",
+            "target_command": "research constructs"
+          },
+          {
+            "name": "diagnose_research_gaps",
+            "target_command": "research gaps"
+          },
+          {
+            "name": "generate_research_ideas",
+            "target_command": "research ideas"
+          }
+        ]
+      },
+      "workflow_ids": [],
+      "prompt_ids": [],
+      "input": [
+        "selected source documents and topic"
+      ],
+      "output": [
+        "keyword evidence packs, prioritization, construct/gap/idea candidates, saved session seed"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py"
+          ],
+          "note": "Source presence is not execution acceptance."
+        },
+        "simulated_calls": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_models": {
+          "status": "not_applicable",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Deterministic source-keyword candidates, not an LLM research agent loop or field-wide gap discovery.",
+        "Saved session has evidence-ready status and empty proposals; no complete website proposal state machine claimed."
+      ]
+    },
+    {
+      "id": "dimensions",
+      "title": "维度与模板",
+      "implementation": "implemented_local",
+      "commands": [
+        "dimensions list/import/save/export",
+        "templates list/import/save/export/generate",
+        "read --mode long --dimensions ..."
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/dimensions/sets",
+            "handler": "list_sets",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/sets",
+            "handler": "create_set",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/dimensions/sets/{set_id}",
+            "handler": "update_set",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/dimensions/sets/{set_id}/reading-availability",
+            "handler": "update_reading_availability",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/dimensions/sets/{set_id}",
+            "handler": "delete_set",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PATCH",
+            "path": "/api/dimensions/sets/{set_id}/share",
+            "handler": "toggle_share",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/dimensions/shared",
+            "handler": "list_shared",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/shared/{set_id}/import",
+            "handler": "import_shared",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/sets/{set_id}/activate",
+            "handler": "activate_set",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/sets/{set_id}/reset",
+            "handler": "reset_set",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/sets/{set_id}/clone",
+            "handler": "clone_set",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/dimensions/sets/{set_id}/items",
+            "handler": "list_items",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/sets/{set_id}/items",
+            "handler": "create_item",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/dimensions/sets/{set_id}/items/{item_id}",
+            "handler": "update_item",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/dimensions/sets/{set_id}/items/{item_id}",
+            "handler": "delete_item",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/sets/{set_id}/items/reorder",
+            "handler": "reorder_items",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/dimensions/templates",
+            "handler": "list_templates",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/dimensions/templates/{template_id}",
+            "handler": "get_template_detail",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/templates/{template_id}/import",
+            "handler": "import_template",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/generate",
+            "handler": "generate_template",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/generate/save",
+            "handler": "save_generated_template",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/import/preview",
+            "handler": "preview_import",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/dimensions/import/confirm",
+            "handler": "confirm_import",
+            "source": "backend/routers/dimensions.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": [
+          {
+            "name": "start_reading",
+            "target_command": "read"
+          }
+        ]
+      },
+      "workflow_ids": [
+        "templates.generate"
+      ],
+      "prompt_ids": [
+        "ai_template.meta_prompt",
+        "ai_template.system_role"
+      ],
+      "input": [
+        "JSON dimension definitions/template; paper for generation"
+      ],
+      "output": [
+        "stored resources and adopted prompt files; custom reading steps; generated JSON"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py",
+            ".tmp/deep-reading-skill-tests/acceptance-v4/preflight.json"
+          ],
+          "note": "All 25 base workflows had earlier preparation-only evidence; latest optional branches and source edits require current tests. Preparation is not model execution."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_custom_dimension_adoption_and_run",
+            "tests/test_runtime.py#test_template_legacy_braces_rendered"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Latest custom dimension execution has synthetic coverage only; generated-template adoption real workflow remains unverified."
+      ]
+    },
+    {
+      "id": "prompts",
+      "title": "提示词资源与覆盖",
+      "implementation": "implemented_local",
+      "commands": [
+        "prompts list/show/check/set/export-online"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/prompts/catalog",
+            "handler": "prompt_catalog",
+            "source": "backend/routers/prompts.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/prompts/item",
+            "handler": "get_prompt_item",
+            "source": "backend/routers/prompts.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/prompts/my",
+            "handler": "save_my_prompt",
+            "source": "backend/routers/prompts.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "DELETE",
+            "path": "/api/prompts/my",
+            "handler": "reset_my_prompt",
+            "source": "backend/routers/prompts.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/prompts/system",
+            "handler": "save_system_prompt",
+            "source": "backend/routers/prompts.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/prompts/",
+            "handler": "get_prompt",
+            "source": "backend/routers/prompts.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "PUT",
+            "path": "/api/prompts/",
+            "handler": "update_prompt",
+            "source": "backend/routers/prompts.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/prompts/list",
+            "handler": "list_prompts",
+            "source": "backend/routers/prompts.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [],
+      "prompt_ids": [],
+      "input": [
+        "builtin Markdown, workspace or explicit overrides; explicit server/token for online export"
+      ],
+      "output": [
+        "loaded rendered content, source/version/hash provenance, saved override history or exported online JSON"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py"
+          ],
+          "note": "Source presence is not execution acceptance."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_catalog_all_valid",
+            "tests/test_runtime.py#test_missing_variable",
+            "tests/test_runtime.py#test_override_and_missing_resource",
+            "tests/test_runtime.py#test_unknown_override_variable"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_applicable",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "No website user/system override export supplied or executed.",
+        "Dynamic archived instructions are not automatically executable; see source_inventory classifications."
+      ]
+    },
+    {
+      "id": "portability",
+      "title": "本地与网站数据迁移",
+      "implementation": "implemented_local",
+      "commands": [
+        "data export/inspect/import"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "POST",
+            "path": "/api/data/export",
+            "handler": "export_data",
+            "source": "backend/routers/data.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/data/import/chunk/init",
+            "handler": "import_chunk_init",
+            "source": "backend/routers/data.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/data/import/chunk",
+            "handler": "import_chunk_upload",
+            "source": "backend/routers/data.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/data/import/chunk/complete",
+            "handler": "import_chunk_complete",
+            "source": "backend/routers/data.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/data/import",
+            "handler": "import_data",
+            "source": "backend/routers/data.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "POST",
+            "path": "/api/data/import/start",
+            "handler": "import_data_start",
+            "source": "backend/routers/data.py",
+            "registered_in_main": true
+          },
+          {
+            "method": "GET",
+            "path": "/api/data/import/{job_id}/status",
+            "handler": "import_data_status",
+            "source": "backend/routers/data.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [],
+      "prompt_ids": [],
+      "input": [
+        "local workspace archive or format_version=1 website .dra; empty destination"
+      ],
+      "output": [
+        "lossless local files; quarantined website raw tables/attachments; projected index and ID maps"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py"
+          ],
+          "note": "Source presence is not execution acceptance."
+        },
+        "simulated_calls": {
+          "status": "test_cases_present_suite_reported_passed",
+          "evidence": [
+            "tests/test_runtime.py#test_local_migration_roundtrip",
+            "tests/test_runtime.py#test_archive_zip_slip",
+            "tests/test_migration.py#test_website_relations_and_raw_preservation"
+          ],
+          "note": "Parent agent reported 33 tests passed on 2026-09-12; no persisted suite log located by this reviewer. Individual tests include offline checks and mocked model calls; not all CLI actions are covered."
+        },
+        "real_models": {
+          "status": "not_applicable",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "synthetic_cases_reported_passed_real_archive_pending",
+          "evidence": [
+            "tests/test_migration.py#test_website_relations_and_raw_preservation",
+            "tests/test_runtime.py#test_local_migration_roundtrip"
+          ]
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Real user .dra was not supplied; synthetic migration only.",
+        "Embedded JSON IDs and unsupported website state retain original values; not a production database restore."
+      ]
+    },
+    {
+      "id": "online_search",
+      "title": "可选在线业务与检索入口",
+      "implementation": "optional_external_connector",
+      "commands": [
+        "search cnki/wos/fulltext/crossref",
+        "online"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [],
+        "agent_tools": [
+          {
+            "name": "search_cnki",
+            "target_command": "search cnki"
+          },
+          {
+            "name": "lookup_english_fulltext",
+            "target_command": "search fulltext"
+          }
+        ]
+      },
+      "workflow_ids": [],
+      "prompt_ids": [],
+      "input": [
+        "query; explicit server/endpoint; authorized token only when needed"
+      ],
+      "output": [
+        "search-entry URLs or remote JSON response"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py"
+          ],
+          "note": "Source presence is not execution acceptance."
+        },
+        "simulated_calls": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_models": {
+          "status": "not_applicable",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_executed_links_only",
+          "evidence": [
+            "scripts/dra_core/connectors.py"
+          ]
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "Search commands return links, not retrieved records/fulltext.",
+        "Authentication/accounts/sharing/admin remain external website dependencies; no endpoint parity or real online acceptance."
+      ]
+    },
+    {
+      "id": "benchmark",
+      "title": "公共输入与盲评准备",
+      "implementation": "implemented_local",
+      "commands": [
+        "plan",
+        "benchmark",
+        "scripts/blind_review.py"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [],
+        "agent_tools": []
+      },
+      "workflow_ids": [],
+      "prompt_ids": [],
+      "input": [
+        "same source plan, business prompts, candidate outputs and verified execution identity"
+      ],
+      "output": [
+        "prepared plan, fingerprints, blind candidate files, review/performance records"
+      ],
+      "validation": {
+        "offline": {
+          "status": "source_inspected",
+          "evidence": [
+            "scripts/dra_core/cli.py"
+          ],
+          "note": "Source presence is not execution acceptance."
+        },
+        "simulated_calls": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_models": {
+          "status": "not_applicable",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "No stable provider ranking; old native-blind files alone do not prove current Luna execution identity.",
+        "MiMo QA sample failed HTTP 401; latest retry outcome not established.",
+        "Current feature changes require fresh same-input comparison."
+      ]
+    },
+    {
+      "id": "distribution",
+      "title": "独立分发与产物导出",
+      "implementation": "implemented_local",
+      "commands": [
+        "doctor",
+        "package",
+        "artifacts list/export"
+      ],
+      "source_mapping": {
+        "equivalence": "related_only_not_endpoint_parity",
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/download/{file_path:path}",
+            "handler": "download_file",
+            "source": "backend/routers/download.py",
+            "registered_in_main": true
+          }
+        ],
+        "agent_tools": []
+      },
+      "workflow_ids": [],
+      "prompt_ids": [],
+      "input": [
+        "new package destination; workspace for result exports"
+      ],
+      "output": [
+        "clean skill copy excluding .env/test/workspaces; structured result XLSX export"
+      ],
+      "validation": {
+        "offline": {
+          "status": "clean_copy_fresh_environment_35_tests_passed",
+          "evidence": [
+            "delivery-validation.json (separate from package)"
+          ],
+          "python": "3.13.5",
+          "dependencies": "PyMuPDF 1.28.2; httpx 0.28.1; openpyxl 3.1.5",
+          "original_repository_imports": false
+        },
+        "simulated_calls": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_models": {
+          "status": "not_applicable",
+          "evidence": []
+        },
+        "real_ocr": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "real_retrieval": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "data_migration": {
+          "status": "not_verified",
+          "evidence": []
+        },
+        "user_acceptance": {
+          "status": "not_verified",
+          "evidence": []
+        }
+      },
+      "gaps": [
+        "All website download formats are not reproduced; clean-copy check evidence recorded separately."
+      ]
+    }
+  ],
+  "latest_regression": {
+    "date": "2026-09-15",
+    "tests": 67,
+    "status": "passed",
+    "scope": "offline, mocked API, native handoff/state, cleanup/source versions and reader"
+  },
+  "native_entry": {
+    "status": "implemented",
+    "commands": [
+      "task --provider native",
+      "native next",
+      "native submit",
+      "jobs resume",
+      "batch --provider native"
+    ],
+    "shared_pipeline": true,
+    "api_keys_read": false,
+    "real_host_sample": ".tmp/deep-reading-skill-tests/acceptance-v4/runs/native-host-abstract-01/result.json",
+    "actual_model_id": null,
+    "user_acceptance": "pending"
+  },
+  "local_reader_cleanup_release": {
+    "date": "2026-09-15",
+    "workflows": 26,
+    "prompt_resources": 145,
+    "commands": [
+      "reader build/serve",
+      "ocr guide",
+      "markdown import/inspect/clean/adopt"
+    ],
+    "browser": "real Chromium file URL passed; no external requests",
+    "real_external_ocr": "not tested in this release",
+    "real_api_cleanup": "not tested; shared finalizer tested with mock API and native",
+    "user_acceptance": "pending",
+    "f1_candidate": "needs review; original OCR table column corruption preserved"
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "schema_version": "027",
+  "tables": {
+    "users": {
+      "foreign_keys": {}
+    },
+    "invite_codes": {
+      "foreign_keys": {
+        "created_by_user_id": "users.id"
+      }
+    },
+    "user_settings": {
+      "foreign_keys": {
+        "user_id": "users.id"
+      }
+    },
+    "user_feedback": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "related_job_id": "jobs.id",
+        "related_file_id": "files.id",
+        "related_bib_entry_id": "bib_entries.id",
+        "related_artifact_id": "artifacts.id",
+        "assigned_admin_id": "users.id"
+      }
+    },
+    "feedback_events": {
+      "foreign_keys": {
+        "feedback_id": "user_feedback.id",
+        "actor_user_id": "users.id"
+      }
+    },
+    "admin_audit_logs": {
+      "foreign_keys": {
+        "admin_user_id": "users.id"
+      }
+    },
+    "agent_sessions": {
+      "foreign_keys": {
+        "owner_user_id": "users.id"
+      }
+    },
+    "agent_messages": {
+      "foreign_keys": {
+        "session_id": "agent_sessions.id",
+        "owner_user_id": "users.id"
+      }
+    },
+    "agent_action_proposals": {
+      "foreign_keys": {
+        "session_id": "agent_sessions.id",
+        "owner_user_id": "users.id"
+      }
+    },
+    "prompt_templates": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "updated_by_user_id": "users.id"
+      }
+    },
+    "upload_batches": {
+      "foreign_keys": {
+        "owner_user_id": "users.id"
+      }
+    },
+    "files": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "batch_id": "upload_batches.id"
+      }
+    },
+    "jobs": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "input_file_id": "files.id"
+      }
+    },
+    "bib_entries": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "source_filter_job_id": "jobs.id",
+        "source_file_id": "files.id",
+        "markdown_source_file_id": "files.id"
+      }
+    },
+    "bib_attachments": {
+      "foreign_keys": {
+        "bib_entry_id": "bib_entries.id",
+        "file_id": "files.id",
+        "owner_user_id": "users.id"
+      }
+    },
+    "ref_format_presets": {
+      "foreign_keys": {
+        "owner_user_id": "users.id"
+      }
+    },
+    "bib_filter_links": {
+      "foreign_keys": {
+        "bib_entry_id": "bib_entries.id",
+        "filter_job_id": "jobs.id"
+      }
+    },
+    "bib_references": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "source_bib_entry_id": "bib_entries.id",
+        "source_job_id": "jobs.id",
+        "matched_bib_entry_id": "bib_entries.id"
+      }
+    },
+    "bib_reference_citations": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "source_bib_entry_id": "bib_entries.id",
+        "bib_reference_id": "bib_references.id",
+        "source_job_id": "jobs.id"
+      }
+    },
+    "job_bib_entries": {
+      "foreign_keys": {
+        "job_id": "jobs.id",
+        "bib_entry_id": "bib_entries.id"
+      }
+    },
+    "reading_items": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "bib_entry_id": "bib_entries.id",
+        "job_id": "jobs.id"
+      }
+    },
+    "reading_item_edits": {
+      "foreign_keys": {
+        "reading_item_id": "reading_items.id",
+        "owner_user_id": "users.id"
+      }
+    },
+    "reading_source_evidence": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "bib_entry_id": "bib_entries.id",
+        "job_id": "jobs.id",
+        "reading_item_id": "reading_items.id",
+        "source_file_id": "files.id"
+      }
+    },
+    "annotations": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "bib_entry_id": "bib_entries.id"
+      }
+    },
+    "card_notes": {
+      "foreign_keys": {
+        "owner_user_id": "users.id",
+        "source_bib_entry_id": "bib_entries.id",
+        "source_markdown_file_id": "files.id",
+        "source_translation_artifact_id": "artifacts.id"
+      }
+    },
+    "artifacts": {
+      "foreign_keys": {
+        "job_id": "jobs.id",
+        "owner_user_id": "users.id"
+      }
+    },
+    "dimension_sets": {
+      "foreign_keys": {
+        "owner_user_id": "users.id"
+      }
+    },
+    "dimension_items": {
+      "foreign_keys": {
+        "set_id": "dimension_sets.id"
+      }
+    },
+    "dimension_templates": {
+      "foreign_keys": {}
+    },
+    "template_items": {
+      "foreign_keys": {
+        "template_id": "dimension_templates.id"
+      }
+    }
+  },
+  "source": "backend/db/models.py",
+  "source_hash": "36ca60f016bc0849ab060e63208e1ca2224fb42aa136acae842d67e0a76f5c9b"
+}

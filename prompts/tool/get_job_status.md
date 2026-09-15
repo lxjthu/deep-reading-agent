@@ -1,0 +1,1 @@
+Get status and artifact links for a reading or synthesis job.

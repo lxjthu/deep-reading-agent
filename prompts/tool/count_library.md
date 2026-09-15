@@ -1,0 +1,1 @@
+Count matching bibliography entries in the user's library without listing all titles. Use this for questions about how many papers/items exist under current filters.

@@ -1,0 +1,1 @@
+Extract economics/management research constructs, mechanisms, variables, and empirical design hints from local evidence packs or selected bibliography entries.

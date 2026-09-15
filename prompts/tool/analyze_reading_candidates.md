@@ -1,0 +1,1 @@
+Analyze a large collection of library papers in batches, write structured working notes, and recommend which papers should be prioritized for deep reading.

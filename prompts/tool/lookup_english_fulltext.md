@@ -1,0 +1,1 @@
+Look up English full-text candidates through existing OpenAlex, Unpaywall, Semantic Scholar, Google PDF, and working-paper search helpers. Does not attach PDFs or write to the database.

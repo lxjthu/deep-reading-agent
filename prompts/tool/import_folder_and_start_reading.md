@@ -1,0 +1,1 @@
+Scan the user's uploaded AI assistant inbox batch, select papers related to a topic, and start batch reading jobs. Use only when the user explicitly asks to start/run/batch read/analyze.

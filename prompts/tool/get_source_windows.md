@@ -1,0 +1,1 @@
+Fetch local original Markdown source text windows for selected bibliography entries.

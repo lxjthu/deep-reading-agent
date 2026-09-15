@@ -1,0 +1,1 @@
+Retrieve local original Markdown passages for writing-style analysis of an author, journal, paper, introduction, theory section, methods section, or argument structure.

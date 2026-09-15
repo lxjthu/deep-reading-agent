@@ -1,0 +1,1 @@
+Search the user's tiered literature knowledge base across metadata, abstracts, user notes, edited reading notes, AI reading notes, cards, annotations, references, and source windows.

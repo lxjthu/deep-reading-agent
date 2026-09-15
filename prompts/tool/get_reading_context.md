@@ -1,0 +1,1 @@
+Fetch structured deep-reading sections for selected entries so the assistant can compare or synthesize them.

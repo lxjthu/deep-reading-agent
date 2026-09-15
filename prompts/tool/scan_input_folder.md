@@ -1,0 +1,1 @@
+Read-only scan of the user's uploaded AI assistant inbox batch and compare it with the user's library. Use this when the user asks to see, list, inspect, or tabulate papers. Use offset to continue the next batch after settling working notes. This never imports files and never starts reading jobs.

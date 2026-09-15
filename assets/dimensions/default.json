@@ -1,0 +1,80 @@
+{
+  "overview": {
+    "name": "研究问题",
+    "description": "论文解决了什么问题？创新点在哪里？",
+    "instruction_prompt": "dimension.overview",
+    "question_prompt": "dimension_questions.overview"
+  },
+  "theory": {
+    "name": "理论框架",
+    "description": "引用了哪些理论？是否存在理论缺口？",
+    "instruction_prompt": "dimension.theory",
+    "question_prompt": "dimension_questions.theory"
+  },
+  "methodology": {
+    "name": "识别策略",
+    "description": "研究方法是否合理？因果推断是否可靠？",
+    "instruction_prompt": "dimension.methodology",
+    "question_prompt": "dimension_questions.methodology"
+  },
+  "data_source": {
+    "name": "数据来源",
+    "description": "数据从哪里获取？是否具有代表性？",
+    "instruction_prompt": "dimension.data_source",
+    "question_prompt": "dimension_questions.data_source"
+  },
+  "variable_measurement": {
+    "name": "变量度量",
+    "description": "关键变量如何度量？是否存在测量误差？",
+    "instruction_prompt": "dimension.variable_measurement",
+    "question_prompt": "dimension_questions.variable_measurement"
+  },
+  "identification_assumptions": {
+    "name": "识别假设",
+    "description": "因果识别所依赖的关键假设是什么？是否可信？",
+    "instruction_prompt": "dimension.identification_assumptions",
+    "question_prompt": "dimension_questions.identification_assumptions"
+  },
+  "results": {
+    "name": "统计结果",
+    "description": "数据是否充分？统计显著性？效应大小？",
+    "instruction_prompt": "dimension.results",
+    "question_prompt": "dimension_questions.results"
+  },
+  "mechanism": {
+    "name": "机制分析",
+    "description": "论文是否分析了作用机制？机制证据是否充分？",
+    "instruction_prompt": "dimension.mechanism",
+    "question_prompt": "dimension_questions.mechanism"
+  },
+  "robustness": {
+    "name": "稳健性检验",
+    "description": "结果是否通过了稳健性检验？",
+    "instruction_prompt": "dimension.robustness",
+    "question_prompt": "dimension_questions.robustness"
+  },
+  "external_validity": {
+    "name": "外部有效性",
+    "description": "结果能否推广到其他场景？",
+    "instruction_prompt": "dimension.external_validity",
+    "question_prompt": "dimension_questions.external_validity"
+  },
+  "contributions_limitations": {
+    "name": "贡献与局限",
+    "description": "论文的核心贡献和主要局限是什么？",
+    "instruction_prompt": "dimension.contributions_limitations",
+    "question_prompt": "dimension_questions.contributions_limitations"
+  },
+  "writing_quality": {
+    "name": "写作质量",
+    "description": "论文的写作和论证质量如何？",
+    "instruction_prompt": "dimension.writing_quality",
+    "question_prompt": "dimension_questions.writing_quality"
+  },
+  "custom": {
+    "name": "自定义问题",
+    "description": "用户自定义的分析问题",
+    "instruction_prompt": "dimension.custom",
+    "question_prompt": "dimension_questions.custom"
+  }
+}

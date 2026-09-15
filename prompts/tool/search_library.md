@@ -1,0 +1,1 @@
+Search the user's bibliography library by title, abstract, journal, keyword, or tag. Use limit=1000 when listing or scanning the library broadly; do not use 50 as a default.

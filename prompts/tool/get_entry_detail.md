@@ -1,0 +1,1 @@
+Get metadata, source file id, and recent workflow timeline for a bibliography entry.

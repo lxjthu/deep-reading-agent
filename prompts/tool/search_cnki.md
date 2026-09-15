@@ -1,0 +1,1 @@
+Build CNKI title-search URLs for selected Chinese bibliography entries or provided titles. Returns a batch of URLs that the frontend can open in new browser tabs.
