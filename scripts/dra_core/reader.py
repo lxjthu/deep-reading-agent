@@ -12,6 +12,7 @@ import time
 import uuid
 from .workspace import Workspace, atomic_json, digest
 from .reader_render import render
+from .reader_compare import comparison, find
 
 ASSETS = Path(__file__).resolve().parents[2]/'assets/reader'
 STATUS = {'completed':'已生成，内容待验收','failed':'执行失败','waiting_for_native':'等待原生回答','running':'执行中','cancelled':'已取消','candidate':'AI 清洗候选','adopted':'已采纳清洗稿','needs_review':'需要核查','validated':'校验通过，尚未采纳'}
@@ -20,7 +21,7 @@ def _json(path):
     return json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
 
 def _page(title, body):
-    return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:; font-src \'self\'; connect-src \'none\'; object-src \'none\'; base-uri \'none\'"><title>'+esc(title)+'</title><link rel="stylesheet" href="assets/reader.css"><link rel="stylesheet" href="assets/katex/katex.min.css"><script defer src="assets/katex/katex.min.js"></script><script defer src="assets/reader.js"></script></head><body class="dra-reader"><main><header><a href="index.html">文献首页</a><span>本地阅读快照</span></header><h1>'+esc(title)+'</h1>'+body+'</main></body></html>'
+    return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:; font-src \'self\'; connect-src \'none\'; object-src \'none\'; base-uri \'none\'"><title>'+esc(title)+'</title><link rel="stylesheet" href="assets/reader.css"><link rel="stylesheet" href="assets/katex/katex.min.css"><link rel="stylesheet" href="assets/compare.css"><script defer src="assets/katex/katex.min.js"></script><script defer src="assets/reader.js"></script></head><body class="dra-reader"><header class="app-header"><a class="brand" href="index.html"><span class="brand-icon">❤️‍🔥</span><span><strong>Deep Reading Agent</strong><small>学术论文深度精读系统</small></span></a><span class="local-badge">本地工作区</span></header><div class="app-nav"><a class="nav-item" href="index.html">我的文献库</a><a class="nav-item" href="compare.html">精读对比</a><a class="nav-item" href="index.html#collections">集合报告</a><span>离线阅读 · 原文与证据可追溯</span></div><main><div class="page-heading"><h1>'+esc(title)+'</h1></div>'+body+'</main></body></html>'
 
 def build(workspace, entry_ids=None, include_pdf=False):
     workspace = workspace if isinstance(workspace,Workspace) else Workspace(workspace)
@@ -79,10 +80,10 @@ def build(workspace, entry_ids=None, include_pdf=False):
                     if rel.startswith('original/'):image_map[rel[len('original/'):]]=candidate
         rendered=render(text,path,out,image_root,namespace=key,image_map=image_map);warnings.extend(rendered['warnings'])
         download='document-'+uuid.uuid4().hex[:12]+'.md';(out/download).write_text(text,encoding='utf-8')
-        return key,title,'<section data-panel id="'+key+'"><a download data-download64="'+base64.b64encode(text.encode('utf-8')).decode('ascii')+'" href="'+download+'">下载 MD</a><details open><summary>章节目录</summary><nav>'+rendered['toc']+'</nav></details>'+('<details><summary>来源与处理记录</summary><pre>'+esc(json.dumps(detail,ensure_ascii=False,indent=2))+'</pre></details>' if detail else '')+'<article>'+rendered['html']+'</article></section>'
+        return key,title,'<section class="reading-layout" data-panel id="'+key+'"><aside class="reading-sidebar"><a class="download-button" download data-download64="'+base64.b64encode(text.encode('utf-8')).decode('ascii')+'" href="'+download+'">下载 MD</a><details open><summary>章节目录</summary><nav>'+rendered['toc']+'</nav></details>'+('<details><summary>来源与处理记录</summary><pre>'+esc(json.dumps(detail,ensure_ascii=False,indent=2))+'</pre></details>' if detail else '')+'</aside><article class="reading-paper">'+rendered['html']+'</article></section>'
 
     def controls(panels):
-        return '<div class="controls"><label>阅读版本 <select data-versions>'+''.join('<option value="'+k+'">'+esc(t)+'</option>' for k,t,_ in panels)+'</select></label><button data-print>打印</button><label>字号 <input data-font type="range" min="14" max="28" value="18"></label><label>行宽 <input data-width type="range" min="600" max="1500" value="1000"></label><span>页内查找：Ctrl+F / ⌘F</span></div>'
+        return '<div class="controls"><label>阅读版本 <select data-versions>'+''.join('<option value="'+k+'">'+esc(t)+'</option>' for k,t,_ in panels)+'</select></label><button data-print>打印</button><label>字号 <input data-font type="range" min="14" max="28" value="16"></label><label>行宽 <input data-width type="range" min="600" max="1500" value="1000"></label><span>页内查找：Ctrl+F / ⌘F</span></div>'
 
     def evidence(plan, folder):
         items=[]
@@ -97,12 +98,12 @@ def build(workspace, entry_ids=None, include_pdf=False):
 
     rows=[];all_types=set();collections=[]
     for entry in entries:
-        eid=entry['entry_id'];panels=[];extras=[];types=set();seen=set()
+        eid=entry['entry_id'];panels=[];extras=[];types=set();seen=set();source_links=[];report_links=[]
         for n,source in enumerate(entry.get('sources',[])):
             for field in ('markdown',):
                 if source.get(field):
                     path=workspace.path(source[field])
-                    if path.is_file(): panels.append(panel(load(source[field]),'原文 '+str(n+1),path,source));seen.add(path)
+                    if path.is_file(): panels.append(panel(load(source[field]),'原文 '+str(n+1),path,source));seen.add(path);source_links.append((panels[-1][0],'原文 '+str(n+1)))
             if source.get('path'):
                 path=workspace.path(source['path'])
                 if include_pdf and path.suffix.lower()=='.pdf' and path.is_file():
@@ -126,7 +127,7 @@ def build(workspace, entry_ids=None, include_pdf=False):
             meta=_json(path.with_suffix('.md.json'));kind=meta.get('kind','报告');types.add(kind)
             context=artifacts.get(str(path.relative_to(workspace.root)))
             label=('人工稿' if meta.get('origin')=='user' else 'AI 候选，内容待验收')+' · '+kind
-            panels.append(panel(load(path.relative_to(workspace.root)),label,path,meta))
+            panels.append(panel(load(path.relative_to(workspace.root)),label,path,meta));report_links.append((panels[-1][0],kind))
             if context:extras.append(evidence(context[1],context[2]))
         for state,plan,folder in runs:
             if eid in [d['entry_id'] for d in plan.get('documents',[])]:extras.append('<p>'+esc(str(state.get('task',''))+'：'+STATUS.get(state.get('status'),str(state.get('status','未知'))))+'</p>')
@@ -140,11 +141,12 @@ def build(workspace, entry_ids=None, include_pdf=False):
                 extras.append('<details><summary>原稿与清洗稿对照 · '+esc(manifest_path.parent.name)+'</summary><div class="compare">'+''.join('<section><h3>'+esc(t)+'</h3>'+h.replace('data-panel','data-comparison')+'</section>' for _,t,h in pair)+'</div></details>')
         if not panels:extras.append('<p class="notice">暂无全文或报告；可导入 PDF / Markdown 后重新构建。</p>')
         extras.insert(0,'<p class="notice">此页为构建时快照，后续研究或人工修改需重新构建。'+('' if include_pdf else '此快照未包含 PDF。')+'</p>')
-        body=controls(panels)+''.join(h for _,_,h in panels)+''.join(extras)
+        quick='<div class="controls entry-links">'+''.join('<a href="#'+key+'">'+esc(label)+'</a>' for key,label in source_links+report_links)+'<a href="compare.html">精读对比</a></div>'
+        body=quick+controls(panels)+''.join(h for _,_,h in panels)+'<section class="source-records"><h2>来源与核查</h2>'+''.join(extras)+'</section>'
         (out/names[eid]).write_text(_page(entry.get('title') or eid,body),encoding='utf-8')
         metadata=entry.get('metadata',{});authors=metadata.get('authors',[]);authors='；'.join(authors) if isinstance(authors,list) else str(authors)
         types.add('全文' if panels else '仅题录');all_types.update(types)
-        rows.append('<div class="entry" data-entry data-types="'+esc(' '.join(types),quote=True)+'"><h2><a href="'+names[eid]+'">'+esc(entry.get('title') or eid)+'</a></h2><p>'+esc(authors+' '+str(metadata.get('year',''))+' · '+' / '.join(types)+' · '+', '.join(entry.get('tags',[])))+'</p></div>')
+        rows.append('<div class="entry" data-entry data-types="'+esc(' '.join(types),quote=True)+'"><h2><a href="'+names[eid]+'">'+esc(entry.get('title') or eid)+'</a></h2><p>'+esc(authors+' '+str(metadata.get('year',''))+' · '+' / '.join(types)+' · '+', '.join(entry.get('tags',[])))+'</p><div class="entry-links">'+''.join('<a href="'+names[eid]+'#'+key+'">'+esc(label)+'</a>' for key,label in source_links+report_links)+'</div></div>')
     for state,plan,folder in runs:
         members=[d['entry_id'] for d in plan.get('documents',[])]
         if len(members)<2:continue
@@ -157,11 +159,13 @@ def build(workspace, entry_ids=None, include_pdf=False):
         name='collection-'+digest(folder.name)[:16]+'.html';title=str(state.get('task','集合报告'))+' · '+folder.name
         body='<p>'+esc(STATUS.get(state.get('status'),str(state.get('status'))))+'</p><ul>'+''.join('<li><a href="'+names[e]+'">'+esc(next(x.get('title',e) for x in entries if x['entry_id']==e))+'</a></li>' for e in members)+'</ul>'+controls(panels)+''.join(h for _,_,h in panels)+evidence(plan,folder)
         (out/name).write_text(_page(title,body),encoding='utf-8');collections.append('<li><a href="'+name+'">'+esc(title)+'</a></li>')
-    body='<p class="notice">构建时间 '+esc(build_id)+'。离线快照不会自动跟随工作区变化；新增内容后请重新构建。</p><div class="controls"><input data-search aria-label="搜索文献" placeholder="搜索标题、作者、年份、标签"><select data-filter aria-label="报告类型"><option value="">全部类型</option>'+''.join('<option>'+esc(t)+'</option>' for t in sorted(all_types))+'</select></div>'+''.join(rows)+'<div class="controls"><button data-prev>上一页</button><span data-page></span><button data-next>下一页</button></div><h2>集合报告</h2><ul>'+''.join(collections)+'</ul>'
-    (out/'index.html').write_text(_page('研究文献阅读台',body),encoding='utf-8')
+    body='<div class="library-overview"><div><span>文献总量</span><strong>'+str(len(entries))+'</strong></div><div><span>全文与报告</span><strong>'+str(sum(1 for row in rows if '仅题录' not in row))+'</strong></div><div><span>集合报告</span><strong>'+str(len(collections))+'</strong></div></div><p class="notice snapshot-note">构建时间 '+esc(build_id)+'。离线快照不会自动跟随工作区变化；新增内容后请重新构建。</p><div class="controls"><input data-search aria-label="搜索文献" placeholder="搜索标题、作者、年份、标签"><select data-filter aria-label="报告类型"><option value="">全部类型</option>'+''.join('<option>'+esc(t)+'</option>' for t in sorted(all_types))+'</select></div><section class="library-list"><div class="list-heading"><strong>我的文献</strong><span>标题 / 作者 / 年份 / 产物</span></div>'+''.join(rows)+'<p class="empty-state" data-empty hidden>没有找到匹配文献，请调整搜索词或类型。</p></section><div class="controls pagination"><button data-prev>上一页</button><span data-page></span><button data-next>下一页</button></div><section class="collection-section" id="collections"><h2>集合报告</h2><ul>'+(''.join(collections) or '<li class="empty-state">暂无集合报告</li>')+'</ul></section>'
+    (out/'index.html').write_text(_page('我的文献库',body),encoding='utf-8')
+    (out/'compare.html').write_text(_page('精读对比',comparison(workspace,entries,names,out,load,warnings)),encoding='utf-8')
+    atomic_json(out/'routes.json',{'entries':names,'compare':'compare.html'})
     atomic_json(out/'manifest.json',{'build_id':build_id,'entry_ids':list(names),'include_pdf':include_pdf,'source_hashes':inputs,'warnings':warnings,'status':'snapshot_requires_content_review'})
     atomic_json(workspace.path('reader/latest.json'),{'build_id':build_id})
-    return {'build_id':build_id,'path':str(out/'index.html'),'entry_count':len(entries),'collection_count':len(collections),'warnings':warnings}
+    return {'build_id':build_id,'path':str(out/'index.html'),'comparison_path':str(out/'compare.html'),'entry_count':len(entries),'collection_count':len(collections),'warnings':warnings}
 
 def serve(workspace, build_id=None, port=0):
     workspace=workspace if isinstance(workspace,Workspace) else Workspace(workspace)

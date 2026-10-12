@@ -4,11 +4,11 @@
 
 ```powershell
 python scripts/dra.py doctor
-python scripts/dra.py ingest folder --workspace D:/Research/workspace --input D:/Research/input
-python scripts/dra.py library list --workspace D:/Research/workspace
-python scripts/dra.py read --mode quant --workspace D:/Research/workspace --input D:/Research/paper.pdf --dry-run
-python scripts/dra.py read --mode quant --workspace D:/Research/workspace --input D:/Research/paper.pdf --provider deepseek
-python scripts/dra.py qa --workspace D:/Research/workspace --entry-id <id> --question "样本与研究方法是什么？"
+python scripts/dra.py ingest folder --workspace ../research/workspace --input ../research/input
+python scripts/dra.py library list --workspace ../research/workspace
+python scripts/dra.py read --mode quant --workspace ../research/workspace --input ../research/paper.pdf --dry-run
+python scripts/dra.py read --mode quant --workspace ../research/workspace --input ../research/paper.pdf --provider deepseek
+python scripts/dra.py qa --workspace ../research/workspace --entry-id <id> --question "样本与研究方法是什么？"
 ```
 
 | 任务 | 命令 |

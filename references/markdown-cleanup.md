@@ -5,10 +5,10 @@
 ## 导入与检查
 
 ```powershell
-python scripts/dra.py ocr guide --input paper.pdf --workspace D:/Research/workspace
-python scripts/dra.py ingest --input paper.pdf --workspace D:/Research/workspace
-python scripts/dra.py markdown import --input paddle-export --entry-id ENTRY_ID --source-url https://aistudio.baidu.com/paddleocr --workspace D:/Research/workspace
-python scripts/dra.py markdown inspect --entry-id ENTRY_ID --workspace D:/Research/workspace
+python scripts/dra.py ocr guide --input paper.pdf --workspace ../research/workspace
+python scripts/dra.py ingest --input paper.pdf --workspace ../research/workspace
+python scripts/dra.py markdown import --input paddle-export --entry-id ENTRY_ID --source-url https://aistudio.baidu.com/paddleocr --workspace ../research/workspace
+python scripts/dra.py markdown inspect --entry-id ENTRY_ID --workspace ../research/workspace
 ```
 
 `ENTRY_ID` 使用已有文献 ID。只有 Markdown 时也可先 `ingest --input paper.md` 创建条目，再用 `markdown import` 登记外部来源。输入支持单 MD 或解压目录；多页文件需明确命名 `page_1.md`、`page_2.md` 等，按数字排序。未知顺序会拒绝导入，请根据原始导出页信息整理命名；不要猜页码。当前不接受任意 ZIP。单个普通文件页码为未知。印刷页与物理页分开存储，未提供时为空。
@@ -20,9 +20,9 @@ python scripts/dra.py markdown inspect --entry-id ENTRY_ID --workspace D:/Resear
 ## 清洗与采纳
 
 ```powershell
-python scripts/dra.py markdown clean --entry-id ENTRY_ID --provider native --workspace D:/Research/workspace --dry-run
-python scripts/dra.py markdown clean --entry-id ENTRY_ID --provider native --workspace D:/Research/workspace
-python scripts/dra.py markdown adopt --run-id RUN_ID --workspace D:/Research/workspace
+python scripts/dra.py markdown clean --entry-id ENTRY_ID --provider native --workspace ../research/workspace --dry-run
+python scripts/dra.py markdown clean --entry-id ENTRY_ID --provider native --workspace ../research/workspace
+python scripts/dra.py markdown adopt --run-id RUN_ID --workspace ../research/workspace
 ```
 
 原生执行遵循 [native.md](native.md)，宿主 Agent 完成三次 next/submit 交接：边界提案、全局标题提案、逐项核查。普通终端不会自动生成原生回答。API 使用 `--provider deepseek` 或 `--provider mimo`，沿用 `.env` / `--env` 配置。原生入口不读取密钥。`--dry-run` 返回计划，不创建成功产物。

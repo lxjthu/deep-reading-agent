@@ -122,11 +122,11 @@ def dispatch(args):
         target=Path(args.output).resolve()
         if target.exists(): raise ValueError('Package destination must not exist')
         target.mkdir(parents=True)
-        for name in ('SKILL.md','README.md','THIRD_PARTY.md','.env.example','requirements.txt','scripts','prompts','assets','references','agents','tests'):
+        for name in ('SKILL.md','README.md','THIRD_PARTY.md','.env.example','.gitignore','requirements.txt','requirements-reproduction.txt','scripts','prompts','assets','references','agents','tests'):
             src=PACKAGE/name
-            if src.is_dir(): shutil.copytree(src,target/name,ignore=shutil.ignore_patterns('__pycache__','*.pyc','build_prompt_resources.py','tmp*'))
+            if src.is_dir(): shutil.copytree(src,target/name,ignore=shutil.ignore_patterns('__pycache__','*.pyc','build_prompt_resources.py','tmp*','*.local.md'))
             elif src.is_file(): shutil.copy2(src,target/name)
-        return {'status':'completed','package':str(target),'excludes':['.env','test','user workspaces','source migration builder']}
+        return {'status':'completed','package':str(target),'excludes':['.env','test','user workspaces','source migration builder','*.local.md']}
     if args.command=='data' and args.action in ('import','inspect'):
         from .portability import import_archive,inspect_archive
         return import_archive(args.input[0],args.workspace) if args.action=='import' else inspect_archive(args.input[0])
@@ -145,10 +145,22 @@ def dispatch(args):
     if not args.workspace: raise ValueError('--workspace required')
     workspace=Workspace(args.workspace); loader=PromptLoader(workspace.root)
     if args.command=='reader':
-        from .reader import build,serve
+        from .reader import build,serve,find
+        if args.action=='find': return find(workspace,args.topic or args.question or '')
+        if args.action=='compare':
+            ids=args.entry_id
+            matches=find(workspace,args.topic or args.question or '') if not ids else None
+            if not ids and not (args.topic or args.question): raise ValueError('reader compare requires --entry-id or --topic')
+            if matches is not None:
+                ids=[m['entry_id'] for m in matches['matches']]
+                if not ids:return {'status':'no_matches',**matches}
+            result=build(workspace,ids,args.include_pdf)
+            result['path']=result['comparison_path']
+            if matches is not None:result['selection']=matches
+            return result
         if args.action=='build': return build(workspace,args.entry_id,args.include_pdf)
         if args.action=='serve': return serve(workspace,args.build_id)
-        raise ValueError('Use reader build/serve')
+        raise ValueError('Use reader find/build/compare/serve')
     if args.command=='ocr':
         from .ocr_guidance import guide
         if args.action!='guide' or not args.input: raise ValueError('Use ocr guide --input PDF')

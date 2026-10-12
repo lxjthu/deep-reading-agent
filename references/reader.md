@@ -1,9 +1,9 @@
 # 离线 HTML 阅读快照
 
 ```powershell
-python scripts/dra.py reader build --workspace D:/Research/workspace
-python scripts/dra.py reader build --workspace D:/Research/workspace --entry-id ENTRY_ID --include-pdf
-python scripts/dra.py reader serve --workspace D:/Research/workspace --build-id BUILD_ID
+python scripts/dra.py reader build --workspace ../research/workspace
+python scripts/dra.py reader build --workspace ../research/workspace --entry-id ENTRY_ID --include-pdf
+python scripts/dra.py reader serve --workspace ../research/workspace --build-id BUILD_ID
 ```
 
 build 返回 `reader/BUILD_ID/index.html`，可双击打开。每次创建新目录，`reader/latest.json` 指向最近构建。HTML 是可重建快照；Markdown、JSON 和原件仍是正式来源。后续修改研究内容后需重新构建，旧快照不会自动更新，也不会覆盖用户编辑的页面。
@@ -17,3 +17,30 @@ build 返回 `reader/BUILD_ID/index.html`，可双击打开。每次创建新目
 若宿主不允许 file URL，可用 serve 临时预览。只监听 `127.0.0.1`，默认临时端口，且只服务生成目录；前台按 Ctrl+C 停止，不启动生产服务。
 
 依赖与许可证见 [THIRD_PARTY.md](../THIRD_PARTY.md)。新阅读页的显示成功不代表历史报告的事实核查通过；失败、待回答、待核查候选和人工稿均有各自状态。
+
+
+## 代理中的主题查看请求
+
+用户说“我想看一下和碳汇相关那几篇论文的精读对比”时：
+
+1. 使用当前研究工作区；若当前没有明确工作区，先定位现有工作区，存在多个无法判断时再询问。
+2. `python scripts/dra.py reader find --workspace <workspace> --topic "碳汇"` 返回题名、ID 和已有精读数量。匹配标题、题录元数据（含已有摘要）及标签，多个词为同时匹配；这是关键词候选集。代理可根据题录判断相关性，必要时分别检索同义词后合并 ID，不把关键词检索描述为完整语义检索。
+3. `python scripts/dra.py reader compare --workspace <workspace> --entry-id <ID1> --entry-id <ID2>` 构建选中文献的页面。也可直接使用 `reader compare --topic "碳汇"` 按关键词构建。无匹配时返回 `no_matches`，不会退回整个文献库。
+4. 用宿主提供的打开浏览器/文件能力展示返回的 `path`，同时给出可点击链接。浏览器不能打开 file URL 时使用本页的 `reader serve`。无需调用模型或在线服务即可查看已有报告。
+5. 缺少精读时列出缺失论文。仅有查看意图时不自动补做模型精读；用户要求生成时再按精读工作流完成后重建。
+
+首页和论文页提供原文、报告直达链接（带版本锚点）；`routes.json` 提供当前快照的文献 ID 与页面文件映射。原 PDF 仍通过 `--include-pdf` 显式包含。
+
+`compare.html` 使用从网页版 `components/compare/compare.css` 复制到包内的样式，适配 DimNavigation、PaperSelector 和 AnswerCard 的文献选择、维度导航及横向卡片结构；运行时不依赖在线仓库。按报告模式与原有二级标题分组，完整报告及各版本均保留。缺少同名章节会显示缺失提示；未自动推断不同模式的语义等价关系。该离线界面用于查看，在线版的批注写回、编辑和 AI 综合操作不在此页面提供。
+
+
+## 缺少全文时的下载交接
+
+用户要求依据精读分析，而候选只有题录时，交付候选题录与接收文件夹，保留原问题以便续办：
+
+- 列出所有候选的题名、作者、期刊、年份，以及已有卷期页码、DOI 或题录链接；未提供的字段不补猜。已有数据库链接标明来源，未联网核验不声称可下载。
+- 根据摘要、关键词检查命中原因；基金项目等背景字段命中的条目注明弱相关，不把所有候选视为测算方法论文。
+- 在当前研究工作区内创建 `inbox/<主题>/`；用户已指定目录则复用。明确给出绝对路径，指导通过学校图书馆、数据库或期刊入口检索完整题名并下载全文 PDF。可分批放入，不要求一次齐全。
+- 保存下载清单和续办记录：原问题、工作区、接收目录、候选 entry_id 与题录、待补状态。交付可直接复制的继续语句：“原文已放入该文件夹，请核对题录、导入并精读，再回答原问题。”
+- 继续时核对文件可读性、首页题名/作者/年份并关联原候选 ID；仅凭文件名不自动绑定。匹配不明确的文件单列处理，避免重复条目。扫描件按可用 OCR 流程提取。
+- 依据用户的继续请求完成精读、证据核验和跨论文归纳；部分材料可先分析，明确覆盖篇数及缺失项。测算方法须有报告或原文证据，不能从题名推断。精读候选本身仍需回查公式、单位和参数的原文位置。

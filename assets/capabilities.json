@@ -2928,6 +2928,30 @@
       "gaps": [
         "All website download formats are not reproduced; clean-copy check evidence recorded separately."
       ]
+    },
+    {
+      "id": "data-reproduction",
+      "title": "文献方法到已有数据复现及前端代码报告",
+      "implementation": "agent_guided_with_portable_helpers",
+      "commands": [
+        "reproduce.py inspect",
+        "reproduce.py run-stata",
+        "reproduce.py report"
+      ],
+      "reference": "references/reproduction.md",
+      "validation": {
+        "date": "2026-10-12",
+        "fresh_venv_install": "passed",
+        "unit_tests": 72,
+        "stata_synthetic_execution": "passed",
+        "relocated_reader_code_download_evidence": "passed"
+      },
+      "limits": [
+        "Requires user data and method-specific preparation",
+        "Stata installed and licensed separately",
+        "Sample templates do not encode all paper settings",
+        "Execution success is distinct from methodological validity"
+      ]
     }
   ],
   "latest_regression": {
